@@ -68,13 +68,13 @@ static int testCompareXMLToArgvFiles(const char *xml,
         goto out;
     }
 
-    if (!(actualargv = virCommandToString(cmd)))
+    if (!(actualargv = virCommandToString(cmd, false)))
         goto out;
 
     if (actualdm != NULL)
         virTrimSpaces(actualdm, NULL);
 
-    if (!(actualld = virCommandToString(ldcmd)))
+    if (!(actualld = virCommandToString(ldcmd, false)))
         goto out;
 
     if (virTestCompareToFile(actualargv, cmdline) < 0)
@@ -176,9 +176,11 @@ mymain(void)
     driver.grubcaps = BHYVE_GRUB_CAP_CONSDEV;
     driver.bhyvecaps = BHYVE_CAP_RTC_UTC | BHYVE_CAP_AHCI32SLOT | \
                        BHYVE_CAP_NET_E1000 | BHYVE_CAP_LPC_BOOTROM | \
-                       BHYVE_CAP_FBUF | BHYVE_CAP_XHCI;
+                       BHYVE_CAP_FBUF | BHYVE_CAP_XHCI | \
+                       BHYVE_CAP_CPUTOPOLOGY;
 
     DO_TEST("base");
+    DO_TEST("wired");
     DO_TEST("acpiapic");
     DO_TEST("disk-cdrom");
     DO_TEST("disk-virtio");
@@ -206,6 +208,10 @@ mymain(void)
     DO_TEST("vnc-vgaconf-off");
     DO_TEST("vnc-vgaconf-io");
     DO_TEST("vnc-autoport");
+    DO_TEST("cputopology");
+    DO_TEST_FAILURE("cputopology-nvcpu-mismatch");
+    DO_TEST("commandline");
+    DO_TEST("msrs");
 
     /* Address allocation tests */
     DO_TEST("addr-single-sata-disk");
@@ -241,6 +247,9 @@ mymain(void)
 
     driver.bhyvecaps &= ~BHYVE_CAP_FBUF;
     DO_TEST_FAILURE("vnc");
+
+    driver.bhyvecaps &= ~BHYVE_CAP_CPUTOPOLOGY;
+    DO_TEST_FAILURE("cputopology");
 
     virObjectUnref(driver.caps);
     virObjectUnref(driver.xmlopt);

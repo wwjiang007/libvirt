@@ -1125,9 +1125,10 @@ virStoragePoolGetAutostart(virStoragePoolPtr pool,
 /**
  * virStoragePoolSetAutostart:
  * @pool: pointer to storage pool
- * @autostart: new flag setting
+ * @autostart: whether the storage pool should be automatically started 0 or 1
  *
- * Sets the autostart flag
+ * Configure the storage pool to be automatically started
+ * when the host machine boots.
  *
  * Returns 0 on success, -1 on failure
  */
@@ -2349,4 +2350,44 @@ virConnectStoragePoolEventDeregisterAny(virConnectPtr conn,
  error:
     virDispatchError(conn);
     return -1;
+}
+
+
+/**
+ * virConnectGetStoragePoolCapabilities:
+ * @conn: pointer to the hypervisor connection
+ * @flags: extra flags; not used yet, so callers should always pass 0
+ *
+ * Prior creating a storage pool (for instance via virStoragePoolCreateXML
+ * or virStoragePoolDefineXML) it may be suitable to know what pool types
+ * are supported along with the file/disk formats for each pool.
+ *
+ * Returns NULL in case of error or an XML string defining the capabilities.
+ */
+char *
+virConnectGetStoragePoolCapabilities(virConnectPtr conn,
+                                     unsigned int flags)
+{
+    VIR_DEBUG("conn=%p, flags=0x%x", conn, flags);
+
+    virResetLastError();
+
+    virCheckConnectReturn(conn, NULL);
+
+    if (conn->storageDriver &&
+        conn->storageDriver->connectGetStoragePoolCapabilities) {
+        char *ret;
+        ret = conn->storageDriver->connectGetStoragePoolCapabilities(conn,
+                                                                     flags);
+        if (!ret)
+            goto error;
+        VIR_DEBUG("conn=%p, ret=%s", conn, ret);
+        return ret;
+    }
+
+    virReportUnsupportedError();
+
+ error:
+    virDispatchError(conn);
+    return NULL;
 }

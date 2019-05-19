@@ -1,8 +1,8 @@
 #include <config.h>
-#include <stdlib.h>
 
 #include "testutils.h"
 #include "virfilewrapper.h"
+#define LIBVIRT_VIRRESCTRLPRIV_H_ALLOW
 #include "virresctrlpriv.h"
 
 

@@ -1,22 +1,17 @@
 {
-  "QMP": {
-    "version": {
-      "qemu": {
-        "micro": 0,
-        "minor": 10,
-        "major": 2
-      },
-      "package": " (v2.10.0)"
-    },
-    "capabilities": [
-    ]
-  }
+  "execute": "qmp_capabilities",
+  "id": "libvirt-1"
 }
 
 {
   "return": {
   },
   "id": "libvirt-1"
+}
+
+{
+  "execute": "query-version",
+  "id": "libvirt-2"
 }
 
 {
@@ -32,10 +27,20 @@
 }
 
 {
+  "execute": "query-target",
+  "id": "libvirt-3"
+}
+
+{
   "return": {
     "arch": "x86_64"
   },
   "id": "libvirt-3"
+}
+
+{
+  "execute": "query-commands",
+  "id": "libvirt-4"
 }
 
 {
@@ -492,19 +497,8 @@
 }
 
 {
-  "return": {
-    "fd": 15,
-    "fdset-id": 0
-  },
+  "execute": "query-kvm",
   "id": "libvirt-5"
-}
-
-{
-  "id": "libvirt-6",
-  "error": {
-    "class": "DeviceNotFound",
-    "desc": "Device 'bogus' not found"
-  }
 }
 
 {
@@ -512,124 +506,12 @@
     "enabled": true,
     "present": true
   },
-  "id": "libvirt-7"
+  "id": "libvirt-5"
 }
 
 {
-  "return": [
-    {
-      "name": "WATCHDOG"
-    },
-    {
-      "name": "WAKEUP"
-    },
-    {
-      "name": "VSERPORT_CHANGE"
-    },
-    {
-      "name": "VNC_INITIALIZED"
-    },
-    {
-      "name": "VNC_DISCONNECTED"
-    },
-    {
-      "name": "VNC_CONNECTED"
-    },
-    {
-      "name": "SUSPEND_DISK"
-    },
-    {
-      "name": "SUSPEND"
-    },
-    {
-      "name": "STOP"
-    },
-    {
-      "name": "SPICE_MIGRATE_COMPLETED"
-    },
-    {
-      "name": "SPICE_INITIALIZED"
-    },
-    {
-      "name": "SPICE_DISCONNECTED"
-    },
-    {
-      "name": "SPICE_CONNECTED"
-    },
-    {
-      "name": "SHUTDOWN"
-    },
-    {
-      "name": "RTC_CHANGE"
-    },
-    {
-      "name": "RESUME"
-    },
-    {
-      "name": "RESET"
-    },
-    {
-      "name": "QUORUM_REPORT_BAD"
-    },
-    {
-      "name": "QUORUM_FAILURE"
-    },
-    {
-      "name": "POWERDOWN"
-    },
-    {
-      "name": "NIC_RX_FILTER_CHANGED"
-    },
-    {
-      "name": "MIGRATION_PASS"
-    },
-    {
-      "name": "MIGRATION"
-    },
-    {
-      "name": "MEM_UNPLUG_ERROR"
-    },
-    {
-      "name": "GUEST_PANICKED"
-    },
-    {
-      "name": "DUMP_COMPLETED"
-    },
-    {
-      "name": "DEVICE_TRAY_MOVED"
-    },
-    {
-      "name": "DEVICE_DELETED"
-    },
-    {
-      "name": "BLOCK_WRITE_THRESHOLD"
-    },
-    {
-      "name": "BLOCK_JOB_READY"
-    },
-    {
-      "name": "BLOCK_JOB_ERROR"
-    },
-    {
-      "name": "BLOCK_JOB_COMPLETED"
-    },
-    {
-      "name": "BLOCK_JOB_CANCELLED"
-    },
-    {
-      "name": "BLOCK_IO_ERROR"
-    },
-    {
-      "name": "BLOCK_IMAGE_CORRUPTED"
-    },
-    {
-      "name": "BALLOON_CHANGE"
-    },
-    {
-      "name": "ACPI_DEVICE_OST"
-    }
-  ],
-  "id": "libvirt-8"
+  "execute": "qom-list-types",
+  "id": "libvirt-6"
 }
 
 {
@@ -2171,7 +2053,15 @@
       "parent": "virtio-input-hid-pci"
     }
   ],
-  "id": "libvirt-9"
+  "id": "libvirt-6"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-blk-pci"
+  },
+  "id": "libvirt-7"
 }
 
 {
@@ -2399,7 +2289,15 @@
       "type": "str"
     }
   ],
-  "id": "libvirt-10"
+  "id": "libvirt-7"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-net-pci"
+  },
+  "id": "libvirt-8"
 }
 
 {
@@ -2686,7 +2584,15 @@
       "type": "uint16"
     }
   ],
-  "id": "libvirt-11"
+  "id": "libvirt-8"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-scsi-pci"
+  },
+  "id": "libvirt-9"
 }
 
 {
@@ -2847,11 +2753,19 @@
       "type": "str"
     }
   ],
-  "id": "libvirt-12"
+  "id": "libvirt-9"
 }
 
 {
-  "id": "libvirt-13",
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-net-ccw"
+  },
+  "id": "libvirt-10"
+}
+
+{
+  "id": "libvirt-10",
   "error": {
     "class": "DeviceNotFound",
     "desc": "Device 'virtio-net-ccw' not found"
@@ -2859,7 +2773,15 @@
 }
 
 {
-  "id": "libvirt-14",
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-scsi-ccw"
+  },
+  "id": "libvirt-11"
+}
+
+{
+  "id": "libvirt-11",
   "error": {
     "class": "DeviceNotFound",
     "desc": "Device 'virtio-scsi-ccw' not found"
@@ -2867,7 +2789,15 @@
 }
 
 {
-  "id": "libvirt-15",
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-net-s390"
+  },
+  "id": "libvirt-12"
+}
+
+{
+  "id": "libvirt-12",
   "error": {
     "class": "DeviceNotFound",
     "desc": "Device 'virtio-net-s390' not found"
@@ -2875,73 +2805,11 @@
 }
 
 {
-  "id": "libvirt-16",
-  "error": {
-    "class": "DeviceNotFound",
-    "desc": "Device 'pci-assign' not found"
-  }
-}
-
-{
-  "return": [
-    {
-      "name": "share_intx",
-      "description": "on/off",
-      "type": "bool"
-    },
-    {
-      "name": "rombar",
-      "type": "uint32"
-    },
-    {
-      "name": "x-pcie-lnksta-dllla",
-      "description": "on/off",
-      "type": "bool"
-    },
-    {
-      "name": "bootindex",
-      "type": "int32"
-    },
-    {
-      "name": "multifunction",
-      "description": "on/off",
-      "type": "bool"
-    },
-    {
-      "name": "host",
-      "description": "Address (bus/device/function) of the host device, example: 04:10.0",
-      "type": "str"
-    },
-    {
-      "name": "romfile",
-      "type": "str"
-    },
-    {
-      "name": "configfd",
-      "type": "str"
-    },
-    {
-      "name": "x-pcie-extcap-init",
-      "description": "on/off",
-      "type": "bool"
-    },
-    {
-      "name": "command_serr_enable",
-      "description": "on/off",
-      "type": "bool"
-    },
-    {
-      "name": "addr",
-      "description": "Slot and optional function number, example: 06.0 or 06",
-      "type": "int32"
-    },
-    {
-      "name": "prefer_msi",
-      "description": "on/off",
-      "type": "bool"
-    }
-  ],
-  "id": "libvirt-17"
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "vfio-pci"
+  },
+  "id": "libvirt-13"
 }
 
 {
@@ -3048,7 +2916,15 @@
       "type": "bool"
     }
   ],
-  "id": "libvirt-18"
+  "id": "libvirt-13"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "scsi-hd"
+  },
+  "id": "libvirt-14"
 }
 
 {
@@ -3162,7 +3038,15 @@
       "type": "uint64"
     }
   ],
-  "id": "libvirt-19"
+  "id": "libvirt-14"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "ide-hd"
+  },
+  "id": "libvirt-15"
 }
 
 {
@@ -3238,7 +3122,15 @@
       "type": "uint16"
     }
   ],
-  "id": "libvirt-20"
+  "id": "libvirt-15"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "PIIX4_PM"
+  },
+  "id": "libvirt-16"
 }
 
 {
@@ -3301,7 +3193,15 @@
       "type": "int32"
     }
   ],
-  "id": "libvirt-21"
+  "id": "libvirt-16"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "usb-redir"
+  },
+  "id": "libvirt-17"
 }
 
 {
@@ -3350,103 +3250,15 @@
       "type": "bool"
     }
   ],
-  "id": "libvirt-22"
+  "id": "libvirt-17"
 }
 
 {
-  "return": [
-    {
-      "name": "isobufs",
-      "type": "uint32"
-    },
-    {
-      "name": "hostaddr",
-      "type": "uint32"
-    },
-    {
-      "name": "msos-desc",
-      "description": "on/off",
-      "type": "bool"
-    },
-    {
-      "name": "productid",
-      "type": "uint32"
-    },
-    {
-      "name": "serial",
-      "type": "str"
-    },
-    {
-      "name": "bootindex",
-      "type": "int32"
-    },
-    {
-      "name": "isobsize",
-      "type": "uint32"
-    },
-    {
-      "name": "port",
-      "type": "str"
-    },
-    {
-      "name": "vendorid",
-      "type": "uint32"
-    },
-    {
-      "name": "pipeline",
-      "description": "on/off",
-      "type": "bool"
-    },
-    {
-      "name": "attached",
-      "type": "bool"
-    },
-    {
-      "name": "hostport",
-      "type": "str"
-    },
-    {
-      "name": "full-path",
-      "description": "on/off",
-      "type": "bool"
-    },
-    {
-      "name": "loglevel",
-      "type": "uint32"
-    },
-    {
-      "name": "hostbus",
-      "type": "uint32"
-    }
-  ],
-  "id": "libvirt-23"
-}
-
-{
-  "return": [
-    {
-      "name": "bootindex",
-      "type": "int32"
-    },
-    {
-      "name": "drive",
-      "description": "Node name or ID of a block device to use as a backend",
-      "type": "str"
-    },
-    {
-      "name": "lun",
-      "type": "uint32"
-    },
-    {
-      "name": "channel",
-      "type": "uint32"
-    },
-    {
-      "name": "scsi-id",
-      "type": "uint32"
-    }
-  ],
-  "id": "libvirt-24"
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "i440FX-pcihost"
+  },
+  "id": "libvirt-18"
 }
 
 {
@@ -3484,7 +3296,15 @@
       "type": "child<qemu:memory-region>"
     }
   ],
-  "id": "libvirt-25"
+  "id": "libvirt-18"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "q35-pcihost"
+  },
+  "id": "libvirt-19"
 }
 
 {
@@ -3562,7 +3382,15 @@
       "type": "uint64"
     }
   ],
-  "id": "libvirt-26"
+  "id": "libvirt-19"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "usb-storage"
+  },
+  "id": "libvirt-20"
 }
 
 {
@@ -3635,7 +3463,15 @@
       "type": "uint16"
     }
   ],
-  "id": "libvirt-27"
+  "id": "libvirt-20"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "kvm-pit"
+  },
+  "id": "libvirt-21"
 }
 
 {
@@ -3649,7 +3485,15 @@
       "type": "LostTickPolicy"
     }
   ],
-  "id": "libvirt-28"
+  "id": "libvirt-21"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "VGA"
+  },
+  "id": "libvirt-22"
 }
 
 {
@@ -3706,7 +3550,15 @@
       "type": "int32"
     }
   ],
-  "id": "libvirt-29"
+  "id": "libvirt-22"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "vmware-svga"
+  },
+  "id": "libvirt-23"
 }
 
 {
@@ -3749,7 +3601,15 @@
       "type": "int32"
     }
   ],
-  "id": "libvirt-30"
+  "id": "libvirt-23"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "qxl"
+  },
+  "id": "libvirt-24"
 }
 
 {
@@ -3844,7 +3704,15 @@
       "type": "uint32"
     }
   ],
-  "id": "libvirt-31"
+  "id": "libvirt-24"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-gpu-pci"
+  },
+  "id": "libvirt-25"
 }
 
 {
@@ -4005,7 +3873,15 @@
       "type": "str"
     }
   ],
-  "id": "libvirt-32"
+  "id": "libvirt-25"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-gpu-device"
+  },
+  "id": "libvirt-26"
 }
 
 {
@@ -4062,7 +3938,15 @@
       "type": "size"
     }
   ],
-  "id": "libvirt-33"
+  "id": "libvirt-26"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "ICH9-LPC"
+  },
+  "id": "libvirt-27"
 }
 
 {
@@ -4158,7 +4042,15 @@
       "type": "uint32"
     }
   ],
-  "id": "libvirt-34"
+  "id": "libvirt-27"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-balloon-pci"
+  },
+  "id": "libvirt-28"
 }
 
 {
@@ -4301,15 +4193,31 @@
       "type": "str"
     }
   ],
-  "id": "libvirt-35"
+  "id": "libvirt-28"
 }
 
 {
-  "id": "libvirt-36",
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-balloon-ccw"
+  },
+  "id": "libvirt-29"
+}
+
+{
+  "id": "libvirt-29",
   "error": {
     "class": "DeviceNotFound",
     "desc": "Device 'virtio-balloon-ccw' not found"
   }
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-balloon-device"
+  },
+  "id": "libvirt-30"
 }
 
 {
@@ -4353,7 +4261,15 @@
       "type": "bool"
     }
   ],
-  "id": "libvirt-37"
+  "id": "libvirt-30"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "nec-usb-xhci"
+  },
+  "id": "libvirt-31"
 }
 
 {
@@ -4433,7 +4349,15 @@
       "type": "uint32"
     }
   ],
-  "id": "libvirt-38"
+  "id": "libvirt-31"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "intel-iommu"
+  },
+  "id": "libvirt-32"
 }
 
 {
@@ -4468,7 +4392,64 @@
       "type": "bool"
     }
   ],
-  "id": "libvirt-39"
+  "id": "libvirt-32"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "mch"
+  },
+  "id": "libvirt-33"
+}
+
+{
+  "return": [
+    {
+      "name": "command_serr_enable",
+      "type": "on/off"
+    },
+    {
+      "name": "multifunction",
+      "type": "on/off"
+    },
+    {
+      "name": "rombar",
+      "type": "uint32"
+    },
+    {
+      "name": "romfile",
+      "type": "string"
+    },
+    {
+      "name": "addr",
+      "type": "pci-devfn"
+    }
+  ],
+  "id": "libvirt-33"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "nvdimm"
+  },
+  "id": "libvirt-34"
+}
+
+{
+  "return": [
+    {
+      "name": "memdev",
+      "type": "link<memory-backend>"
+    }
+  ],
+  "id": "libvirt-34"
+}
+
+{
+  "execute": "query-machines",
+  "id": "libvirt-35"
 }
 
 {
@@ -4657,7 +4638,12 @@
       "alias": "q35"
     }
   ],
-  "id": "libvirt-40"
+  "id": "libvirt-35"
+}
+
+{
+  "execute": "query-cpu-definitions",
+  "id": "libvirt-36"
 }
 
 {
@@ -4992,21 +4978,36 @@
       "migration-safe": true
     }
   ],
-  "id": "libvirt-41"
+  "id": "libvirt-36"
+}
+
+{
+  "execute": "query-tpm-models",
+  "id": "libvirt-37"
 }
 
 {
   "return": [
     "tpm-tis"
   ],
-  "id": "libvirt-42"
+  "id": "libvirt-37"
+}
+
+{
+  "execute": "query-tpm-types",
+  "id": "libvirt-38"
 }
 
 {
   "return": [
     "passthrough"
   ],
-  "id": "libvirt-43"
+  "id": "libvirt-38"
+}
+
+{
+  "execute": "query-command-line-options",
+  "id": "libvirt-39"
 }
 
 {
@@ -6285,7 +6286,12 @@
       "option": "drive"
     }
   ],
-  "id": "libvirt-44"
+  "id": "libvirt-39"
+}
+
+{
+  "execute": "query-migrate-capabilities",
+  "id": "libvirt-40"
 }
 
 {
@@ -6335,7 +6341,12 @@
       "capability": "return-path"
     }
   ],
-  "id": "libvirt-45"
+  "id": "libvirt-40"
+}
+
+{
+  "execute": "query-qmp-schema",
+  "id": "libvirt-41"
 }
 
 {
@@ -16058,7 +16069,18 @@
       "meta-type": "object"
     }
   ],
-  "id": "libvirt-46"
+  "id": "libvirt-41"
+}
+
+{
+  "execute": "query-cpu-model-expansion",
+  "arguments": {
+    "type": "static",
+    "model": {
+      "name": "host"
+    }
+  },
+  "id": "libvirt-42"
 }
 
 {
@@ -16237,7 +16259,188 @@
       }
     }
   },
-  "id": "libvirt-47"
+  "id": "libvirt-42"
+}
+
+{
+  "execute": "query-cpu-model-expansion",
+  "arguments": {
+    "type": "full",
+    "model": {
+      "name": "base",
+      "props": {
+        "cmov": true,
+        "ia64": false,
+        "aes": true,
+        "mmx": true,
+        "rdpid": false,
+        "arat": true,
+        "pause-filter": false,
+        "xsavec": false,
+        "osxsave": false,
+        "kvm-asyncpf": true,
+        "perfctr-core": false,
+        "mpx": false,
+        "pbe": false,
+        "avx512cd": false,
+        "decodeassists": false,
+        "sse4.1": true,
+        "family": 6,
+        "avx512f": false,
+        "msr": true,
+        "mce": true,
+        "mca": true,
+        "xcrypt": false,
+        "min-level": 13,
+        "xgetbv1": false,
+        "cid": false,
+        "ds": false,
+        "fxsr": true,
+        "xsaveopt": true,
+        "xtpr": false,
+        "avx512vl": false,
+        "avx512-vpopcntdq": false,
+        "phe": false,
+        "extapic": false,
+        "3dnowprefetch": false,
+        "cr8legacy": false,
+        "xcrypt-en": false,
+        "pn": false,
+        "dca": false,
+        "vendor": "GenuineIntel",
+        "pku": false,
+        "smx": false,
+        "cmp-legacy": false,
+        "avx512-4fmaps": false,
+        "vmcb-clean": false,
+        "hle": false,
+        "3dnowext": false,
+        "npt": false,
+        "clwb": false,
+        "lbrv": false,
+        "adx": false,
+        "ss": true,
+        "pni": true,
+        "svm-lock": false,
+        "smep": true,
+        "smap": false,
+        "pfthreshold": false,
+        "x2apic": true,
+        "avx512vbmi": false,
+        "flushbyasid": false,
+        "f16c": true,
+        "ace2-en": false,
+        "pae": true,
+        "pat": true,
+        "sse": true,
+        "phe-en": false,
+        "kvm-nopiodelay": true,
+        "tm": false,
+        "kvmclock-stable-bit": true,
+        "hypervisor": true,
+        "pcommit": false,
+        "syscall": true,
+        "avx512dq": false,
+        "svm": false,
+        "invtsc": false,
+        "sse2": true,
+        "est": false,
+        "avx512ifma": false,
+        "tm2": false,
+        "kvm-pv-eoi": true,
+        "cx8": true,
+        "kvm-mmu": false,
+        "sse4.2": true,
+        "pge": true,
+        "pdcm": false,
+        "model": 60,
+        "movbe": true,
+        "nrip-save": false,
+        "ssse3": true,
+        "sse4a": false,
+        "invpcid": true,
+        "pdpe1gb": true,
+        "tsc-deadline": true,
+        "fma": true,
+        "cx16": true,
+        "de": true,
+        "stepping": 3,
+        "xsave": true,
+        "clflush": true,
+        "skinit": false,
+        "tsc": true,
+        "tce": false,
+        "fpu": true,
+        "ds-cpl": false,
+        "ibs": false,
+        "fma4": false,
+        "la57": false,
+        "osvw": false,
+        "apic": true,
+        "pmm": false,
+        "tsc-adjust": true,
+        "kvm-steal-time": true,
+        "kvmclock": true,
+        "lwp": false,
+        "xop": false,
+        "avx": true,
+        "ospke": false,
+        "acpi": false,
+        "avx512bw": false,
+        "ace2": false,
+        "fsgsbase": true,
+        "ht": false,
+        "nx": true,
+        "pclmulqdq": true,
+        "mmxext": false,
+        "popcnt": true,
+        "xsaves": false,
+        "lm": true,
+        "umip": false,
+        "pse": true,
+        "avx2": true,
+        "sep": true,
+        "nodeid-msr": false,
+        "misalignsse": false,
+        "min-xlevel": 2147483656,
+        "bmi1": true,
+        "bmi2": true,
+        "kvm-pv-unhalt": true,
+        "tsc-scale": false,
+        "topoext": false,
+        "clflushopt": false,
+        "monitor": false,
+        "avx512er": false,
+        "pmm-en": false,
+        "pcid": true,
+        "3dnow": false,
+        "erms": true,
+        "lahf-lm": true,
+        "fxsr-opt": false,
+        "xstore": false,
+        "rtm": false,
+        "lmce": true,
+        "perfctr-nb": false,
+        "rdrand": true,
+        "rdseed": false,
+        "avx512-4vnniw": false,
+        "vme": true,
+        "vmx": true,
+        "dtes64": false,
+        "mtrr": true,
+        "rdtscp": true,
+        "pse36": true,
+        "tbm": false,
+        "wdt": false,
+        "model-id": "Intel(R) Core(TM) i7-4810MQ CPU @ 2.80GHz",
+        "sha-ni": false,
+        "abm": true,
+        "avx512pf": false,
+        "xstore-en": false
+      }
+    }
+  },
+  "id": "libvirt-43"
 }
 
 {
@@ -16480,7 +16683,21 @@
       }
     }
   },
-  "id": "libvirt-48"
+  "id": "libvirt-43"
+}
+
+{
+  "execute": "query-cpu-model-expansion",
+  "arguments": {
+    "type": "static",
+    "model": {
+      "name": "host",
+      "props": {
+        "migratable": false
+      }
+    }
+  },
+  "id": "libvirt-44"
 }
 
 {
@@ -16659,7 +16876,188 @@
       }
     }
   },
-  "id": "libvirt-49"
+  "id": "libvirt-44"
+}
+
+{
+  "execute": "query-cpu-model-expansion",
+  "arguments": {
+    "type": "full",
+    "model": {
+      "name": "base",
+      "props": {
+        "cmov": true,
+        "ia64": false,
+        "aes": true,
+        "mmx": true,
+        "rdpid": false,
+        "arat": true,
+        "pause-filter": false,
+        "xsavec": false,
+        "osxsave": false,
+        "kvm-asyncpf": true,
+        "perfctr-core": false,
+        "mpx": false,
+        "pbe": false,
+        "avx512cd": false,
+        "decodeassists": false,
+        "sse4.1": true,
+        "family": 6,
+        "avx512f": false,
+        "msr": true,
+        "mce": true,
+        "mca": true,
+        "xcrypt": false,
+        "min-level": 13,
+        "xgetbv1": false,
+        "cid": false,
+        "ds": false,
+        "fxsr": true,
+        "xsaveopt": true,
+        "xtpr": false,
+        "avx512vl": false,
+        "avx512-vpopcntdq": false,
+        "phe": false,
+        "extapic": false,
+        "3dnowprefetch": false,
+        "cr8legacy": false,
+        "xcrypt-en": false,
+        "pn": false,
+        "dca": false,
+        "vendor": "GenuineIntel",
+        "pku": false,
+        "smx": false,
+        "cmp-legacy": false,
+        "avx512-4fmaps": false,
+        "vmcb-clean": false,
+        "hle": false,
+        "3dnowext": false,
+        "npt": false,
+        "clwb": false,
+        "lbrv": false,
+        "adx": false,
+        "ss": true,
+        "pni": true,
+        "svm-lock": false,
+        "smep": true,
+        "smap": false,
+        "pfthreshold": false,
+        "x2apic": true,
+        "avx512vbmi": false,
+        "flushbyasid": false,
+        "f16c": true,
+        "ace2-en": false,
+        "pae": true,
+        "pat": true,
+        "sse": true,
+        "phe-en": false,
+        "kvm-nopiodelay": true,
+        "tm": false,
+        "kvmclock-stable-bit": true,
+        "hypervisor": true,
+        "pcommit": false,
+        "syscall": true,
+        "avx512dq": false,
+        "svm": false,
+        "invtsc": true,
+        "sse2": true,
+        "est": false,
+        "avx512ifma": false,
+        "tm2": false,
+        "kvm-pv-eoi": true,
+        "cx8": true,
+        "kvm-mmu": false,
+        "sse4.2": true,
+        "pge": true,
+        "pdcm": false,
+        "model": 60,
+        "movbe": true,
+        "nrip-save": false,
+        "ssse3": true,
+        "sse4a": false,
+        "invpcid": true,
+        "pdpe1gb": true,
+        "tsc-deadline": true,
+        "fma": true,
+        "cx16": true,
+        "de": true,
+        "stepping": 3,
+        "xsave": true,
+        "clflush": true,
+        "skinit": false,
+        "tsc": true,
+        "tce": false,
+        "fpu": true,
+        "ds-cpl": false,
+        "ibs": false,
+        "fma4": false,
+        "la57": false,
+        "osvw": false,
+        "apic": true,
+        "pmm": false,
+        "tsc-adjust": true,
+        "kvm-steal-time": true,
+        "kvmclock": true,
+        "lwp": false,
+        "xop": false,
+        "avx": true,
+        "ospke": false,
+        "acpi": false,
+        "avx512bw": false,
+        "ace2": false,
+        "fsgsbase": true,
+        "ht": false,
+        "nx": true,
+        "pclmulqdq": true,
+        "mmxext": false,
+        "popcnt": true,
+        "xsaves": false,
+        "lm": true,
+        "umip": false,
+        "pse": true,
+        "avx2": true,
+        "sep": true,
+        "nodeid-msr": false,
+        "misalignsse": false,
+        "min-xlevel": 2147483656,
+        "bmi1": true,
+        "bmi2": true,
+        "kvm-pv-unhalt": true,
+        "tsc-scale": false,
+        "topoext": false,
+        "clflushopt": false,
+        "monitor": false,
+        "avx512er": false,
+        "pmm-en": false,
+        "pcid": true,
+        "3dnow": false,
+        "erms": true,
+        "lahf-lm": true,
+        "fxsr-opt": false,
+        "xstore": false,
+        "rtm": false,
+        "lmce": true,
+        "perfctr-nb": false,
+        "rdrand": true,
+        "rdseed": false,
+        "avx512-4vnniw": false,
+        "vme": true,
+        "vmx": true,
+        "dtes64": false,
+        "mtrr": true,
+        "rdtscp": true,
+        "pse36": true,
+        "tbm": false,
+        "wdt": false,
+        "model-id": "Intel(R) Core(TM) i7-4810MQ CPU @ 2.80GHz",
+        "sha-ni": false,
+        "abm": true,
+        "avx512pf": false,
+        "xstore-en": false
+      }
+    }
+  },
+  "id": "libvirt-45"
 }
 
 {
@@ -16902,13 +17300,23 @@
       }
     }
   },
-  "id": "libvirt-50"
+  "id": "libvirt-45"
+}
+
+{
+  "execute": "qmp_capabilities",
+  "id": "libvirt-1"
 }
 
 {
   "return": {
   },
   "id": "libvirt-1"
+}
+
+{
+  "execute": "query-cpu-definitions",
+  "id": "libvirt-2"
 }
 
 {
@@ -17284,6 +17692,17 @@
 }
 
 {
+  "execute": "query-cpu-model-expansion",
+  "arguments": {
+    "type": "static",
+    "model": {
+      "name": "max"
+    }
+  },
+  "id": "libvirt-3"
+}
+
+{
   "return": {
     "model": {
       "name": "base",
@@ -17460,6 +17879,187 @@
     }
   },
   "id": "libvirt-3"
+}
+
+{
+  "execute": "query-cpu-model-expansion",
+  "arguments": {
+    "type": "full",
+    "model": {
+      "name": "base",
+      "props": {
+        "cmov": true,
+        "ia64": false,
+        "aes": true,
+        "mmx": true,
+        "rdpid": false,
+        "arat": true,
+        "pause-filter": false,
+        "xsavec": false,
+        "osxsave": false,
+        "kvm-asyncpf": false,
+        "perfctr-core": false,
+        "mpx": true,
+        "pbe": false,
+        "avx512cd": false,
+        "decodeassists": false,
+        "sse4.1": true,
+        "family": 6,
+        "avx512f": false,
+        "msr": true,
+        "mce": true,
+        "mca": true,
+        "xcrypt": false,
+        "min-level": 13,
+        "xgetbv1": true,
+        "cid": false,
+        "ds": false,
+        "fxsr": true,
+        "xsaveopt": true,
+        "xtpr": false,
+        "avx512vl": false,
+        "avx512-vpopcntdq": false,
+        "phe": false,
+        "extapic": false,
+        "3dnowprefetch": false,
+        "cr8legacy": true,
+        "xcrypt-en": false,
+        "pn": false,
+        "dca": false,
+        "vendor": "AuthenticAMD",
+        "pku": true,
+        "smx": false,
+        "cmp-legacy": false,
+        "avx512-4fmaps": false,
+        "vmcb-clean": false,
+        "hle": false,
+        "3dnowext": true,
+        "npt": false,
+        "clwb": true,
+        "lbrv": false,
+        "adx": true,
+        "ss": true,
+        "pni": true,
+        "svm-lock": false,
+        "smep": true,
+        "smap": true,
+        "pfthreshold": false,
+        "x2apic": false,
+        "avx512vbmi": false,
+        "flushbyasid": false,
+        "f16c": false,
+        "ace2-en": false,
+        "pae": true,
+        "pat": true,
+        "sse": true,
+        "phe-en": false,
+        "kvm-nopiodelay": false,
+        "tm": false,
+        "kvmclock-stable-bit": false,
+        "hypervisor": true,
+        "pcommit": true,
+        "syscall": true,
+        "avx512dq": false,
+        "svm": true,
+        "invtsc": false,
+        "sse2": true,
+        "est": false,
+        "avx512ifma": false,
+        "tm2": false,
+        "kvm-pv-eoi": false,
+        "cx8": true,
+        "kvm-mmu": false,
+        "sse4.2": true,
+        "pge": true,
+        "pdcm": false,
+        "model": 6,
+        "movbe": true,
+        "nrip-save": false,
+        "ssse3": true,
+        "sse4a": true,
+        "invpcid": false,
+        "pdpe1gb": true,
+        "tsc-deadline": false,
+        "fma": false,
+        "cx16": true,
+        "de": true,
+        "stepping": 3,
+        "xsave": true,
+        "clflush": true,
+        "skinit": false,
+        "tsc": true,
+        "tce": false,
+        "fpu": true,
+        "ds-cpl": false,
+        "ibs": false,
+        "fma4": false,
+        "la57": true,
+        "osvw": false,
+        "apic": true,
+        "pmm": false,
+        "tsc-adjust": false,
+        "kvm-steal-time": false,
+        "kvmclock": false,
+        "lwp": false,
+        "xop": false,
+        "avx": false,
+        "ospke": true,
+        "acpi": true,
+        "avx512bw": false,
+        "ace2": false,
+        "fsgsbase": true,
+        "ht": false,
+        "nx": true,
+        "pclmulqdq": true,
+        "mmxext": true,
+        "popcnt": true,
+        "xsaves": false,
+        "lm": true,
+        "umip": false,
+        "pse": true,
+        "avx2": false,
+        "sep": true,
+        "nodeid-msr": false,
+        "misalignsse": false,
+        "min-xlevel": 2147483658,
+        "bmi1": true,
+        "bmi2": true,
+        "kvm-pv-unhalt": false,
+        "tsc-scale": false,
+        "topoext": false,
+        "clflushopt": true,
+        "monitor": true,
+        "avx512er": false,
+        "pmm-en": false,
+        "pcid": false,
+        "3dnow": true,
+        "erms": true,
+        "lahf-lm": true,
+        "fxsr-opt": false,
+        "xstore": false,
+        "rtm": false,
+        "lmce": false,
+        "perfctr-nb": false,
+        "rdrand": false,
+        "rdseed": false,
+        "avx512-4vnniw": false,
+        "vme": false,
+        "vmx": false,
+        "dtes64": false,
+        "mtrr": true,
+        "rdtscp": true,
+        "pse36": true,
+        "tbm": false,
+        "wdt": false,
+        "model-id": "QEMU TCG CPU version 2.5+",
+        "sha-ni": false,
+        "abm": true,
+        "avx512pf": false,
+        "xstore-en": false
+      }
+    }
+  },
+  "id": "libvirt-4"
 }
 
 {
@@ -17706,6 +18306,20 @@
 }
 
 {
+  "execute": "query-cpu-model-expansion",
+  "arguments": {
+    "type": "static",
+    "model": {
+      "name": "max",
+      "props": {
+        "migratable": false
+      }
+    }
+  },
+  "id": "libvirt-5"
+}
+
+{
   "return": {
     "model": {
       "name": "base",
@@ -17882,6 +18496,187 @@
     }
   },
   "id": "libvirt-5"
+}
+
+{
+  "execute": "query-cpu-model-expansion",
+  "arguments": {
+    "type": "full",
+    "model": {
+      "name": "base",
+      "props": {
+        "cmov": true,
+        "ia64": false,
+        "aes": true,
+        "mmx": true,
+        "rdpid": false,
+        "arat": true,
+        "pause-filter": false,
+        "xsavec": false,
+        "osxsave": false,
+        "kvm-asyncpf": false,
+        "perfctr-core": false,
+        "mpx": true,
+        "pbe": false,
+        "avx512cd": false,
+        "decodeassists": false,
+        "sse4.1": true,
+        "family": 6,
+        "avx512f": false,
+        "msr": true,
+        "mce": true,
+        "mca": true,
+        "xcrypt": false,
+        "min-level": 13,
+        "xgetbv1": true,
+        "cid": false,
+        "ds": false,
+        "fxsr": true,
+        "xsaveopt": true,
+        "xtpr": false,
+        "avx512vl": false,
+        "avx512-vpopcntdq": false,
+        "phe": false,
+        "extapic": false,
+        "3dnowprefetch": false,
+        "cr8legacy": true,
+        "xcrypt-en": false,
+        "pn": false,
+        "dca": false,
+        "vendor": "AuthenticAMD",
+        "pku": true,
+        "smx": false,
+        "cmp-legacy": false,
+        "avx512-4fmaps": false,
+        "vmcb-clean": false,
+        "hle": false,
+        "3dnowext": true,
+        "npt": false,
+        "clwb": true,
+        "lbrv": false,
+        "adx": true,
+        "ss": true,
+        "pni": true,
+        "svm-lock": false,
+        "smep": true,
+        "smap": true,
+        "pfthreshold": false,
+        "x2apic": false,
+        "avx512vbmi": false,
+        "flushbyasid": false,
+        "f16c": false,
+        "ace2-en": false,
+        "pae": true,
+        "pat": true,
+        "sse": true,
+        "phe-en": false,
+        "kvm-nopiodelay": false,
+        "tm": false,
+        "kvmclock-stable-bit": false,
+        "hypervisor": true,
+        "pcommit": true,
+        "syscall": true,
+        "avx512dq": false,
+        "svm": true,
+        "invtsc": false,
+        "sse2": true,
+        "est": false,
+        "avx512ifma": false,
+        "tm2": false,
+        "kvm-pv-eoi": false,
+        "cx8": true,
+        "kvm-mmu": false,
+        "sse4.2": true,
+        "pge": true,
+        "pdcm": false,
+        "model": 6,
+        "movbe": true,
+        "nrip-save": false,
+        "ssse3": true,
+        "sse4a": true,
+        "invpcid": false,
+        "pdpe1gb": true,
+        "tsc-deadline": false,
+        "fma": false,
+        "cx16": true,
+        "de": true,
+        "stepping": 3,
+        "xsave": true,
+        "clflush": true,
+        "skinit": false,
+        "tsc": true,
+        "tce": false,
+        "fpu": true,
+        "ds-cpl": false,
+        "ibs": false,
+        "fma4": false,
+        "la57": true,
+        "osvw": false,
+        "apic": true,
+        "pmm": false,
+        "tsc-adjust": false,
+        "kvm-steal-time": false,
+        "kvmclock": false,
+        "lwp": false,
+        "xop": false,
+        "avx": false,
+        "ospke": true,
+        "acpi": true,
+        "avx512bw": false,
+        "ace2": false,
+        "fsgsbase": true,
+        "ht": false,
+        "nx": true,
+        "pclmulqdq": true,
+        "mmxext": true,
+        "popcnt": true,
+        "xsaves": false,
+        "lm": true,
+        "umip": false,
+        "pse": true,
+        "avx2": false,
+        "sep": true,
+        "nodeid-msr": false,
+        "misalignsse": false,
+        "min-xlevel": 2147483658,
+        "bmi1": true,
+        "bmi2": true,
+        "kvm-pv-unhalt": false,
+        "tsc-scale": false,
+        "topoext": false,
+        "clflushopt": true,
+        "monitor": true,
+        "avx512er": false,
+        "pmm-en": false,
+        "pcid": false,
+        "3dnow": true,
+        "erms": true,
+        "lahf-lm": true,
+        "fxsr-opt": false,
+        "xstore": false,
+        "rtm": false,
+        "lmce": false,
+        "perfctr-nb": false,
+        "rdrand": false,
+        "rdseed": false,
+        "avx512-4vnniw": false,
+        "vme": false,
+        "vmx": false,
+        "dtes64": false,
+        "mtrr": true,
+        "rdtscp": true,
+        "pse36": true,
+        "tbm": false,
+        "wdt": false,
+        "model-id": "QEMU TCG CPU version 2.5+",
+        "sha-ni": false,
+        "abm": true,
+        "avx512pf": false,
+        "xstore-en": false
+      }
+    }
+  },
+  "id": "libvirt-6"
 }
 
 {

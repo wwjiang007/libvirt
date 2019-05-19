@@ -17,6 +17,7 @@
  */
 #include <config.h>
 #include "testutils.h"
+#include "testutilsqemu.h"
 #include "testutilsqemuschema.h"
 #include "qemu/qemu_qapi.h"
 
@@ -27,9 +28,9 @@ testQEMUSchemaValidateRecurse(virJSONValuePtr obj,
                               virBufferPtr debug);
 
 static int
-testQEMUSchemaValidateArrayBuiltin(virJSONValuePtr obj,
-                                   virJSONValuePtr root,
-                                   virBufferPtr debug)
+testQEMUSchemaValidateBuiltin(virJSONValuePtr obj,
+                              virJSONValuePtr root,
+                              virBufferPtr debug)
 {
     const char *t = virJSONValueObjectGetString(root, "json-type");
     const char *s = NULL;
@@ -101,11 +102,9 @@ testQEMUSchemaStealObjectMemberByName(const char *name,
 {
     virJSONValuePtr member;
     virJSONValuePtr ret = NULL;
-    size_t n;
     size_t i;
 
-    n = virJSONValueArraySize(members);
-    for (i = 0; i < n; i++) {
+    for (i = 0; i < virJSONValueArraySize(members); i++) {
         member = virJSONValueArrayGet(members, i);
 
         if (STREQ_NULLABLE(name, virJSONValueObjectGetString(member, "name"))) {
@@ -188,7 +187,6 @@ testQEMUSchemaValidateObjectMergeVariant(virJSONValuePtr root,
                                          virHashTablePtr schema,
                                          virBufferPtr debug)
 {
-    size_t n;
     size_t i;
     virJSONValuePtr variants = NULL;
     virJSONValuePtr variant;
@@ -203,8 +201,7 @@ testQEMUSchemaValidateObjectMergeVariant(virJSONValuePtr root,
         return -2;
     }
 
-    n = virJSONValueArraySize(variants);
-    for (i = 0; i < n; i++) {
+    for (i = 0; i < virJSONValueArraySize(variants); i++) {
         variant = virJSONValueArrayGet(variants, i);
 
         if (STREQ_NULLABLE(variantname,
@@ -342,7 +339,6 @@ testQEMUSchemaValidateEnum(virJSONValuePtr obj,
     const char *objstr;
     virJSONValuePtr values = NULL;
     virJSONValuePtr value;
-    size_t n;
     size_t i;
 
     if (virJSONValueGetType(obj) != VIR_JSON_TYPE_STRING) {
@@ -358,8 +354,7 @@ testQEMUSchemaValidateEnum(virJSONValuePtr obj,
         return -2;
     }
 
-    n = virJSONValueArraySize(values);
-    for (i = 0; i < n; i++) {
+    for (i = 0; i < virJSONValueArraySize(values); i++) {
         value = virJSONValueArrayGet(values, i);
 
         if (STREQ_NULLABLE(objstr, virJSONValueGetString(value))) {
@@ -383,7 +378,6 @@ testQEMUSchemaValidateArray(virJSONValuePtr objs,
     const char *elemtypename = virJSONValueObjectGetString(root, "element-type");
     virJSONValuePtr elementschema;
     virJSONValuePtr obj;
-    size_t n;
     size_t i;
 
     if (virJSONValueGetType(objs) != VIR_JSON_TYPE_ARRAY) {
@@ -401,8 +395,7 @@ testQEMUSchemaValidateArray(virJSONValuePtr objs,
     virBufferAddLit(debug, "[\n");
     virBufferAdjustIndent(debug, 3);
 
-    n = virJSONValueArraySize(objs);
-    for (i = 0; i < n; i++) {
+    for (i = 0; i < virJSONValueArraySize(objs); i++) {
         obj = virJSONValueArrayGet(objs, i);
 
         if (testQEMUSchemaValidateRecurse(obj, elementschema, schema, debug) < 0)
@@ -423,8 +416,8 @@ testQEMUSchemaValidateAlternate(virJSONValuePtr obj,
 {
     virJSONValuePtr members;
     virJSONValuePtr member;
-    size_t n;
     size_t i;
+    size_t n;
     const char *membertype;
     virJSONValuePtr memberschema;
     int indent;
@@ -483,7 +476,7 @@ testQEMUSchemaValidateRecurse(virJSONValuePtr obj,
     const char *t = virJSONValueObjectGetString(root, "meta-type");
 
     if (STREQ_NULLABLE(t, "builtin")) {
-        return testQEMUSchemaValidateArrayBuiltin(obj, root, debug);
+        return testQEMUSchemaValidateBuiltin(obj, root, debug);
     } else if (STREQ_NULLABLE(t, "object")) {
         return testQEMUSchemaValidateObject(obj, root, schema, debug);
     } else if (STREQ_NULLABLE(t, "enum")) {
@@ -524,13 +517,70 @@ testQEMUSchemaValidate(virJSONValuePtr obj,
 }
 
 
+/**
+ * testQEMUSchemaGetLatest:
+ *
+ * Returns the schema data as the qemu monitor would reply from the latest
+ * replies file used for qemucapabilitiestest for the x86_64 architecture.
+ */
+virJSONValuePtr
+testQEMUSchemaGetLatest(void)
+{
+    char *capsLatestFile = NULL;
+    char *capsLatest = NULL;
+    char *schemaReply;
+    char *end;
+    virJSONValuePtr reply = NULL;
+    virJSONValuePtr schema = NULL;
+
+    if (!(capsLatestFile = testQemuGetLatestCapsForArch("x86_64", "replies"))) {
+        VIR_TEST_VERBOSE("failed to find latest caps replies\n");
+        return NULL;
+    }
+
+    VIR_TEST_DEBUG("replies file: '%s'\n", capsLatestFile);
+
+    if (virTestLoadFile(capsLatestFile, &capsLatest) < 0)
+        goto cleanup;
+
+    if (!(schemaReply = strstr(capsLatest, "\"execute\": \"query-qmp-schema\"")) ||
+        !(schemaReply = strstr(schemaReply, "\n\n")) ||
+        !(end = strstr(schemaReply + 2, "\n\n"))) {
+        VIR_TEST_VERBOSE("failed to find reply to 'query-qmp-schema' in '%s'\n",
+                         capsLatestFile);
+        goto cleanup;
+    }
+
+    schemaReply += 2;
+    *end = '\0';
+
+    if (!(reply = virJSONValueFromString(schemaReply))) {
+        VIR_TEST_VERBOSE("failed to parse 'query-qmp-schema' reply from '%s'\n",
+                         capsLatestFile);
+        goto cleanup;
+    }
+
+    if (!(schema = virJSONValueObjectStealArray(reply, "return"))) {
+        VIR_TEST_VERBOSE("missing qapi schema data in reply in '%s'\n",
+                         capsLatestFile);
+        goto cleanup;
+    }
+
+ cleanup:
+    VIR_FREE(capsLatestFile);
+    VIR_FREE(capsLatest);
+    virJSONValueFree(reply);
+    return schema;
+}
+
+
 virHashTablePtr
 testQEMUSchemaLoad(void)
 {
-    virJSONValuePtr schemajson;
+    virJSONValuePtr schema;
 
-    if (!(schemajson = virTestLoadFileJSON("qemuqapischema.json", NULL)))
+    if (!(schema = testQEMUSchemaGetLatest()))
         return NULL;
 
-    return virQEMUQAPISchemaConvert(schemajson);
+    return virQEMUQAPISchemaConvert(schema);
 }

@@ -17,17 +17,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <errno.h>
 #include <dirent.h>
 #include <sys/utsname.h>
 #include <fcntl.h>
@@ -47,6 +40,7 @@
 
 #include "c-ctype.h"
 #include "viralloc.h"
+#define LIBVIRT_VIRHOSTCPUPRIV_H_ALLOW
 #include "virhostcpupriv.h"
 #include "physmem.h"
 #include "virerror.h"
@@ -64,6 +58,7 @@
 VIR_LOG_INIT("util.hostcpu");
 
 #define KVM_DEVICE "/dev/kvm"
+#define MSR_DEVICE "/dev/cpu/0/msr"
 
 
 #if defined(__FreeBSD__) || defined(__APPLE__)
@@ -166,7 +161,7 @@ virHostCPUGetStatsFreeBSD(int cpuNum,
     for (i = 0; cpu_map[i].field != NULL; i++) {
         virNodeCPUStatsPtr param = &params[i];
 
-        if (virStrcpyStatic(param->field, cpu_map[i].field) == NULL) {
+        if (virStrcpyStatic(param->field, cpu_map[i].field) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("Field '%s' too long for destination"),
                            cpu_map[i].field);
@@ -197,38 +192,8 @@ virHostCPUGetStatsFreeBSD(int cpuNum,
 #ifdef __linux__
 # define CPUINFO_PATH "/proc/cpuinfo"
 # define PROCSTAT_PATH "/proc/stat"
-# define VIR_HOST_CPU_MASK_LEN 1024
 
 # define LINUX_NB_CPU_STATS 4
-
-
-static unsigned long
-virHostCPUCountThreadSiblings(unsigned int cpu)
-{
-    unsigned long ret = 0;
-    int rv = -1;
-    char *str = NULL;
-    size_t i;
-
-    rv = virFileReadValueString(&str,
-                                "%s/cpu/cpu%u/topology/thread_siblings",
-                                SYSFS_SYSTEM_PATH, cpu);
-    if (rv == -2) {
-        ret = 1;
-        goto cleanup;
-    }
-    if (rv < 0)
-        goto cleanup;
-
-    for (i = 0; str[i] != '\0'; i++) {
-        if (c_isxdigit(str[i]))
-            ret += count_one_bits(virHexToBin(str[i]));
-    }
-
- cleanup:
-    VIR_FREE(str);
-    return ret;
-}
 
 int
 virHostCPUGetSocket(unsigned int cpu, unsigned int *socket)
@@ -290,6 +255,22 @@ virHostCPUGetSiblingsList(unsigned int cpu)
     return ret;
 }
 
+static unsigned long
+virHostCPUCountThreadSiblings(unsigned int cpu)
+{
+    virBitmapPtr siblings_map;
+    unsigned long ret = 0;
+
+    if (!(siblings_map = virHostCPUGetSiblingsList(cpu)))
+        goto cleanup;
+
+    ret = virBitmapCountBits(siblings_map);
+
+ cleanup:
+    virBitmapFree(siblings_map);
+    return ret;
+}
+
 /* parses a node entry, returning number of processors in the node and
  * filling arguments */
 static int
@@ -307,9 +288,6 @@ virHostCPUParseNode(const char *node,
                     int *threads,
                     int *offline)
 {
-    /* Biggest value we can expect to be used as either socket id
-     * or core id. Bitmaps will need to be sized accordingly */
-    const int ID_MAX = 4095;
     int ret = -1;
     int processors = 0;
     DIR *cpudir = NULL;
@@ -338,7 +316,7 @@ virHostCPUParseNode(const char *node,
         goto cleanup;
 
     /* enumerate sockets in the node */
-    if (!(sockets_map = virBitmapNew(ID_MAX + 1)))
+    if (!(sockets_map = virBitmapNewEmpty()))
         goto cleanup;
 
     while ((direrr = virDirRead(cpudir, &cpudirent, node)) > 0) {
@@ -357,14 +335,8 @@ virHostCPUParseNode(const char *node,
 
         if (virHostCPUGetSocket(cpu, &sock) < 0)
             goto cleanup;
-        if (sock > ID_MAX) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Socket %d can't be handled (max socket is %d)"),
-                           sock, ID_MAX);
-            goto cleanup;
-        }
 
-        if (virBitmapSetBit(sockets_map, sock) < 0)
+        if (virBitmapSetBitExpand(sockets_map, sock) < 0)
             goto cleanup;
 
         if (sock > sock_max)
@@ -381,7 +353,7 @@ virHostCPUParseNode(const char *node,
         goto cleanup;
 
     for (i = 0; i < sock_max; i++)
-        if (!(cores_maps[i] = virBitmapNew(ID_MAX + 1)))
+        if (!(cores_maps[i] = virBitmapNewEmpty()))
             goto cleanup;
 
     /* Iterate over all CPUs in the node, in ascending order */
@@ -425,14 +397,8 @@ virHostCPUParseNode(const char *node,
             if (virHostCPUGetCore(cpu, &core) < 0)
                 goto cleanup;
         }
-        if (core > ID_MAX) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Core %d can't be handled (max core is %d)"),
-                           core, ID_MAX);
-            goto cleanup;
-        }
 
-        if (virBitmapSetBit(cores_maps[sock], core) < 0)
+        if (virBitmapSetBitExpand(cores_maps[sock], core) < 0)
             goto cleanup;
 
         if (!(siblings = virHostCPUCountThreadSiblings(cpu)))
@@ -933,7 +899,7 @@ virHostCPUStatsAssign(virNodeCPUStatsPtr param,
                       const char *name,
                       unsigned long long value)
 {
-    if (virStrcpyStatic(param->field, name) == NULL) {
+    if (virStrcpyStatic(param->field, name) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "%s", _("kernel cpu time field is too long"
                                " for the destination"));
@@ -1289,3 +1255,86 @@ virHostCPUGetMicrocodeVersion(void)
 }
 
 #endif /* __linux__ */
+
+
+#if HAVE_LINUX_KVM_H && defined(KVM_GET_MSRS) && \
+    (defined(__i386__) || defined(__x86_64__)) && \
+    (defined(__linux__) || defined(__FreeBSD__))
+static int
+virHostCPUGetMSRFromKVM(unsigned long index,
+                        uint64_t *result)
+{
+    VIR_AUTOCLOSE fd = -1;
+    struct {
+        struct kvm_msrs header;
+        struct kvm_msr_entry entry;
+    } msr = {
+        .header = { .nmsrs = 1 },
+        .entry = { .index = index },
+    };
+
+    if ((fd = open(KVM_DEVICE, O_RDONLY)) < 0) {
+        virReportSystemError(errno, _("Unable to open %s"), KVM_DEVICE);
+        return -1;
+    }
+
+    if (ioctl(fd, KVM_GET_MSRS, &msr) < 0) {
+        VIR_DEBUG("Cannot get MSR 0x%lx from KVM", index);
+        return 1;
+    }
+
+    *result = msr.entry.data;
+    return 0;
+}
+
+/*
+ * Returns 0 on success,
+ *         1 when the MSR is not supported by the host CPU,
+ *        -1 on error.
+ */
+int
+virHostCPUGetMSR(unsigned long index,
+                 uint64_t *msr)
+{
+    VIR_AUTOCLOSE fd = -1;
+    char ebuf[1024];
+
+    *msr = 0;
+
+    if ((fd = open(MSR_DEVICE, O_RDONLY)) < 0) {
+        VIR_DEBUG("Unable to open %s: %s",
+                  MSR_DEVICE, virStrerror(errno, ebuf, sizeof(ebuf)));
+    } else {
+        int rc = pread(fd, msr, sizeof(*msr), index);
+
+        if (rc == sizeof(*msr))
+            return 0;
+
+        if (rc < 0 && errno == EIO) {
+            VIR_DEBUG("CPU does not support MSR 0x%lx", index);
+            return 1;
+        }
+
+        VIR_DEBUG("Cannot read MSR 0x%lx from %s: %s",
+                  index, MSR_DEVICE, virStrerror(errno, ebuf, sizeof(ebuf)));
+    }
+
+    VIR_DEBUG("Falling back to KVM ioctl");
+
+    return virHostCPUGetMSRFromKVM(index, msr);
+}
+
+#else
+
+int
+virHostCPUGetMSR(unsigned long index ATTRIBUTE_UNUSED,
+                 uint64_t *msr ATTRIBUTE_UNUSED)
+{
+    virReportSystemError(ENOSYS, "%s",
+                         _("Reading MSRs is not supported on this platform"));
+    return -1;
+}
+
+#endif /* HAVE_LINUX_KVM_H && defined(KVM_GET_MSRS) && \
+          (defined(__i386__) || defined(__x86_64__)) && \
+          (defined(__linux__) || defined(__FreeBSD__)) */

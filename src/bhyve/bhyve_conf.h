@@ -19,8 +19,8 @@
  *
  */
 
-#ifndef BHYVE_CONF_H
-# define BHYVE_CONF_H
+#ifndef LIBVIRT_BHYVE_CONF_H
+# define LIBVIRT_BHYVE_CONF_H
 
 # include "bhyve_utils.h"
 
@@ -29,4 +29,13 @@ virBhyveDriverConfigPtr virBhyveDriverGetConfig(bhyveConnPtr driver);
 int virBhyveLoadDriverConfig(virBhyveDriverConfigPtr cfg,
                              const char *filename);
 
-#endif /* BHYVE_CONF_H */
+typedef struct _bhyveDomainCmdlineDef bhyveDomainCmdlineDef;
+typedef bhyveDomainCmdlineDef *bhyveDomainCmdlineDefPtr;
+struct _bhyveDomainCmdlineDef {
+    size_t num_args;
+    char **args;
+};
+
+void bhyveDomainCmdlineDefFree(bhyveDomainCmdlineDefPtr def);
+
+#endif /* LIBVIRT_BHYVE_CONF_H */

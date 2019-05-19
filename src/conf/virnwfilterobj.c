@@ -276,7 +276,7 @@ virNWFilterObjTestUnassignDef(virNWFilterObjPtr obj)
 
     obj->wantRemoved = true;
     /* trigger the update on VMs referencing the filter */
-    if (virNWFilterTriggerVMFilterRebuild() < 0)
+    if (virNWFilterTriggerRebuild() < 0)
         rc = -1;
 
     obj->wantRemoved = false;
@@ -358,7 +358,7 @@ virNWFilterObjListAssignDef(virNWFilterObjListPtr nwfilters,
 
         obj->newDef = def;
         /* trigger the update on VMs referencing the filter */
-        if (virNWFilterTriggerVMFilterRebuild() < 0) {
+        if (virNWFilterTriggerRebuild() < 0) {
             obj->newDef = NULL;
             virNWFilterObjUnlock(obj);
             return NULL;
@@ -547,7 +547,7 @@ virNWFilterObjListLoadAllConfigs(virNWFilterObjListPtr nwfilters,
     while ((ret = virDirRead(dir, &entry, configDir)) > 0) {
         virNWFilterObjPtr obj;
 
-        if (!virFileStripSuffix(entry->d_name, ".xml"))
+        if (!virStringStripSuffix(entry->d_name, ".xml"))
             continue;
 
         obj = virNWFilterObjListLoadConfig(nwfilters, configDir, entry->d_name);

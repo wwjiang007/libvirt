@@ -16,8 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library;  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -27,7 +25,6 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <getopt.h>
-#include <stdlib.h>
 
 
 #include "lock_daemon.h"
@@ -48,6 +45,7 @@
 #include "viruuid.h"
 #include "virstring.h"
 #include "virgettext.h"
+#include "virenum.h"
 
 #include "locking/lock_daemon_dispatch.h"
 #include "locking/lock_protocol.h"
@@ -86,8 +84,9 @@ enum {
     VIR_LOCK_DAEMON_ERR_LAST
 };
 
-VIR_ENUM_DECL(virDaemonErr)
-VIR_ENUM_IMPL(virDaemonErr, VIR_LOCK_DAEMON_ERR_LAST,
+VIR_ENUM_DECL(virDaemonErr);
+VIR_ENUM_IMPL(virDaemonErr,
+              VIR_LOCK_DAEMON_ERR_LAST,
               "Initialization successful",
               "Unable to obtain pidfile",
               "Unable to create rundir",
@@ -97,7 +96,8 @@ VIR_ENUM_IMPL(virDaemonErr, VIR_LOCK_DAEMON_ERR_LAST,
               "Unable to initialize network sockets",
               "Unable to load configuration file",
               "Unable to look for hook scripts",
-              "Unable to re-execute daemon");
+              "Unable to re-execute daemon",
+);
 
 static void *
 virLockDaemonClientNew(virNetServerClientPtr client,
@@ -248,7 +248,6 @@ virLockDaemonNewPostExecRestart(virJSONValuePtr object, bool privileged)
     virJSONValuePtr child;
     virJSONValuePtr lockspaces;
     size_t i;
-    ssize_t n;
     const char *serverNames[] = { "virtlockd" };
 
     if (VIR_ALLOC(lockd) < 0)
@@ -281,13 +280,13 @@ virLockDaemonNewPostExecRestart(virJSONValuePtr object, bool privileged)
         goto error;
     }
 
-    if ((n = virJSONValueArraySize(lockspaces)) < 0) {
+    if (!virJSONValueIsArray(lockspaces)) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Malformed lockspaces data from JSON file"));
+                       _("Malformed lockspaces array"));
         goto error;
     }
 
-    for (i = 0; i < n; i++) {
+    for (i = 0; i < virJSONValueArraySize(lockspaces); i++) {
         virLockSpacePtr lockspace;
 
         child = virJSONValueArrayGet(lockspaces, i);
@@ -620,9 +619,7 @@ virLockDaemonSetupNetworkingSystemD(virNetServerPtr lockSrv, virNetServerPtr adm
         /* Systemd passes FDs, starting immediately after stderr,
          * so the first FD we'll get is '3'. */
         if (!(svc = virNetServerServiceNewFD(3 + i, 0,
-#if WITH_GNUTLS
                                              NULL,
-#endif
                                              false, 0, 1)))
             return -1;
 
@@ -643,9 +640,7 @@ virLockDaemonSetupNetworkingNative(virNetServerPtr srv, const char *sock_path)
     VIR_DEBUG("Setting up networking natively");
 
     if (!(svc = virNetServerServiceNewUNIX(sock_path, 0700, 0, 0,
-#if WITH_GNUTLS
                                            NULL,
-#endif
                                            false, 0, 1)))
         return -1;
 
@@ -738,6 +733,7 @@ virLockDaemonClientFree(void *opaque)
     }
 
     virMutexDestroy(&priv->lock);
+    VIR_FREE(priv->ownerName);
     VIR_FREE(priv);
 }
 
@@ -1286,6 +1282,7 @@ int main(int argc, char **argv) {
                   virGetLastErrorMessage(), remote_config_file);
         exit(EXIT_FAILURE);
     }
+    VIR_FREE(remote_config_file);
 
     if (virLockDaemonSetupLogging(config, privileged, verbose, godaemon) < 0) {
         VIR_ERROR(_("Can't initialize logging"));
@@ -1499,6 +1496,7 @@ int main(int argc, char **argv) {
     VIR_FREE(admin_sock_file);
     VIR_FREE(state_file);
     VIR_FREE(run_dir);
+    virLockDaemonConfigFree(config);
     return ret;
 
  no_memory:

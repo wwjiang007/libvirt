@@ -17,14 +17,13 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Jim Fehlig <jfehlig@novell.com>
  */
 
-#ifndef __BITMAP_H__
-# define __BITMAP_H__
+#ifndef LIBVIRT_VIRBITMAP_H
+# define LIBVIRT_VIRBITMAP_H
 
 # include "internal.h"
+# include "virautoclean.h"
 
 # include <sys/types.h>
 
@@ -155,4 +154,6 @@ void virBitmapSubtract(virBitmapPtr a, virBitmapPtr b)
 
 void virBitmapShrink(virBitmapPtr map, size_t b);
 
-#endif
+VIR_DEFINE_AUTOPTR_FUNC(virBitmap, virBitmapFree);
+
+#endif /* LIBVIRT_VIRBITMAP_H */

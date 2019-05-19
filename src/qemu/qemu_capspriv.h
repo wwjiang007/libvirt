@@ -17,16 +17,14 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Pavel Fedin <p.fedin@samsung.com>
  */
 
-#ifndef __QEMU_CAPSPRIV_H_ALLOW__
+#ifndef LIBVIRT_QEMU_CAPSPRIV_H_ALLOW
 # error "qemu_capspriv.h may only be included by qemu_capabilities.c or test suites"
-#endif
+#endif /* LIBVIRT_QEMU_CAPSPRIV_H_ALLOW */
 
-#ifndef __QEMU_CAPSPRIV_H__
-# define __QEMU_CAPSPRIV_H__
+#ifndef LIBVIRT_QEMU_CAPSPRIV_H
+# define LIBVIRT_QEMU_CAPSPRIV_H
 
 virQEMUCapsPtr virQEMUCapsNewCopy(virQEMUCapsPtr qemuCaps);
 
@@ -70,10 +68,18 @@ virQEMUCapsInitCPUModel(virQEMUCapsPtr qemuCaps,
 void
 virQEMUCapsInitQMPBasicArch(virQEMUCapsPtr qemuCaps);
 
+qemuMonitorCPUModelInfoPtr
+virQEMUCapsGetCPUModelInfo(virQEMUCapsPtr qemuCaps,
+                           virDomainVirtType type);
+
 void
 virQEMUCapsSetCPUModelInfo(virQEMUCapsPtr qemuCaps,
                            virDomainVirtType type,
                            qemuMonitorCPUModelInfoPtr modelInfo);
+
+virCPUDataPtr
+virQEMUCapsGetCPUModelX86Data(qemuMonitorCPUModelInfoPtr model,
+                              bool migratable);
 
 virCPUDefPtr
 virQEMUCapsProbeHostCPUForEmulator(virArch hostArch,
@@ -85,6 +91,10 @@ virQEMUCapsSetGICCapabilities(virQEMUCapsPtr qemuCaps,
                               virGICCapability *capabilities,
                               size_t ncapabilities);
 
+void
+virQEMUCapsSetSEVCapabilities(virQEMUCapsPtr qemuCaps,
+                              virSEVCapability *capabilities);
+
 int
 virQEMUCapsProbeQMPCPUDefinitions(virQEMUCapsPtr qemuCaps,
                                   qemuMonitorPtr mon,
@@ -93,4 +103,8 @@ virQEMUCapsProbeQMPCPUDefinitions(virQEMUCapsPtr qemuCaps,
 void
 virQEMUCapsSetMicrocodeVersion(virQEMUCapsPtr qemuCaps,
                                unsigned int microcodeVersion);
-#endif
+
+void
+virQEMUCapsStripMachineAliases(virQEMUCapsPtr qemuCaps);
+
+#endif /* LIBVIRT_QEMU_CAPSPRIV_H */

@@ -15,8 +15,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library;  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Cedric Bosdonnat <cbosdonnat@suse.com>
  */
 
 #include <config.h>
@@ -835,7 +833,7 @@ timeout(int id ATTRIBUTE_UNUSED, void *opaque ATTRIBUTE_UNUSED)
 static int
 mymain(void)
 {
-    objecteventTest test;
+    objecteventTest test = { 0 };
     int ret = EXIT_SUCCESS;
     int timer;
 

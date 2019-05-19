@@ -4,7 +4,7 @@
  * Description: Provides the interfaces of the libvirt library to handle
  *              errors raised while using the library.
  *
- * Copyright (C) 2006-2016 Red Hat, Inc.
+ * Copyright (C) 2006-2019 Red Hat, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,12 +19,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel Veillard <veillard@redhat.com>
  */
 
-#ifndef __VIR_VIRERR_H__
-# define __VIR_VIRERR_H__
+#ifndef LIBVIRT_VIRTERROR_H
+# define LIBVIRT_VIRTERROR_H
 
 # include <libvirt/libvirt.h>
 
@@ -76,7 +74,7 @@ typedef enum {
     VIR_FROM_NETWORK = 19,      /* Error from network config */
 
     VIR_FROM_DOMAIN = 20,       /* Error from domain config */
-    VIR_FROM_UML = 21,          /* Error at the UML driver */
+    VIR_FROM_UML = 21,          /* Error at the UML driver; unused since 5.0.0 */
     VIR_FROM_NODEDEV = 22,      /* Error from node device monitor */
     VIR_FROM_XEN_INOTIFY = 23,  /* Error from xen inotify layer */
     VIR_FROM_SECURITY = 24,     /* Error from security framework */
@@ -133,6 +131,8 @@ typedef enum {
     VIR_FROM_PERF = 65,         /* Error from perf */
     VIR_FROM_LIBSSH = 66,       /* Error from libssh connection transport */
     VIR_FROM_RESCTRL = 67,      /* Error from resource control */
+    VIR_FROM_FIREWALLD = 68,    /* Error from firewalld */
+    VIR_FROM_DOMAIN_CHECKPOINT = 69, /* Error from domain checkpoint */
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_ERR_DOMAIN_LAST
@@ -321,6 +321,15 @@ typedef enum {
                                            to guest-sync command (DEPRECATED)*/
     VIR_ERR_LIBSSH = 98,                /* error in libssh transport driver */
     VIR_ERR_DEVICE_MISSING = 99,        /* fail to find the desired device */
+    VIR_ERR_INVALID_NWFILTER_BINDING = 100,  /* invalid nwfilter binding */
+    VIR_ERR_NO_NWFILTER_BINDING = 101,  /* no nwfilter binding */
+    VIR_ERR_INVALID_DOMAIN_CHECKPOINT = 102, /* invalid domain checkpoint */
+    VIR_ERR_NO_DOMAIN_CHECKPOINT = 103, /* domain checkpoint not found */
+    VIR_ERR_NO_DOMAIN_BACKUP = 104,     /* domain backup job id not found */
+
+# ifdef VIR_ENUM_SENTINELS
+    VIR_ERR_NUMBER_LAST
+# endif
 } virErrorNumber;
 
 /**
@@ -344,6 +353,8 @@ void                    virResetLastError       (void);
 void                    virResetError           (virErrorPtr err);
 void                    virFreeError            (virErrorPtr err);
 
+int                     virGetLastErrorCode     (void);
+int                     virGetLastErrorDomain   (void);
 const char *            virGetLastErrorMessage  (void);
 
 virErrorPtr             virConnGetLastError     (virConnectPtr conn);
@@ -362,4 +373,4 @@ int                     virConnCopyLastError    (virConnectPtr conn,
 }
 # endif
 
-#endif /* __VIR_VIRERR_H__ */
+#endif /* LIBVIRT_VIRTERROR_H */

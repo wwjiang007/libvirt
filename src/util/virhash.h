@@ -5,16 +5,13 @@
  *
  * Copyright (C) 2005-2014 Red Hat, Inc.
  * Copyright (C) 2000 Bjorn Reese and Daniel Veillard.
- *
- * Author: Bjorn Reese <bjorn.reese@systematic.dk>
- *         Daniel Veillard <veillard@redhat.com>
  */
 
-#ifndef __VIR_HASH_H__
-# define __VIR_HASH_H__
+#ifndef LIBVIRT_VIRHASH_H
+# define LIBVIRT_VIRHASH_H
 
-# include <stdint.h>
-# include <stdbool.h>
+
+# include "virautoclean.h"
 
 /*
  * The hash table.
@@ -200,4 +197,6 @@ void *virHashSearch(const virHashTable *table, virHashSearcher iter,
 /* Convenience for when VIR_FREE(value) is sufficient as a data freer.  */
 void virHashValueFree(void *value, const void *name);
 
-#endif                          /* ! __VIR_HASH_H__ */
+VIR_DEFINE_AUTOPTR_FUNC(virHashTable, virHashFree);
+
+#endif /* LIBVIRT_VIRHASH_H */

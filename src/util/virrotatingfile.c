@@ -406,8 +406,7 @@ virRotatingFileWriterRollover(virRotatingFileWriterPtr file)
             }
 
             VIR_FREE(nextpath);
-            nextpath = thispath;
-            thispath = NULL;
+            VIR_STEAL_PTR(nextpath, thispath);
         }
     }
 
@@ -484,7 +483,7 @@ virRotatingFileWriterAppend(virRotatingFileWriterPtr file,
         if ((file->entry->pos == file->maxlen && len) ||
             forceRollover) {
             virRotatingFileWriterEntryPtr tmp;
-            VIR_DEBUG("Hit max size %zu on %s (force=%d)\n",
+            VIR_DEBUG("Hit max size %zu on %s (force=%d)",
                       file->maxlen, file->basepath, forceRollover);
 
             if (virRotatingFileWriterRollover(file) < 0)
@@ -571,7 +570,7 @@ virRotatingFileReaderConsume(virRotatingFileReaderPtr file,
 {
     ssize_t ret = 0;
 
-    VIR_DEBUG("Consume %p %zu\n", buf, len);
+    VIR_DEBUG("Consume %p %zu", buf, len);
     while (len) {
         virRotatingFileReaderEntryPtr entry;
         ssize_t got;

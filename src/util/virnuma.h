@@ -19,15 +19,15 @@
  *
  */
 
-#ifndef __VIR_NUMA_H__
-# define __VIR_NUMA_H__
+#ifndef LIBVIRT_VIRNUMA_H
+# define LIBVIRT_VIRNUMA_H
 
 # include "internal.h"
 # include "virbitmap.h"
 # include "virutil.h"
 
 
-char *virNumaGetAutoPlacementAdvice(unsigned short vcups,
+char *virNumaGetAutoPlacementAdvice(unsigned short vcpus,
                                     unsigned long long balloon);
 
 int virNumaSetupMemoryPolicy(virDomainNumatuneMemMode mode,
@@ -52,16 +52,16 @@ int virNumaGetNodeCPUs(int node, virBitmapPtr *cpus) ATTRIBUTE_NOINLINE;
 int virNumaGetPageInfo(int node,
                        unsigned int page_size,
                        unsigned long long huge_page_sum,
-                       unsigned int *page_avail,
-                       unsigned int *page_free);
+                       unsigned long long *page_avail,
+                       unsigned long long *page_free);
 int virNumaGetPages(int node,
                     unsigned int **pages_size,
-                    unsigned int **pages_avail,
-                    unsigned int **pages_free,
+                    unsigned long long **pages_avail,
+                    unsigned long long **pages_free,
                     size_t *npages)
     ATTRIBUTE_NONNULL(5) ATTRIBUTE_NOINLINE;
 int virNumaSetPagePoolSize(int node,
                            unsigned int page_size,
                            unsigned long long page_count,
                            bool add);
-#endif /* __VIR_NUMA_H__ */
+#endif /* LIBVIRT_VIRNUMA_H */

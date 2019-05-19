@@ -17,12 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author:
- *   Jamie Strandboge <jamie@canonical.com>
- *   Based on security_selinux.c by James Morris <jmorris@namei.org>
- *
- * AppArmor security driver.
  */
 
 #include <config.h>
@@ -31,7 +25,6 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <sys/apparmor.h>
-#include <errno.h>
 #include <unistd.h>
 #include <wait.h>
 
@@ -170,7 +163,7 @@ profile_status_file(const char *str)
  * load (add) a profile. Will create one if necessary
  */
 static int
-load_profile(virSecurityManagerPtr mgr,
+load_profile(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
              const char *profile,
              virDomainDefPtr def,
              const char *fn,
@@ -180,8 +173,6 @@ load_profile(virSecurityManagerPtr mgr,
     bool create = true;
     char *xml = NULL;
     virCommandPtr cmd = NULL;
-    const char *probe = virSecurityManagerGetAllowDiskFormatProbing(mgr)
-        ? "1" : "0";
 
     xml = virDomainDefFormat(def, NULL, VIR_DOMAIN_DEF_FORMAT_SECURE);
     if (!xml)
@@ -190,7 +181,7 @@ load_profile(virSecurityManagerPtr mgr,
     if (profile_status_file(profile) >= 0)
         create = false;
 
-    cmd = virCommandNewArgList(VIRT_AA_HELPER, "-p", probe,
+    cmd = virCommandNewArgList(VIRT_AA_HELPER,
                                create ? "-c" : "-r",
                                "-u", profile, NULL);
     if (!create && fn) {
@@ -266,10 +257,16 @@ use_apparmor(void)
     if (access(APPARMOR_PROFILES_PATH, R_OK) != 0)
         goto cleanup;
 
+    /* First check profile status using full binary path. If that fails
+     * check using profile name.
+     */
     rc = profile_status(libvirt_daemon, 1);
-    /* Error or unconfined should all result in -1*/
-    if (rc < 0)
-        rc = -1;
+    if (rc < 0) {
+        rc = profile_status("libvirtd", 1);
+        /* Error or unconfined should all result in -1*/
+        if (rc < 0)
+            rc = -1;
+    }
 
  cleanup:
     VIR_FREE(libvirt_daemon);
@@ -532,7 +529,7 @@ AppArmorGetSecurityProcessLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
     }
 
     if (virStrcpy(sec->label, profile_name,
-        VIR_SECURITY_LABEL_BUFLEN) == NULL) {
+        VIR_SECURITY_LABEL_BUFLEN) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "%s", _("error copying profile name"));
         goto cleanup;
@@ -663,7 +660,7 @@ AppArmorSetSecurityChildProcessLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
     if ((profile_name = get_profile_name(def)) == NULL)
         goto cleanup;
 
-    cmd_str = virCommandToString(cmd);
+    cmd_str = virCommandToString(cmd, false);
     VIR_DEBUG("Changing AppArmor profile to %s on %s", profile_name, cmd_str);
     virCommandSetAppArmorProfile(cmd, profile_name);
     rc = 0;
@@ -700,7 +697,8 @@ AppArmorClearSecuritySocketLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
 static int
 AppArmorRestoreSecurityImageLabel(virSecurityManagerPtr mgr,
                                   virDomainDefPtr def,
-                                  virStorageSourcePtr src)
+                                  virStorageSourcePtr src,
+                                  virSecurityDomainImageLabelFlags flags ATTRIBUTE_UNUSED)
 {
     if (!virStorageSourceIsLocalStorage(src))
         return 0;
@@ -708,13 +706,6 @@ AppArmorRestoreSecurityImageLabel(virSecurityManagerPtr mgr,
     return reload_profile(mgr, def, NULL, false);
 }
 
-static int
-AppArmorRestoreSecurityDiskLabel(virSecurityManagerPtr mgr,
-                                 virDomainDefPtr def,
-                                 virDomainDiskDefPtr disk)
-{
-    return AppArmorRestoreSecurityImageLabel(mgr, def, disk->src);
-}
 
 /* Called when hotplugging */
 static int
@@ -768,7 +759,7 @@ AppArmorSetInputLabel(virSecurityManagerPtr mgr,
     if (input == NULL)
         return 0;
 
-    switch ((virDomainInputType) input->type) {
+    switch ((virDomainInputType)input->type) {
     case VIR_DOMAIN_INPUT_TYPE_PASSTHROUGH:
         if (input->source.evdev == NULL) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -808,7 +799,8 @@ AppArmorRestoreInputLabel(virSecurityManagerPtr mgr,
 static int
 AppArmorSetSecurityImageLabel(virSecurityManagerPtr mgr,
                               virDomainDefPtr def,
-                              virStorageSourcePtr src)
+                              virStorageSourcePtr src,
+                              virSecurityDomainImageLabelFlags flags ATTRIBUTE_UNUSED)
 {
     int rc = -1;
     char *profile_name = NULL;
@@ -851,14 +843,6 @@ AppArmorSetSecurityImageLabel(virSecurityManagerPtr mgr,
     VIR_FREE(profile_name);
 
     return rc;
-}
-
-static int
-AppArmorSetSecurityDiskLabel(virSecurityManagerPtr mgr,
-                             virDomainDefPtr def,
-                             virDomainDiskDefPtr disk)
-{
-    return AppArmorSetSecurityImageLabel(mgr, def, disk->src);
 }
 
 static int
@@ -928,7 +912,7 @@ AppArmorSetSecurityHostdevLabel(virSecurityManagerPtr mgr,
     ptr->mgr = mgr;
     ptr->def = def;
 
-    switch ((virDomainHostdevSubsysType) dev->source.subsys.type) {
+    switch ((virDomainHostdevSubsysType)dev->source.subsys.type) {
     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB: {
         virUSBDevicePtr usb =
             virUSBDeviceNew(usbsrc->bus, usbsrc->device, vroot);
@@ -1047,7 +1031,7 @@ AppArmorSetChardevLabel(virSecurityManagerPtr mgr,
     if (!secdef)
         return 0;
 
-    switch ((virDomainChrType) dev_source->type) {
+    switch ((virDomainChrType)dev_source->type) {
     case VIR_DOMAIN_CHR_TYPE_DEV:
     case VIR_DOMAIN_CHR_TYPE_FILE:
     case VIR_DOMAIN_CHR_TYPE_UNIX:
@@ -1196,9 +1180,6 @@ virSecurityDriver virAppArmorSecurityDriver = {
     .getDOI                             = AppArmorSecurityManagerGetDOI,
 
     .domainSecurityVerify               = AppArmorSecurityVerify,
-
-    .domainSetSecurityDiskLabel         = AppArmorSetSecurityDiskLabel,
-    .domainRestoreSecurityDiskLabel     = AppArmorRestoreSecurityDiskLabel,
 
     .domainSetSecurityImageLabel        = AppArmorSetSecurityImageLabel,
     .domainRestoreSecurityImageLabel    = AppArmorRestoreSecurityImageLabel,

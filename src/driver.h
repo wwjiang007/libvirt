@@ -19,8 +19,8 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_DRIVER_H__
-# define __VIR_DRIVER_H__
+#ifndef LIBVIRT_DRIVER_H
+# define LIBVIRT_DRIVER_H
 
 # include <unistd.h>
 
@@ -81,10 +81,12 @@ typedef virConnectDriver *virConnectDriverPtr;
 struct _virConnectDriver {
     /* Wether driver permits a server in the URI */
     bool localOnly;
+    /* Wether driver needs a server in the URI */
+    bool remoteOnly;
     /*
      * NULL terminated list of supported URI schemes.
      *  - Single element { NULL } list indicates no supported schemes
-     *  - NULL list indicates wildcard supportnig all schemes
+     *  - NULL list indicates wildcard supporting all schemes
      */
     const char **uriSchemes;
     virHypervisorDriverPtr hypervisorDriver;
@@ -108,10 +110,8 @@ int virSetSharedSecretDriver(virSecretDriverPtr driver) ATTRIBUTE_RETURN_CHECK;
 int virSetSharedStorageDriver(virStorageDriverPtr driver) ATTRIBUTE_RETURN_CHECK;
 
 int virDriverLoadModule(const char *name,
-                        const char *regfunc);
-int virDriverLoadModuleFull(const char *name,
-                            const char *regfunc,
-                            void **handle);
+                        const char *regfunc,
+                        bool required);
 
 virConnectPtr virGetConnectInterface(void);
 virConnectPtr virGetConnectNetwork(void);
@@ -127,4 +127,4 @@ int virSetConnectNodeDev(virConnectPtr conn);
 int virSetConnectSecret(virConnectPtr conn);
 int virSetConnectStorage(virConnectPtr conn);
 
-#endif /* __VIR_DRIVER_H__ */
+#endif /* LIBVIRT_DRIVER_H */

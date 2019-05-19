@@ -2,7 +2,7 @@
  * nwfilter_conf.h: network filter XML processing
  *                  (derived from storage_conf.h)
  *
- * Copyright (C) 2006-2010, 2012-2014 Red Hat, Inc.
+ * Copyright (C) 2006-2010, 2012-2018 Red Hat, Inc.
  * Copyright (C) 2006-2008 Daniel P. Berrange
  *
  * Copyright (C) 2010 IBM Corporation
@@ -20,11 +20,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Stefan Berger <stefanb@us.ibm.com>
  */
-#ifndef NWFILTER_CONF_H
-# define NWFILTER_CONF_H
+
+#ifndef LIBVIRT_NWFILTER_CONF_H
+# define LIBVIRT_NWFILTER_CONF_H
 
 # include "internal.h"
 
@@ -34,6 +33,7 @@
 # include "virsocketaddr.h"
 # include "virmacaddr.h"
 # include "virdomainobjlist.h"
+# include "virenum.h"
 
 /* XXX
  * The config parser/structs should not be using platform specific
@@ -501,7 +501,7 @@ typedef struct _virNWFilterIncludeDef virNWFilterIncludeDef;
 typedef virNWFilterIncludeDef *virNWFilterIncludeDefPtr;
 struct _virNWFilterIncludeDef {
     char *filterref;
-    virNWFilterHashTablePtr params;
+    virHashTablePtr params;
 };
 
 
@@ -546,20 +546,6 @@ struct _virNWFilterDef {
 };
 
 
-typedef enum {
-    STEP_APPLY_NEW,
-    STEP_TEAR_NEW,
-    STEP_TEAR_OLD,
-    STEP_APPLY_CURRENT,
-} UpdateStep;
-
-struct domUpdateCBStruct {
-    void *opaque;
-    UpdateStep step;
-    virHashTablePtr skipInterfaces;
-};
-
-
 void
 virNWFilterRuleDefFree(virNWFilterRuleDefPtr def);
 
@@ -567,7 +553,7 @@ void
 virNWFilterDefFree(virNWFilterDefPtr def);
 
 int
-virNWFilterTriggerVMFilterRebuild(void);
+virNWFilterTriggerRebuild(void);
 
 int
 virNWFilterDeleteDef(const char *configDir,
@@ -599,44 +585,15 @@ virNWFilterReadLockFilterUpdates(void);
 void
 virNWFilterUnlockFilterUpdates(void);
 
+typedef int (*virNWFilterTriggerRebuildCallback)(void *opaque);
+
 int
-virNWFilterConfLayerInit(virDomainObjListIterator domUpdateCB,
+virNWFilterConfLayerInit(virNWFilterTriggerRebuildCallback cb,
                          void *opaque);
 
 void
 virNWFilterConfLayerShutdown(void);
 
-int
-virNWFilterInstFiltersOnAllVMs(void);
-
-typedef int
-(*virNWFilterRebuild)(virDomainObjListIterator domUpdateCB,
-                      void *data);
-
-typedef void
-(*virNWFilterVoidCall)(void);
-
-typedef struct _virNWFilterCallbackDriver virNWFilterCallbackDriver;
-typedef virNWFilterCallbackDriver *virNWFilterCallbackDriverPtr;
-struct _virNWFilterCallbackDriver {
-    const char *name;
-
-    virNWFilterRebuild vmFilterRebuild;
-    virNWFilterVoidCall vmDriverLock;
-    virNWFilterVoidCall vmDriverUnlock;
-};
-
-void
-virNWFilterRegisterCallbackDriver(virNWFilterCallbackDriverPtr);
-
-void
-virNWFilterUnRegisterCallbackDriver(virNWFilterCallbackDriverPtr);
-
-void
-virNWFilterCallbackDriversLock(void);
-
-void
-virNWFilterCallbackDriversUnlock(void);
 
 char *
 virNWFilterPrintTCPFlags(uint8_t flags);
@@ -650,6 +607,7 @@ virNWFilterRuleIsProtocolIPv6(virNWFilterRuleDefPtr rule);
 bool
 virNWFilterRuleIsProtocolEthernet(virNWFilterRuleDefPtr rule);
 
+
 VIR_ENUM_DECL(virNWFilterRuleAction);
 VIR_ENUM_DECL(virNWFilterRuleDirection);
 VIR_ENUM_DECL(virNWFilterRuleProtocol);
@@ -658,4 +616,4 @@ VIR_ENUM_DECL(virNWFilterChainPolicy);
 VIR_ENUM_DECL(virNWFilterEbtablesTable);
 VIR_ENUM_DECL(virNWFilterChainSuffix);
 
-#endif /* NWFILTER_CONF_H */
+#endif /* LIBVIRT_NWFILTER_CONF_H */

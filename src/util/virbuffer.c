@@ -16,35 +16,19 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Daniel Veillard <veillard@redhat.com>
  */
 
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <stdarg.h>
 #include "c-ctype.h"
 
-#define __VIR_BUFFER_C__
-
 #include "virbuffer.h"
-#include "viralloc.h"
 #include "virerror.h"
 #include "virstring.h"
+#include "viralloc.h"
 
-
-/* If adding more fields, ensure to edit buf.h to match
-   the number of fields */
-struct _virBuffer {
-    unsigned int size;
-    unsigned int use;
-    unsigned int error; /* errno value, or -1 for usage error */
-    int indent;
-    char *content;
-};
+#define VIR_FROM_THIS VIR_FROM_NONE
 
 /**
  * virBufferFail
@@ -213,7 +197,7 @@ virBufferAddBuffer(virBufferPtr buf, virBufferPtr toadd)
 
     if (buf->error || toadd->error) {
         if (!buf->error)
-            buf->error = toadd->error;
+            virBufferSetError(buf, toadd->error);
         goto done;
     }
 
@@ -297,9 +281,8 @@ virBufferContentAndReset(virBufferPtr buf)
  */
 void virBufferFreeAndReset(virBufferPtr buf)
 {
-    char *str = virBufferContentAndReset(buf);
-
-    VIR_FREE(str);
+    if (buf)
+        virBufferSetError(buf, 0);
 }
 
 /**
@@ -356,7 +339,7 @@ virBufferCheckErrorInternal(const virBuffer *buf,
  *
  * Return the string usage in bytes
  */
-unsigned int
+size_t
 virBufferUse(const virBuffer *buf)
 {
     if (buf == NULL)
@@ -456,7 +439,8 @@ void
 virBufferEscapeString(virBufferPtr buf, const char *format, const char *str)
 {
     int len;
-    char *escaped, *out;
+    VIR_AUTOFREE(char *) escaped = NULL;
+    char *out;
     const char *cur;
     const char forbidden_characters[] = {
         0x01,   0x02,   0x03,   0x04,   0x05,   0x06,   0x07,   0x08,
@@ -533,7 +517,6 @@ virBufferEscapeString(virBufferPtr buf, const char *format, const char *str)
     *out = 0;
 
     virBufferAsprintf(buf, format, escaped);
-    VIR_FREE(escaped);
 }
 
 /**
@@ -612,7 +595,8 @@ virBufferEscape(virBufferPtr buf, char escape, const char *toescape,
                 const char *format, const char *str)
 {
     int len;
-    char *escaped, *out;
+    VIR_AUTOFREE(char *) escaped = NULL;
+    char *out;
     const char *cur;
 
     if ((format == NULL) || (buf == NULL) || (str == NULL))
@@ -644,101 +628,6 @@ virBufferEscape(virBufferPtr buf, char escape, const char *toescape,
     *out = 0;
 
     virBufferAsprintf(buf, format, escaped);
-    VIR_FREE(escaped);
-}
-
-
-struct _virBufferEscapePair {
-    char escape;
-    char *toescape;
-};
-
-
-/**
- * virBufferEscapeN:
- * @buf: the buffer to append to
- * @format: a printf like format string but with only one %s parameter
- * @str: the string argument which needs to be escaped
- * @...: the variable list of escape pairs
- *
- * The variable list of arguments @... must be composed of
- * 'char escape, char *toescape' pairs followed by NULL.
- *
- * This has the same functionality as virBufferEscape with the extension
- * that allows to specify multiple pairs of chars that needs to be escaped.
- */
-void
-virBufferEscapeN(virBufferPtr buf,
-                 const char *format,
-                 const char *str,
-                 ...)
-{
-    int len;
-    size_t i;
-    char *escaped = NULL;
-    char *out;
-    const char *cur;
-    struct _virBufferEscapePair escapeItem;
-    struct _virBufferEscapePair *escapeList = NULL;
-    size_t nescapeList = 0;
-    va_list ap;
-
-    if ((format == NULL) || (buf == NULL) || (str == NULL))
-        return;
-
-    if (buf->error)
-        return;
-
-    len = strlen(str);
-
-    va_start(ap, str);
-
-    while ((escapeItem.escape = va_arg(ap, int))) {
-        if (!(escapeItem.toescape = va_arg(ap, char *))) {
-            virBufferSetError(buf, errno);
-            goto cleanup;
-        }
-
-        if (strcspn(str, escapeItem.toescape) == len)
-            continue;
-
-        if (VIR_APPEND_ELEMENT_QUIET(escapeList, nescapeList, escapeItem) < 0) {
-            virBufferSetError(buf, errno);
-            goto cleanup;
-        }
-    }
-
-    if (nescapeList == 0) {
-        virBufferAsprintf(buf, format, str);
-        goto cleanup;
-    }
-
-    if (xalloc_oversized(2, len) ||
-        VIR_ALLOC_N_QUIET(escaped, 2 * len + 1) < 0) {
-        virBufferSetError(buf, errno);
-        goto cleanup;
-    }
-
-    cur = str;
-    out = escaped;
-    while (*cur != 0) {
-        for (i = 0; i < nescapeList; i++) {
-            if (strchr(escapeList[i].toescape, *cur)) {
-                *out++ = escapeList[i].escape;
-                break;
-            }
-        }
-        *out++ = *cur;
-        cur++;
-    }
-    *out = 0;
-
-    virBufferAsprintf(buf, format, escaped);
-
- cleanup:
-    va_end(ap);
-    VIR_FREE(escapeList);
-    VIR_FREE(escaped);
 }
 
 
@@ -803,7 +692,8 @@ void
 virBufferEscapeShell(virBufferPtr buf, const char *str)
 {
     int len;
-    char *escaped, *out;
+    VIR_AUTOFREE(char *) escaped = NULL;
+    char *out;
     const char *cur;
 
     if ((buf == NULL) || (str == NULL))
@@ -847,7 +737,6 @@ virBufferEscapeShell(virBufferPtr buf, const char *str)
     *out = 0;
 
     virBufferAdd(buf, escaped, -1);
-    VIR_FREE(escaped);
 }
 
 /**

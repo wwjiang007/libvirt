@@ -17,8 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel Veillard <veillard@redhat.com>
  */
 
 #include <config.h>
@@ -27,8 +25,6 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <stdlib.h>
-#include <stdio.h>
 
 #include "virerror.h"
 #include "virhook.h"
@@ -45,13 +41,13 @@ VIR_LOG_INIT("util.hook");
 
 #define LIBVIRT_HOOK_DIR SYSCONFDIR "/libvirt/hooks"
 
-VIR_ENUM_DECL(virHookDriver)
-VIR_ENUM_DECL(virHookDaemonOp)
-VIR_ENUM_DECL(virHookSubop)
-VIR_ENUM_DECL(virHookQemuOp)
-VIR_ENUM_DECL(virHookLxcOp)
-VIR_ENUM_DECL(virHookNetworkOp)
-VIR_ENUM_DECL(virHookLibxlOp)
+VIR_ENUM_DECL(virHookDriver);
+VIR_ENUM_DECL(virHookDaemonOp);
+VIR_ENUM_DECL(virHookSubop);
+VIR_ENUM_DECL(virHookQemuOp);
+VIR_ENUM_DECL(virHookLxcOp);
+VIR_ENUM_DECL(virHookNetworkOp);
+VIR_ENUM_DECL(virHookLibxlOp);
 
 VIR_ENUM_IMPL(virHookDriver,
               VIR_HOOK_DRIVER_LAST,
@@ -59,19 +55,25 @@ VIR_ENUM_IMPL(virHookDriver,
               "qemu",
               "lxc",
               "network",
-              "libxl")
+              "libxl",
+);
 
-VIR_ENUM_IMPL(virHookDaemonOp, VIR_HOOK_DAEMON_OP_LAST,
+VIR_ENUM_IMPL(virHookDaemonOp,
+              VIR_HOOK_DAEMON_OP_LAST,
               "start",
               "shutdown",
-              "reload")
+              "reload",
+);
 
-VIR_ENUM_IMPL(virHookSubop, VIR_HOOK_SUBOP_LAST,
+VIR_ENUM_IMPL(virHookSubop,
+              VIR_HOOK_SUBOP_LAST,
               "-",
               "begin",
-              "end")
+              "end",
+);
 
-VIR_ENUM_IMPL(virHookQemuOp, VIR_HOOK_QEMU_OP_LAST,
+VIR_ENUM_IMPL(virHookQemuOp,
+              VIR_HOOK_QEMU_OP_LAST,
               "start",
               "stopped",
               "prepare",
@@ -80,32 +82,39 @@ VIR_ENUM_IMPL(virHookQemuOp, VIR_HOOK_QEMU_OP_LAST,
               "started",
               "reconnect",
               "attach",
-              "restore")
+              "restore",
+);
 
-VIR_ENUM_IMPL(virHookLxcOp, VIR_HOOK_LXC_OP_LAST,
+VIR_ENUM_IMPL(virHookLxcOp,
+              VIR_HOOK_LXC_OP_LAST,
               "start",
               "stopped",
               "prepare",
               "release",
               "started",
-              "reconnect")
+              "reconnect",
+);
 
-VIR_ENUM_IMPL(virHookNetworkOp, VIR_HOOK_NETWORK_OP_LAST,
+VIR_ENUM_IMPL(virHookNetworkOp,
+              VIR_HOOK_NETWORK_OP_LAST,
               "start",
               "started",
               "stopped",
               "plugged",
               "unplugged",
-              "updated")
+              "updated",
+);
 
-VIR_ENUM_IMPL(virHookLibxlOp, VIR_HOOK_LIBXL_OP_LAST,
+VIR_ENUM_IMPL(virHookLibxlOp,
+              VIR_HOOK_LIBXL_OP_LAST,
               "start",
               "stopped",
               "prepare",
               "release",
               "migrate",
               "started",
-              "reconnect")
+              "reconnect",
+);
 
 static int virHooksFound = -1;
 
@@ -122,8 +131,7 @@ static int virHooksFound = -1;
 static int
 virHookCheck(int no, const char *driver)
 {
-    char *path;
-    int ret;
+    VIR_AUTOFREE(char *) path = NULL;
 
     if (driver == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -139,18 +147,17 @@ virHookCheck(int no, const char *driver)
     }
 
     if (!virFileExists(path)) {
-        ret = 0;
         VIR_DEBUG("No hook script %s", path);
-    } else if (!virFileIsExecutable(path)) {
-        ret = 0;
-        VIR_WARN("Non-executable hook script %s", path);
-    } else {
-        ret = 1;
-        VIR_DEBUG("Found hook script %s", path);
+        return 0;
     }
 
-    VIR_FREE(path);
-    return ret;
+    if (!virFileIsExecutable(path)) {
+        VIR_WARN("Non-executable hook script %s", path);
+        return 0;
+    }
+
+    VIR_DEBUG("Found hook script %s", path);
+    return 1;
 }
 
 /*
@@ -233,8 +240,8 @@ virHookCall(int driver,
             char **output)
 {
     int ret;
-    char *path;
-    virCommandPtr cmd;
+    VIR_AUTOFREE(char *) path = NULL;
+    VIR_AUTOPTR(virCommand) cmd = NULL;
     const char *drvstr;
     const char *opstr;
     const char *subopstr;
@@ -253,7 +260,7 @@ virHookCall(int driver,
     if ((virHooksFound == -1) ||
         ((driver == VIR_HOOK_DRIVER_DAEMON) &&
          (op == VIR_HOOK_DAEMON_OP_RELOAD ||
-         op == VIR_HOOK_DAEMON_OP_SHUTDOWN)))
+          op == VIR_HOOK_DAEMON_OP_SHUTDOWN)))
         virHookInitialize();
 
     if ((virHooksFound & (1 << driver)) == 0)
@@ -315,10 +322,6 @@ virHookCall(int driver,
         virReportError(VIR_ERR_HOOK_SCRIPT_FAILED, "%s",
                        virGetLastErrorMessage());
     }
-
-    virCommandFree(cmd);
-
-    VIR_FREE(path);
 
     return ret;
 }

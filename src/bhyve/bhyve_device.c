@@ -16,8 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Roman Bogorodskiy
  */
 
 #include <config.h>
@@ -71,7 +69,8 @@ bhyveDomainPCIAddressSetCreate(virDomainDefPtr def, unsigned int nbuses)
 {
     virDomainPCIAddressSetPtr addrs;
 
-    if ((addrs = virDomainPCIAddressSetAlloc(nbuses)) == NULL)
+    if ((addrs = virDomainPCIAddressSetAlloc(nbuses,
+                                             VIR_PCI_ADDRESS_EXTENSION_NONE)) == NULL)
         return NULL;
 
     if (virDomainPCIAddressBusSetModel(&addrs->buses[0],
@@ -110,7 +109,7 @@ bhyveAssignDevicePCISlots(virDomainDefPtr def,
             ((def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_USB) &&
              (def->controllers[i]->model == VIR_DOMAIN_CONTROLLER_MODEL_USB_NEC_XHCI))) {
             if (def->controllers[i]->model == VIR_DOMAIN_CONTROLLER_MODEL_PCI_ROOT ||
-                !virDeviceInfoPCIAddressWanted(&def->controllers[i]->info))
+                !virDeviceInfoPCIAddressIsWanted(&def->controllers[i]->info))
                 continue;
 
             if (virDomainPCIAddressReserveNextAddr(addrs,
@@ -122,7 +121,7 @@ bhyveAssignDevicePCISlots(virDomainDefPtr def,
     }
 
     for (i = 0; i < def->nnets; i++) {
-        if (!virDeviceInfoPCIAddressWanted(&def->nets[i]->info))
+        if (!virDeviceInfoPCIAddressIsWanted(&def->nets[i]->info))
             continue;
         if (virDomainPCIAddressReserveNextAddr(addrs,
                                                &def->nets[i]->info,
@@ -148,7 +147,7 @@ bhyveAssignDevicePCISlots(virDomainDefPtr def,
     }
 
     for (i = 0; i < def->nvideos; i++) {
-        if (!virDeviceInfoPCIAddressWanted(&def->videos[i]->info))
+        if (!virDeviceInfoPCIAddressIsWanted(&def->videos[i]->info))
             continue;
         if (virDomainPCIAddressReserveNextAddr(addrs,
                                                &def->videos[i]->info,

@@ -20,6 +20,7 @@
 #include <config.h>
 
 #include "testutils.h"
+
 #include "virfile.h"
 #include "virfilecache.h"
 
@@ -56,7 +57,7 @@ testFileCacheObjOnceInit(void)
 }
 
 
-VIR_ONCE_GLOBAL_INIT(testFileCacheObj)
+VIR_ONCE_GLOBAL_INIT(testFileCacheObj);
 
 
 static testFileCacheObjPtr

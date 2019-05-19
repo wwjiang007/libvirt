@@ -2,15 +2,10 @@
   <qemuctime>0</qemuctime>
   <selfctime>0</selfctime>
   <selfvers>0</selfvers>
-  <usedQMP/>
   <flag name='kvm'/>
   <flag name='no-hpet'/>
-  <flag name='no-kvm-pit'/>
-  <flag name='pci-configfd'/>
   <flag name='spice'/>
-  <flag name='boot-index'/>
   <flag name='hda-duplex'/>
-  <flag name='pci-bootindex'/>
   <flag name='ccid-emulated'/>
   <flag name='ccid-passthru'/>
   <flag name='virtio-tx-alg'/>
@@ -31,14 +26,9 @@
   <flag name='virtio-blk-pci.scsi'/>
   <flag name='scsi-disk.channel'/>
   <flag name='scsi-block'/>
-  <flag name='transaction'/>
-  <flag name='block-job-async'/>
-  <flag name='scsi-cd'/>
-  <flag name='ide-cd'/>
   <flag name='hda-micro'/>
   <flag name='dump-guest-memory'/>
   <flag name='nec-usb-xhci'/>
-  <flag name='balloon-event'/>
   <flag name='lsi'/>
   <flag name='virtio-scsi-pci'/>
   <flag name='blockio'/>
@@ -47,22 +37,15 @@
   <flag name='usb-redir.filter'/>
   <flag name='ide-drive.wwn'/>
   <flag name='scsi-disk.wwn'/>
+  <flag name='seccomp-sandbox'/>
   <flag name='reboot-timeout'/>
-  <flag name='seamless-migration'/>
-  <flag name='block-commit'/>
   <flag name='vnc'/>
-  <flag name='drive-mirror'/>
-  <flag name='usb-redir.bootindex'/>
-  <flag name='usb-host.bootindex'/>
-  <flag name='blockdev-snapshot-sync'/>
   <flag name='qxl'/>
   <flag name='VGA'/>
   <flag name='cirrus-vga'/>
   <flag name='vmware-svga'/>
   <flag name='device-video-primary'/>
   <flag name='usb-serial'/>
-  <flag name='usb-net'/>
-  <flag name='add-fd'/>
   <flag name='nbd-server'/>
   <flag name='virtio-rng'/>
   <flag name='rng-random'/>
@@ -72,14 +55,8 @@
   <flag name='tpm-tis'/>
   <flag name='pci-bridge'/>
   <flag name='vfio-pci'/>
-  <flag name='vfio-pci.bootindex'/>
-  <flag name='scsi-generic'/>
-  <flag name='scsi-generic.bootindex'/>
   <flag name='mem-merge'/>
-  <flag name='vnc-websocket'/>
   <flag name='drive-discard'/>
-  <flag name='mlock'/>
-  <flag name='device-del-event'/>
   <flag name='dmi-to-pci-bridge'/>
   <flag name='i440fx-pci-hole64-size'/>
   <flag name='q35-pci-hole64-size'/>
@@ -91,7 +68,6 @@
   <flag name='boot-strict'/>
   <flag name='pvpanic'/>
   <flag name='spice-file-xfer-disable'/>
-  <flag name='spiceport'/>
   <flag name='usb-kbd'/>
   <flag name='msg-timestamp'/>
   <flag name='active-commit'/>
@@ -143,7 +119,6 @@
   <flag name='secret'/>
   <flag name='pxb'/>
   <flag name='pxb-pcie'/>
-  <flag name='device-tray-moved-event'/>
   <flag name='nec-usb-xhci-ports'/>
   <flag name='virtio-scsi-pci.iothread'/>
   <flag name='name-guest'/>
@@ -177,9 +152,15 @@
   <flag name='virtio-blk.num-queues'/>
   <flag name='isa-serial'/>
   <flag name='dump-completed'/>
+  <flag name='disk-write-cache'/>
+  <flag name='nbd-tls'/>
+  <flag name='sdl-gl'/>
+  <flag name='hda-output'/>
+  <flag name='vhost-vsock'/>
+  <flag name='mch'/>
   <version>2008000</version>
   <kvmVersion>0</kvmVersion>
-  <microcodeVersion>255684</microcodeVersion>
+  <microcodeVersion>43100764</microcodeVersion>
   <package> (v2.8.0)</package>
   <arch>x86_64</arch>
   <cpu type='kvm' name='host' usable='yes'/>
@@ -362,7 +343,7 @@
     <blocker name='3dnowprefetch'/>
   </cpu>
   <cpu type='tcg' name='486' usable='yes'/>
-  <machine name='pc-i440fx-2.8' alias='pc' hotplugCpus='yes' maxCpus='255'/>
+  <machine name='pc-i440fx-2.8' alias='pc' hotplugCpus='yes' maxCpus='255' default='yes'/>
   <machine name='pc-0.12' hotplugCpus='yes' maxCpus='255'/>
   <machine name='pc-i440fx-2.4' hotplugCpus='yes' maxCpus='255'/>
   <machine name='pc-1.3' hotplugCpus='yes' maxCpus='255'/>

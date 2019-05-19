@@ -21,7 +21,6 @@
 
 #include <config.h>
 
-#include <string.h>
 
 #include "vircommand.h"
 #include "cpu/cpu.h"
@@ -39,10 +38,12 @@
 
 VIR_LOG_INIT("vmware.vmware_conf");
 
-VIR_ENUM_IMPL(vmwareDriver, VMWARE_DRIVER_LAST,
+VIR_ENUM_IMPL(vmwareDriver,
+              VMWARE_DRIVER_LAST,
               "player",
               "ws",
-              "fusion");
+              "fusion",
+);
 
 /* Free all memory associated with a vmware_driver structure */
 void
@@ -186,10 +187,9 @@ vmwareLoadDomains(struct vmware_driver *driver)
                              VIR_DOMAIN_RUNNING_UNKNOWN);
         vm->persistent = 1;
 
-        virObjectUnlock(vm);
+        virDomainObjEndAPI(&vm);
 
         vmdef = NULL;
-        vm = NULL;
     }
 
     ret = 0;
@@ -435,7 +435,7 @@ vmwareVmxPath(virDomainDefPtr vmdef, char **vmxPath)
     if (vmwareParsePath(src, &directoryName, &fileName) < 0)
         goto cleanup;
 
-    if (!virFileHasSuffix(fileName, ".vmdk")) {
+    if (!virStringHasCaseSuffix(fileName, ".vmdk")) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Expecting source '%s' of first file-based harddisk "
                          "to be a VMDK image"), src);

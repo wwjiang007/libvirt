@@ -135,7 +135,7 @@ static int virFDStreamDataOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(virFDStreamData)
+VIR_ONCE_GLOBAL_INIT(virFDStreamData);
 
 
 static int
@@ -795,8 +795,13 @@ static int virFDStreamWrite(virStreamPtr st, const char *bytes, size_t nbytes)
         char *buf;
 
         if (fdst->threadQuit || fdst->threadErr) {
-            virReportSystemError(EBADF, "%s",
-                                 _("cannot write to stream"));
+
+            /* virStreamSend will virResetLastError possibly set
+             * by virFDStreamEvent */
+            if (fdst->threadErr && !virGetLastError())
+                virSetError(fdst->threadErr);
+            else
+                virReportSystemError(EBADF, "%s", _("cannot write to stream"));
             goto cleanup;
         }
 
@@ -875,8 +880,13 @@ static int virFDStreamRead(virStreamPtr st, char *bytes, size_t nbytes)
         while (!(msg = fdst->msg)) {
             if (fdst->threadQuit || fdst->threadErr) {
                 if (nbytes) {
-                    virReportSystemError(EBADF, "%s",
-                                         _("stream is not open"));
+                    /* virStreamRecv will virResetLastError possibly set
+                     * by virFDStreamEvent */
+                    if (fdst->threadErr && !virGetLastError())
+                        virSetError(fdst->threadErr);
+                    else
+                        virReportSystemError(EBADF, "%s",
+                                             _("stream is not open"));
                 } else {
                     ret = 0;
                 }
@@ -976,8 +986,12 @@ virFDStreamSendHole(virStreamPtr st,
          * might mess up file position for the thread. */
 
         if (fdst->threadQuit || fdst->threadErr) {
-            virReportSystemError(EBADF, "%s",
-                                 _("stream is not open"));
+            /* virStreamSendHole will virResetLastError possibly set
+             * by virFDStreamEvent */
+            if (fdst->threadErr && !virGetLastError())
+                virSetError(fdst->threadErr);
+            else
+                virReportSystemError(EBADF, "%s", _("stream is not open"));
             goto cleanup;
         }
 
@@ -1165,11 +1179,11 @@ int virFDStreamConnectUNIX(virStreamPtr st,
     memset(&sa, 0, sizeof(sa));
     sa.sun_family = AF_UNIX;
     if (abstract) {
-        if (virStrcpy(sa.sun_path+1, path, sizeof(sa.sun_path)-1) == NULL)
+        if (virStrcpy(sa.sun_path+1, path, sizeof(sa.sun_path)-1) < 0)
             goto error;
         sa.sun_path[0] = '\0';
     } else {
-        if (virStrcpy(sa.sun_path, path, sizeof(sa.sun_path)) == NULL)
+        if (virStrcpyStatic(sa.sun_path, path) < 0)
             goto error;
     }
 

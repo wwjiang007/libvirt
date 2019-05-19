@@ -2,9 +2,7 @@
   <qemuctime>0</qemuctime>
   <selfctime>0</selfctime>
   <selfvers>0</selfvers>
-  <usedQMP/>
   <flag name='kvm'/>
-  <flag name='boot-index'/>
   <flag name='hda-duplex'/>
   <flag name='virtio-tx-alg'/>
   <flag name='virtio-blk-pci.ioeventfd'/>
@@ -21,30 +19,20 @@
   <flag name='virtio-blk-pci.scsi'/>
   <flag name='scsi-disk.channel'/>
   <flag name='scsi-block'/>
-  <flag name='transaction'/>
-  <flag name='block-job-async'/>
-  <flag name='scsi-cd'/>
-  <flag name='ide-cd'/>
   <flag name='hda-micro'/>
   <flag name='dump-guest-memory'/>
   <flag name='nec-usb-xhci'/>
-  <flag name='balloon-event'/>
   <flag name='lsi'/>
   <flag name='virtio-scsi-pci'/>
   <flag name='blockio'/>
   <flag name='ide-drive.wwn'/>
   <flag name='scsi-disk.wwn'/>
+  <flag name='seccomp-sandbox'/>
   <flag name='reboot-timeout'/>
-  <flag name='seamless-migration'/>
-  <flag name='block-commit'/>
   <flag name='vnc'/>
-  <flag name='drive-mirror'/>
-  <flag name='blockdev-snapshot-sync'/>
   <flag name='VGA'/>
   <flag name='device-video-primary'/>
   <flag name='usb-serial'/>
-  <flag name='usb-net'/>
-  <flag name='add-fd'/>
   <flag name='nbd-server'/>
   <flag name='virtio-rng'/>
   <flag name='rng-random'/>
@@ -53,20 +41,13 @@
   <flag name='nvram'/>
   <flag name='pci-bridge'/>
   <flag name='vfio-pci'/>
-  <flag name='vfio-pci.bootindex'/>
-  <flag name='scsi-generic'/>
-  <flag name='scsi-generic.bootindex'/>
   <flag name='mem-merge'/>
-  <flag name='vnc-websocket'/>
   <flag name='drive-discard'/>
-  <flag name='mlock'/>
-  <flag name='device-del-event'/>
   <flag name='usb-storage'/>
   <flag name='usb-storage.removable'/>
   <flag name='virtio-mmio'/>
   <flag name='ich9-intel-hda'/>
   <flag name='boot-strict'/>
-  <flag name='spiceport'/>
   <flag name='usb-kbd'/>
   <flag name='msg-timestamp'/>
   <flag name='active-commit'/>
@@ -105,7 +86,6 @@
   <flag name='chardev-logfile'/>
   <flag name='debug-threads'/>
   <flag name='secret'/>
-  <flag name='device-tray-moved-event'/>
   <flag name='nec-usb-xhci-ports'/>
   <flag name='virtio-scsi-pci.iothread'/>
   <flag name='name-guest'/>
@@ -143,9 +123,16 @@
   <flag name='iscsi.password-secret'/>
   <flag name='isa-serial'/>
   <flag name='dump-completed'/>
+  <flag name='disk-write-cache'/>
+  <flag name='nbd-tls'/>
+  <flag name='sdl-gl'/>
+  <flag name='hda-output'/>
+  <flag name='blockdev-del'/>
+  <flag name='vhost-vsock'/>
+  <flag name='iothread.poll-max-ns'/>
   <version>2009000</version>
   <kvmVersion>0</kvmVersion>
-  <microcodeVersion>346538</microcodeVersion>
+  <microcodeVersion>42900765</microcodeVersion>
   <package> (v2.9.0)</package>
   <arch>ppc64</arch>
   <cpu type='kvm' name='default'/>
@@ -1015,7 +1002,7 @@
   <cpu type='tcg' name='MPC8544E_v11'/>
   <cpu type='tcg' name='405GPb'/>
   <cpu type='tcg' name='MPC8541E_v11'/>
-  <machine name='pseries-2.9' alias='pseries' hotplugCpus='yes' maxCpus='1024'/>
+  <machine name='pseries-2.9' alias='pseries' hotplugCpus='yes' maxCpus='1024' default='yes'/>
   <machine name='ref405ep' maxCpus='1'/>
   <machine name='virtex-ml507' maxCpus='1'/>
   <machine name='powernv' maxCpus='2048'/>

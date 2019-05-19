@@ -33,6 +33,7 @@
 #include "cpu/cpu.h"
 #include "qemu/qemu_monitor.h"
 #include "qemu/qemu_migration_params.h"
+#define LIBVIRT_QEMU_MIGRATION_PARAMSPRIV_H_ALLOW
 #include "qemu/qemu_migration_paramspriv.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
@@ -873,7 +874,6 @@ qemuMonitorJSONTestAttachChardev(virDomainXMLOptionPtr xmlopt)
                       "'data':{'addr':{'type':'inet',"
                                       "'data':{'host':'example.com',"
                                               "'port':'1234'}},"
-                              "'wait':false,"
                               "'telnet':false,"
                               "'server':false}}}");
 
@@ -919,7 +919,6 @@ qemuMonitorJSONTestAttachChardev(virDomainXMLOptionPtr xmlopt)
            "'backend':{'type':'socket',"
                       "'data':{'addr':{'type':'unix',"
                                       "'data':{'path':'/path/to/socket'}},"
-                              "'wait':false,"
                               "'server':false}}}");
 
     chr = (virDomainChrSourceDef) { .type = VIR_DOMAIN_CHR_TYPE_SPICEVMC };
@@ -1297,7 +1296,7 @@ testQemuMonitorJSON ## funcName(const void *opaque) \
 { \
     const testQemuMonitorJSONSimpleFuncData *data = opaque; \
     virDomainXMLOptionPtr xmlopt = data->xmlopt; \
-    qemuMonitorTestPtr test = qemuMonitorTestNewSimple(true, xmlopt); \
+    qemuMonitorTestPtr test = qemuMonitorTestNewSchema(xmlopt, data->schema); \
     const char *reply = data->reply; \
     int ret = -1; \
  \
@@ -1320,14 +1319,13 @@ cleanup: \
 }
 
 GEN_TEST_FUNC(qemuMonitorJSONSetLink, "vnet0", VIR_DOMAIN_NET_INTERFACE_LINK_STATE_DOWN)
-GEN_TEST_FUNC(qemuMonitorJSONBlockResize, "vda", 123456)
-GEN_TEST_FUNC(qemuMonitorJSONSetVNCPassword, "secret_password")
+GEN_TEST_FUNC(qemuMonitorJSONBlockResize, "vda", "asdf", 123456)
 GEN_TEST_FUNC(qemuMonitorJSONSetPassword, "spice", "secret_password", "disconnect")
 GEN_TEST_FUNC(qemuMonitorJSONExpirePassword, "spice", "123456")
 GEN_TEST_FUNC(qemuMonitorJSONSetBalloon, 1024)
 GEN_TEST_FUNC(qemuMonitorJSONSetCPU, 1, true)
 GEN_TEST_FUNC(qemuMonitorJSONEjectMedia, "hdc", true)
-GEN_TEST_FUNC(qemuMonitorJSONChangeMedia, "hdc", "/foo/bar", NULL)
+GEN_TEST_FUNC(qemuMonitorJSONChangeMedia, "hdc", "/foo/bar", "formatstr")
 GEN_TEST_FUNC(qemuMonitorJSONSaveVirtualMemory, 0, 1024, "/foo/bar")
 GEN_TEST_FUNC(qemuMonitorJSONSavePhysicalMemory, 0, 1024, "/foo/bar")
 GEN_TEST_FUNC(qemuMonitorJSONSetMigrationSpeed, 1024)
@@ -1338,21 +1336,27 @@ GEN_TEST_FUNC(qemuMonitorJSONMigrate, QEMU_MONITOR_MIGRATE_BACKGROUND |
 GEN_TEST_FUNC(qemuMonitorJSONDump, "dummy_protocol", "elf",
               true)
 GEN_TEST_FUNC(qemuMonitorJSONGraphicsRelocate, VIR_DOMAIN_GRAPHICS_TYPE_SPICE,
-              "localhost", 12345, 12346, NULL)
+              "localhost", 12345, 12346, "certsubjectval")
 GEN_TEST_FUNC(qemuMonitorJSONAddNetdev, "id=net0,type=test")
 GEN_TEST_FUNC(qemuMonitorJSONRemoveNetdev, "net0")
 GEN_TEST_FUNC(qemuMonitorJSONDelDevice, "ide0")
 GEN_TEST_FUNC(qemuMonitorJSONAddDevice, "some_dummy_devicestr")
-GEN_TEST_FUNC(qemuMonitorJSONSetDrivePassphrase, "drive-vda", "secret_passhprase")
-GEN_TEST_FUNC(qemuMonitorJSONDriveMirror, "vdb", "/foo/bar", NULL, 1024, 0, 0,
+GEN_TEST_FUNC(qemuMonitorJSONDriveMirror, "vdb", "/foo/bar", "formatstr", 1024, 1234, 31234,
               VIR_DOMAIN_BLOCK_REBASE_SHALLOW | VIR_DOMAIN_BLOCK_REBASE_REUSE_EXT)
-GEN_TEST_FUNC(qemuMonitorJSONBlockCommit, "vdb", "/foo/bar1", "/foo/bar2", NULL, 1024)
+GEN_TEST_FUNC(qemuMonitorJSONBlockdevMirror, "jobname", "vdb", "targetnode", 1024, 1234, 31234,
+              VIR_DOMAIN_BLOCK_REBASE_SHALLOW | VIR_DOMAIN_BLOCK_REBASE_REUSE_EXT)
+GEN_TEST_FUNC(qemuMonitorJSONBlockStream, "vdb", "/foo/bar1", "backingfilename", 1024)
+GEN_TEST_FUNC(qemuMonitorJSONBlockCommit, "vdb", "/foo/bar1", "/foo/bar2", "backingfilename", 1024)
 GEN_TEST_FUNC(qemuMonitorJSONDrivePivot, "vdb")
-GEN_TEST_FUNC(qemuMonitorJSONScreendump, "/foo/bar")
+GEN_TEST_FUNC(qemuMonitorJSONScreendump, "devicename", 1, "/foo/bar")
 GEN_TEST_FUNC(qemuMonitorJSONOpenGraphics, "spice", "spicefd", false)
-GEN_TEST_FUNC(qemuMonitorJSONNBDServerStart, "localhost", 12345)
+GEN_TEST_FUNC(qemuMonitorJSONNBDServerStart, "localhost", 12345, "test-alias")
 GEN_TEST_FUNC(qemuMonitorJSONNBDServerAdd, "vda", true)
 GEN_TEST_FUNC(qemuMonitorJSONDetachCharDev, "serial1")
+GEN_TEST_FUNC(qemuMonitorJSONBlockdevTrayOpen, "foodev", true)
+GEN_TEST_FUNC(qemuMonitorJSONBlockdevTrayClose, "foodev")
+GEN_TEST_FUNC(qemuMonitorJSONBlockdevMediumRemove, "foodev")
+GEN_TEST_FUNC(qemuMonitorJSONBlockdevMediumInsert, "foodev", "newnode")
 
 static bool
 testQemuMonitorJSONqemuMonitorJSONQueryCPUsEqual(struct qemuMonitorQueryCpusEntry *a,
@@ -1512,7 +1516,7 @@ testQemuMonitorJSONqemuMonitorJSONGetBalloonInfo(const void *data)
     if (qemuMonitorTestAddItem(test, "query-balloon",
                                "{"
                                "    \"return\": {"
-                               "        \"actual\": 4294967296"
+                               "        \"actual\": 18446744073709551615"
                                "    },"
                                "    \"id\": \"libvirt-9\""
                                "}") < 0)
@@ -1521,7 +1525,7 @@ testQemuMonitorJSONqemuMonitorJSONGetBalloonInfo(const void *data)
     if (qemuMonitorJSONGetBalloonInfo(qemuMonitorTestGetMonitor(test), &currmem) < 0)
         goto cleanup;
 
-    if (currmem != (4294967296ULL/1024)) {
+    if (currmem != (18446744073709551615ULL/1024)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "Unexpected currmem value: %llu", currmem);
         goto cleanup;
@@ -1586,12 +1590,29 @@ testQemuMonitorJSONqemuMonitorJSONGetVirtType(const void *data)
     return ret;
 }
 
+
+static void
+testQemuMonitorJSONGetBlockInfoPrint(const struct qemuDomainDiskInfo *d)
+{
+    VIR_TEST_VERBOSE("removable: %d, tray: %d, tray_open: %d, empty: %d, "
+                     "io_status: %d, nodename: '%s'\n",
+                     d->removable, d->tray, d->tray_open, d->empty,
+                     d->io_status, NULLSTR(d->nodename));
+}
+
+
 static int
 testHashEqualQemuDomainDiskInfo(const void *value1, const void *value2)
 {
     const struct qemuDomainDiskInfo *info1 = value1, *info2 = value2;
+    int ret;
 
-    return memcmp(info1, info2, sizeof(*info1));
+    if ((ret = memcmp(info1, info2, sizeof(*info1))) != 0) {
+        testQemuMonitorJSONGetBlockInfoPrint(info1);
+        testQemuMonitorJSONGetBlockInfoPrint(info2);
+    }
+
+    return ret;
 }
 
 static int
@@ -1631,7 +1652,6 @@ testQemuMonitorJSONqemuMonitorJSONGetBlockInfo(const void *data)
     if (VIR_ALLOC(info) < 0)
         goto cleanup;
 
-    info->locked = true;
     info->removable = true;
     info->tray = true;
 
@@ -1675,7 +1695,7 @@ testQemuMonitorJSONqemuMonitorJSONGetBlockInfo(const void *data)
 }
 
 static int
-testQemuMonitorJSONqemuMonitorJSONGetBlockStatsInfo(const void *data)
+testQemuMonitorJSONqemuMonitorJSONGetAllBlockStatsInfo(const void *data)
 {
     virDomainXMLOptionPtr xmlopt = (virDomainXMLOptionPtr)data;
     qemuMonitorTestPtr test = qemuMonitorTestNewSimple(true, xmlopt);
@@ -1773,11 +1793,10 @@ testQemuMonitorJSONqemuMonitorJSONGetBlockStatsInfo(const void *data)
     if (!test)
         return -1;
 
-    /* fill in seven times - we are gonna ask seven times later on */
-    if (qemuMonitorTestAddItem(test, "query-blockstats", reply) < 0 ||
-        qemuMonitorTestAddItem(test, "query-blockstats", reply) < 0 ||
-        qemuMonitorTestAddItem(test, "query-blockstats", reply) < 0 ||
-        qemuMonitorTestAddItem(test, "query-blockstats", reply) < 0)
+    if (!(blockstats = virHashCreate(10, virHashValueFree)))
+        goto cleanup;
+
+    if (qemuMonitorTestAddItem(test, "query-blockstats", reply) < 0)
         goto cleanup;
 
 #define CHECK0FULL(var, value, varformat, valformat) \
@@ -1810,13 +1829,13 @@ testQemuMonitorJSONqemuMonitorJSONGetBlockStatsInfo(const void *data)
     CHECK0FULL(wr_highest_offset, WR_HIGHEST_OFFSET, "%llu", "%llu") \
     CHECK0FULL(wr_highest_offset_valid, WR_HIGHEST_OFFSET_VALID, "%d", "%d")
 
-    if (qemuMonitorGetAllBlockStatsInfo(qemuMonitorTestGetMonitor(test),
-                                        &blockstats, false) < 0)
+    if (qemuMonitorJSONGetAllBlockStatsInfo(qemuMonitorTestGetMonitor(test),
+                                            blockstats, false) < 0)
         goto cleanup;
 
     if (!blockstats) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       "qemuMonitorJSONGetBlockStatsInfo didn't return stats");
+                       "qemuMonitorJSONGetAllBlockStatsInfo didn't return stats");
         goto cleanup;
     }
 
@@ -2125,14 +2144,14 @@ testQemuMonitorJSONqemuMonitorJSONSetBlockIoThrottle(const void *data)
         goto cleanup;
 
     if (qemuMonitorJSONGetBlockIoThrottle(qemuMonitorTestGetMonitor(test),
-                                          "drive-virtio-disk0", &info) < 0)
+                                          "drive-virtio-disk0", NULL, &info) < 0)
         goto cleanup;
 
     if (testValidateGetBlockIoThrottle(&info, &expectedInfo) < 0)
         goto cleanup;
 
     if (qemuMonitorJSONSetBlockIoThrottle(qemuMonitorTestGetMonitor(test),
-                                          "drive-virtio-disk1", &info, true,
+                                          "drive-virtio-disk1", NULL, &info, true,
                                           true, true) < 0)
         goto cleanup;
 
@@ -2694,7 +2713,7 @@ testQemuMonitorCPUInfo(const void *opaque)
 
     vm = qemuMonitorTestGetDomainObj(test);
     if (!vm)
-        return -1;
+        goto cleanup;
 
     rc = qemuMonitorGetCPUInfo(qemuMonitorTestGetMonitor(test),
                                &vcpus, data->maxvcpus, true, data->fast);
@@ -2815,11 +2834,32 @@ struct testQAPISchemaData {
     const char *query;
     const char *json;
     bool success;
+    int rc;
+    bool replyobj;
 };
 
 
 static int
-testQAPISchema(const void *opaque)
+testQAPISchemaQuery(const void *opaque)
+{
+    const struct testQAPISchemaData *data = opaque;
+    virJSONValuePtr replyobj = NULL;
+    int rc;
+
+    rc = virQEMUQAPISchemaPathGet(data->query, data->schema, &replyobj);
+
+    if (data->rc != rc || data->replyobj != !!replyobj) {
+        VIR_TEST_VERBOSE("\n success: expected '%d' got '%d', replyobj: expected '%d' got '%d'",
+                         data->rc, rc, data->replyobj, !!replyobj);
+        return -1;
+    }
+
+    return 0;
+}
+
+
+static int
+testQAPISchemaValidate(const void *opaque)
 {
     const struct testQAPISchemaData *data = opaque;
     virBuffer debug = VIR_BUFFER_INITIALIZER;
@@ -2840,7 +2880,7 @@ testQAPISchema(const void *opaque)
         ret = 0;
     }
 
-    if (virTestGetDebug() ||
+    if (virTestGetDebug() >= 3 ||
         (ret < 0 && virTestGetVerbose())) {
         char *debugstr = virBufferContentAndReset(&debug);
         fprintf(stderr, "\n%s\n", debugstr);
@@ -2862,10 +2902,11 @@ mymain(void)
     virQEMUDriver driver;
     testQemuMonitorJSONSimpleFuncData simpleFunc;
     struct testQAPISchemaData qapiData;
-    char *metaschema = NULL;
+    virJSONValuePtr metaschema = NULL;
+    char *metaschemastr = NULL;
 
 #if !WITH_YAJL
-    fputs("libvirt not compiled with yajl, skipping this test\n", stderr);
+    fputs("libvirt not compiled with JSON support, skipping this test\n", stderr);
     return EXIT_AM_SKIP;
 #endif
 
@@ -2880,7 +2921,6 @@ mymain(void)
         ret = -1;
         goto cleanup;
     }
-    simpleFunc.schema = qapiData.schema;
 
 #define DO_TEST(name) \
     if (virTestRun(# name, testQemuMonitorJSON ## name, driver.xmlopt) < 0) \
@@ -2888,12 +2928,15 @@ mymain(void)
 
 #define DO_TEST_SIMPLE(CMD, FNC, ...) \
     simpleFunc = (testQemuMonitorJSONSimpleFuncData) {.cmd = CMD, .func = FNC, \
-                                       .xmlopt = driver.xmlopt, __VA_ARGS__ }; \
+                                       .xmlopt = driver.xmlopt, \
+                                       .schema = qapiData.schema, \
+                                       __VA_ARGS__ }; \
     if (virTestRun(# FNC, testQemuMonitorJSONSimpleFunc, &simpleFunc) < 0) \
         ret = -1
 
 #define DO_TEST_GEN(name, ...) \
     simpleFunc = (testQemuMonitorJSONSimpleFuncData) {.xmlopt = driver.xmlopt, \
+                                                      .schema = qapiData.schema \
                                                      __VA_ARGS__ }; \
     if (virTestRun(# name, testQemuMonitorJSON ## name, &simpleFunc) < 0) \
         ret = -1
@@ -2949,7 +2992,6 @@ mymain(void)
     DO_TEST_SIMPLE("rtc-reset-reinjection", qemuMonitorJSONRTCResetReinjection);
     DO_TEST_GEN(qemuMonitorJSONSetLink);
     DO_TEST_GEN(qemuMonitorJSONBlockResize);
-    DO_TEST_GEN(qemuMonitorJSONSetVNCPassword);
     DO_TEST_GEN(qemuMonitorJSONSetPassword);
     DO_TEST_GEN(qemuMonitorJSONExpirePassword);
     DO_TEST_GEN(qemuMonitorJSONSetBalloon);
@@ -2967,8 +3009,9 @@ mymain(void)
     DO_TEST_GEN(qemuMonitorJSONRemoveNetdev);
     DO_TEST_GEN(qemuMonitorJSONDelDevice);
     DO_TEST_GEN(qemuMonitorJSONAddDevice);
-    DO_TEST_GEN(qemuMonitorJSONSetDrivePassphrase);
     DO_TEST_GEN(qemuMonitorJSONDriveMirror);
+    DO_TEST_GEN(qemuMonitorJSONBlockdevMirror);
+    DO_TEST_GEN(qemuMonitorJSONBlockStream);
     DO_TEST_GEN(qemuMonitorJSONBlockCommit);
     DO_TEST_GEN(qemuMonitorJSONDrivePivot);
     DO_TEST_GEN(qemuMonitorJSONScreendump);
@@ -2976,9 +3019,13 @@ mymain(void)
     DO_TEST_GEN(qemuMonitorJSONNBDServerStart);
     DO_TEST_GEN(qemuMonitorJSONNBDServerAdd);
     DO_TEST_GEN(qemuMonitorJSONDetachCharDev);
+    DO_TEST_GEN(qemuMonitorJSONBlockdevTrayOpen);
+    DO_TEST_GEN(qemuMonitorJSONBlockdevTrayClose);
+    DO_TEST_GEN(qemuMonitorJSONBlockdevMediumRemove);
+    DO_TEST_GEN(qemuMonitorJSONBlockdevMediumInsert);
     DO_TEST(qemuMonitorJSONGetBalloonInfo);
     DO_TEST(qemuMonitorJSONGetBlockInfo);
-    DO_TEST(qemuMonitorJSONGetBlockStatsInfo);
+    DO_TEST(qemuMonitorJSONGetAllBlockStatsInfo);
     DO_TEST(qemuMonitorJSONGetMigrationCacheSize);
     DO_TEST(qemuMonitorJSONGetMigrationStats);
     DO_TEST(qemuMonitorJSONGetChardevInfo);
@@ -3028,57 +3075,91 @@ mymain(void)
 
 #undef DO_TEST_BLOCK_NODE_DETECT
 
-#define DO_TEST_QAPI_SCHEMA(nme, rootquery, scc, jsonstr) \
+#define DO_TEST_QAPI_QUERY(nme, qry, scc, rplobj) \
+    do { \
+        qapiData.name = nme; \
+        qapiData.query = qry; \
+        qapiData.rc = scc; \
+        qapiData.replyobj = rplobj; \
+        if (virTestRun("qapi schema query" nme, testQAPISchemaQuery, &qapiData) < 0)\
+            ret = -1; \
+    } while (0)
+
+    DO_TEST_QAPI_QUERY("command", "blockdev-add", 1, true);
+    DO_TEST_QAPI_QUERY("event", "RTC_CHANGE", 1, true);
+    DO_TEST_QAPI_QUERY("object property", "screendump/arg-type/device", 1, true);
+    DO_TEST_QAPI_QUERY("optional property", "block-commit/arg-type/*top", 1, true);
+    DO_TEST_QAPI_QUERY("variant", "blockdev-add/arg-type/+file", 1, true);
+    DO_TEST_QAPI_QUERY("variant property", "blockdev-add/arg-type/+file/filename", 1, true);
+    DO_TEST_QAPI_QUERY("enum value", "query-status/ret-type/status/^debug", 1, false);
+    DO_TEST_QAPI_QUERY("builtin type", "query-qmp-schema/ret-type/name/!string", 1, false);
+    DO_TEST_QAPI_QUERY("alternate variant 1", "blockdev-add/arg-type/+qcow2/backing/!null", 1, false);
+    DO_TEST_QAPI_QUERY("alternate variant 2", "blockdev-add/arg-type/+qcow2/backing/!string", 1, false);
+    DO_TEST_QAPI_QUERY("alternate variant 3", "blockdev-add/arg-type/+qcow2/backing/+file/filename", 1, true);
+
+    DO_TEST_QAPI_QUERY("nonexistent command", "nonexistent", 0, false);
+    DO_TEST_QAPI_QUERY("nonexistent attr", "screendump/arg-type/nonexistent", 0, false);
+    DO_TEST_QAPI_QUERY("nonexistent variant", "blockdev-add/arg-type/+nonexistent", 0, false);
+    DO_TEST_QAPI_QUERY("nonexistent enum value", "query-status/ret-type/status/^nonexistentdebug", 0, false);
+    DO_TEST_QAPI_QUERY("broken query for enum value", "query-status/ret-type/status/^debug/test", -1, false);
+    DO_TEST_QAPI_QUERY("builtin type", "query-qmp-schema/ret-type/name/!number", 0, false);
+
+#undef DO_TEST_QAPI_QUERY
+
+
+#define DO_TEST_QAPI_VALIDATE(nme, rootquery, scc, jsonstr) \
     do { \
         qapiData.name = nme; \
         qapiData.query = rootquery; \
         qapiData.success = scc; \
         qapiData.json = jsonstr; \
-        if (virTestRun("qapi schema " nme, testQAPISchema, &qapiData) < 0)\
+        if (virTestRun("qapi schema validate" nme, testQAPISchemaValidate, &qapiData) < 0)\
             ret = -1; \
     } while (0)
 
 
-    DO_TEST_QAPI_SCHEMA("string", "trace-event-get-state/arg-type", true,
-                        "{\"name\":\"test\"}");
-    DO_TEST_QAPI_SCHEMA("all attrs", "trace-event-get-state/arg-type", true,
-                        "{\"name\":\"test\", \"vcpu\":123}");
-    DO_TEST_QAPI_SCHEMA("attr type mismatch", "trace-event-get-state/arg-type", false,
-                        "{\"name\":123}");
-    DO_TEST_QAPI_SCHEMA("missing mandatory attr", "trace-event-get-state/arg-type", false,
-                        "{\"vcpu\":123}");
-    DO_TEST_QAPI_SCHEMA("attr name not present", "trace-event-get-state/arg-type", false,
-                        "{\"name\":\"test\", \"blah\":123}");
-    DO_TEST_QAPI_SCHEMA("variant", "blockdev-add/arg-type", true,
-                        "{\"driver\":\"file\", \"filename\":\"ble\"}");
-    DO_TEST_QAPI_SCHEMA("variant wrong", "blockdev-add/arg-type", false,
-                        "{\"driver\":\"filefilefilefile\", \"filename\":\"ble\"}");
-    DO_TEST_QAPI_SCHEMA("variant missing mandatory", "blockdev-add/arg-type", false,
-                        "{\"driver\":\"file\", \"pr-manager\":\"ble\"}");
-    DO_TEST_QAPI_SCHEMA("variant missing discriminator", "blockdev-add/arg-type", false,
-                        "{\"node-name\":\"dfgfdg\"}");
-    DO_TEST_QAPI_SCHEMA("alternate 1", "blockdev-add/arg-type", true,
-                        "{\"driver\":\"qcow2\","
-                         "\"file\": { \"driver\":\"file\", \"filename\":\"ble\"}}");
-    DO_TEST_QAPI_SCHEMA("alternate 2", "blockdev-add/arg-type", true,
-                        "{\"driver\":\"qcow2\",\"file\": \"somepath\"}");
-    DO_TEST_QAPI_SCHEMA("alternate 2", "blockdev-add/arg-type", false,
-                        "{\"driver\":\"qcow2\",\"file\": 1234}");
+    DO_TEST_QAPI_VALIDATE("string", "trace-event-get-state/arg-type", true,
+                          "{\"name\":\"test\"}");
+    DO_TEST_QAPI_VALIDATE("all attrs", "trace-event-get-state/arg-type", true,
+                          "{\"name\":\"test\", \"vcpu\":123}");
+    DO_TEST_QAPI_VALIDATE("attr type mismatch", "trace-event-get-state/arg-type", false,
+                          "{\"name\":123}");
+    DO_TEST_QAPI_VALIDATE("missing mandatory attr", "trace-event-get-state/arg-type", false,
+                          "{\"vcpu\":123}");
+    DO_TEST_QAPI_VALIDATE("attr name not present", "trace-event-get-state/arg-type", false,
+                          "{\"name\":\"test\", \"blah\":123}");
+    DO_TEST_QAPI_VALIDATE("variant", "blockdev-add/arg-type", true,
+                          "{\"driver\":\"file\", \"filename\":\"ble\"}");
+    DO_TEST_QAPI_VALIDATE("variant wrong", "blockdev-add/arg-type", false,
+                          "{\"driver\":\"filefilefilefile\", \"filename\":\"ble\"}");
+    DO_TEST_QAPI_VALIDATE("variant missing mandatory", "blockdev-add/arg-type", false,
+                          "{\"driver\":\"file\", \"pr-manager\":\"ble\"}");
+    DO_TEST_QAPI_VALIDATE("variant missing discriminator", "blockdev-add/arg-type", false,
+                          "{\"node-name\":\"dfgfdg\"}");
+    DO_TEST_QAPI_VALIDATE("alternate 1", "blockdev-add/arg-type", true,
+                          "{\"driver\":\"qcow2\","
+                          "\"file\": { \"driver\":\"file\", \"filename\":\"ble\"}}");
+    DO_TEST_QAPI_VALIDATE("alternate 2", "blockdev-add/arg-type", true,
+                          "{\"driver\":\"qcow2\",\"file\": \"somepath\"}");
+    DO_TEST_QAPI_VALIDATE("alternate 2", "blockdev-add/arg-type", false,
+                          "{\"driver\":\"qcow2\",\"file\": 1234}");
 
-    if (!(metaschema = virTestLoadFilePath("qemuqapischema.json", NULL))) {
-        VIR_TEST_VERBOSE("failed to load qapi schema\n");
+    if (!(metaschema = testQEMUSchemaGetLatest()) ||
+        !(metaschemastr = virJSONValueToString(metaschema, false))) {
+        VIR_TEST_VERBOSE("failed to load latest qapi schema\n");
         ret = -1;
         goto cleanup;
     }
 
-    DO_TEST_QAPI_SCHEMA("schema-meta", "query-qmp-schema/ret-type", true,
-                        metaschema);
+    DO_TEST_QAPI_VALIDATE("schema-meta", "query-qmp-schema/ret-type", true,
+                        metaschemastr);
 
 
-#undef DO_TEST_QAPI_SCHEMA
+#undef DO_TEST_QAPI_VALIDATE
 
  cleanup:
-    VIR_FREE(metaschema);
+    VIR_FREE(metaschemastr);
+    virJSONValueFree(metaschema);
     virHashFree(qapiData.schema);
     qemuTestDriverFree(&driver);
     return (ret == 0) ? EXIT_SUCCESS : EXIT_FAILURE;

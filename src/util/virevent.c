@@ -17,8 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -28,7 +26,6 @@
 #include "virlog.h"
 #include "virerror.h"
 
-#include <stdlib.h>
 
 VIR_LOG_INIT("util.event");
 
@@ -286,14 +283,12 @@ int virEventRegisterDefaultImpl(void)
         return -1;
     }
 
-    virEventRegisterImpl(
-        virEventPollAddHandle,
-        virEventPollUpdateHandle,
-        virEventPollRemoveHandle,
-        virEventPollAddTimeout,
-        virEventPollUpdateTimeout,
-        virEventPollRemoveTimeout
-        );
+    virEventRegisterImpl(virEventPollAddHandle,
+                         virEventPollUpdateHandle,
+                         virEventPollRemoveHandle,
+                         virEventPollAddTimeout,
+                         virEventPollUpdateTimeout,
+                         virEventPollRemoveTimeout);
 
     return 0;
 }

@@ -1,9 +1,6 @@
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
-#include <string.h>
 
 #include <sys/types.h>
 #include <fcntl.h>
@@ -96,8 +93,6 @@ mymain(void)
     DO_TEST("sharenet");
     DO_TEST("ethernet");
     DO_TEST("ethernet-hostip");
-    DO_TEST_FULL("filesystem-root", 0, false,
-                 VIR_DOMAIN_DEF_PARSE_SKIP_OSTYPE_CHECKS);
     DO_TEST("initenv");
     DO_TEST("initdir");
     DO_TEST("inituser");

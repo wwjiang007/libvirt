@@ -1,8 +1,5 @@
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/types.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -22,32 +19,32 @@ static virDomainXMLOptionPtr xmlopt;
 static int
 testCompareFiles(const char *xml, const char *sexpr)
 {
-  char *gotsexpr = NULL;
-  int ret = -1;
-  virDomainDefPtr def = NULL;
+    char *gotsexpr = NULL;
+    int ret = -1;
+    virDomainDefPtr def = NULL;
 
-  if (!(def = virDomainDefParseFile(xml, caps, xmlopt, NULL,
-                                    VIR_DOMAIN_DEF_PARSE_INACTIVE)))
-      goto fail;
+    if (!(def = virDomainDefParseFile(xml, caps, xmlopt, NULL,
+                                      VIR_DOMAIN_DEF_PARSE_INACTIVE)))
+        goto fail;
 
-  if (!virDomainDefCheckABIStability(def, def, xmlopt)) {
-      fprintf(stderr, "ABI stability check failed on %s", xml);
-      goto fail;
-  }
+    if (!virDomainDefCheckABIStability(def, def, xmlopt)) {
+        fprintf(stderr, "ABI stability check failed on %s", xml);
+        goto fail;
+    }
 
-  if (!(gotsexpr = xenFormatSxpr(NULL, def)))
-      goto fail;
+    if (!(gotsexpr = xenFormatSxpr(NULL, def)))
+        goto fail;
 
-  if (virTestCompareToFile(gotsexpr, sexpr) < 0)
-      goto fail;
+    if (virTestCompareToFile(gotsexpr, sexpr) < 0)
+        goto fail;
 
-  ret = 0;
+    ret = 0;
 
  fail:
-  VIR_FREE(gotsexpr);
-  virDomainDefFree(def);
+    VIR_FREE(gotsexpr);
+    virDomainDefFree(def);
 
-  return ret;
+    return ret;
 }
 
 struct testInfo {
@@ -154,6 +151,7 @@ mymain(void)
 
     DO_TEST("fv-sound", "fv-sound", "fvtest");
 
+    DO_TEST("fv-net-many-models", "fv-net-many-models", "fvtest");
     DO_TEST("fv-net-netfront", "fv-net-netfront", "fvtest");
     DO_TEST("fv-net-rate", "fv-net-rate", "fvtest");
 

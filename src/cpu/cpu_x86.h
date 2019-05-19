@@ -16,26 +16,28 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *      Jiri Denemark <jdenemar@redhat.com>
  */
 
-#ifndef __VIR_CPU_X86_H__
-# define __VIR_CPU_X86_H__
+#ifndef LIBVIRT_CPU_X86_H
+# define LIBVIRT_CPU_X86_H
 
 # include "cpu.h"
 # include "cpu_x86_data.h"
 
 extern struct cpuArchDriver cpuDriverX86;
 
-int virCPUx86DataAddCPUID(virCPUDataPtr cpuData,
-                          const virCPUx86CPUID *cpuid);
+int virCPUx86DataAdd(virCPUDataPtr cpuData,
+                     const virCPUx86DataItem *cpuid);
 
 int virCPUx86DataSetSignature(virCPUDataPtr cpuData,
                               unsigned int family,
                               unsigned int model,
                               unsigned int stepping);
+
+uint32_t virCPUx86DataGetSignature(virCPUDataPtr cpuData,
+                                   unsigned int *family,
+                                   unsigned int *model,
+                                   unsigned int *stepping);
 
 int virCPUx86DataSetVendor(virCPUDataPtr cpuData,
                            const char *vendor);
@@ -43,4 +45,4 @@ int virCPUx86DataSetVendor(virCPUDataPtr cpuData,
 int virCPUx86DataAddFeature(virCPUDataPtr cpuData,
                             const char *name);
 
-#endif /* __VIR_CPU_X86_H__ */
+#endif /* LIBVIRT_CPU_X86_H */

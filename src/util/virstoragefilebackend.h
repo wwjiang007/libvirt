@@ -18,8 +18,8 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_STORAGE_FILE_BACKEND_H__
-# define __VIR_STORAGE_FILE_BACKEND_H__
+#ifndef LIBVIRT_VIRSTORAGEFILEBACKEND_H
+# define LIBVIRT_VIRSTORAGEFILEBACKEND_H
 
 # include <sys/stat.h>
 
@@ -71,11 +71,10 @@ typedef int
                               uid_t uid,
                               gid_t gid);
 
-virStorageFileBackendPtr virStorageFileBackendForType(int type, int protocol);
-virStorageFileBackendPtr virStorageFileBackendForTypeInternal(int type,
-                                                              int protocol,
-                                                              bool report);
-
+int virStorageFileBackendForType(int type,
+                                 int protocol,
+                                 bool required,
+                                 virStorageFileBackendPtr *backend);
 
 struct _virStorageFileBackend {
     int type;
@@ -101,4 +100,4 @@ struct _virStorageFileBackend {
 
 int virStorageFileBackendRegister(virStorageFileBackendPtr backend);
 
-#endif /* __VIR_STORAGE_FILE_BACKEND_H__ */
+#endif /* LIBVIRT_VIRSTORAGEFILEBACKEND_H */

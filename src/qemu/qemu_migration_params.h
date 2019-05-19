@@ -19,8 +19,8 @@
  *
  */
 
-#ifndef __QEMU_MIGRATION_PARAMS_H__
-# define __QEMU_MIGRATION_PARAMS_H__
+#ifndef LIBVIRT_QEMU_MIGRATION_PARAMS_H
+# define LIBVIRT_QEMU_MIGRATION_PARAMS_H
 
 # include "internal.h"
 
@@ -28,6 +28,8 @@
 # include "virxml.h"
 # include "qemu_monitor.h"
 # include "qemu_conf.h"
+# include "virautoclean.h"
+# include "virenum.h"
 
 typedef enum {
     QEMU_MIGRATION_CAP_XBZRLE,
@@ -37,10 +39,12 @@ typedef enum {
     QEMU_MIGRATION_CAP_POSTCOPY,
     QEMU_MIGRATION_CAP_COMPRESS,
     QEMU_MIGRATION_CAP_PAUSE_BEFORE_SWITCHOVER,
+    QEMU_MIGRATION_CAP_LATE_BLOCK_ACTIVATE,
+    QEMU_MIGRATION_CAP_MULTIFD,
 
     QEMU_MIGRATION_CAP_LAST
 } qemuMigrationCapability;
-VIR_ENUM_DECL(qemuMigrationCapability)
+VIR_ENUM_DECL(qemuMigrationCapability);
 
 typedef enum {
     QEMU_MIGRATION_PARAM_COMPRESS_LEVEL,
@@ -54,6 +58,8 @@ typedef enum {
     QEMU_MIGRATION_PARAM_DOWNTIME_LIMIT,
     QEMU_MIGRATION_PARAM_BLOCK_INCREMENTAL,
     QEMU_MIGRATION_PARAM_XBZRLE_CACHE_SIZE,
+    QEMU_MIGRATION_PARAM_MAX_POSTCOPY_BANDWIDTH,
+    QEMU_MIGRATION_PARAM_MULTIFD_CHANNELS,
 
     QEMU_MIGRATION_PARAM_LAST
 } qemuMigrationParam;
@@ -83,8 +89,12 @@ qemuMigrationParamsDump(qemuMigrationParamsPtr migParams,
                         int *maxparams,
                         unsigned long *flags);
 
+qemuMigrationParamsPtr
+qemuMigrationParamsNew(void);
+
 void
 qemuMigrationParamsFree(qemuMigrationParamsPtr migParams);
+VIR_DEFINE_AUTOPTR_FUNC(qemuMigrationParams, qemuMigrationParamsFree);
 
 int
 qemuMigrationParamsApply(virQEMUDriverPtr driver,
@@ -98,7 +108,6 @@ qemuMigrationParamsEnableTLS(virQEMUDriverPtr driver,
                              bool tlsListen,
                              int asyncJob,
                              char **tlsAlias,
-                             char **secAlias,
                              const char *hostname,
                              qemuMigrationParamsPtr migParams);
 
@@ -113,9 +122,9 @@ qemuMigrationParamsFetch(virQEMUDriverPtr driver,
                          qemuMigrationParamsPtr *migParams);
 
 int
-qemuMigrationParamsSetString(qemuMigrationParamsPtr migParams,
-                             qemuMigrationParam param,
-                             const char *value);
+qemuMigrationParamsSetULL(qemuMigrationParamsPtr migParams,
+                          qemuMigrationParam param,
+                          unsigned long long value);
 
 int
 qemuMigrationParamsGetULL(qemuMigrationParamsPtr migParams,
@@ -153,4 +162,4 @@ bool
 qemuMigrationCapsGet(virDomainObjPtr vm,
                      qemuMigrationCapability cap);
 
-#endif /* __QEMU_MIGRATION_PARAMS_H__ */
+#endif /* LIBVIRT_QEMU_MIGRATION_PARAMS_H */

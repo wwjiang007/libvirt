@@ -3,7 +3,7 @@
 # This spec file assumes you are building on a Fedora version
 # that's still supported by the vendor. It may work on other distros
 # or versions, but no effort will be made to ensure that going forward.
-%define min_fedora 26
+%define min_fedora 29
 
 %if 0%{?fedora} && 0%{?fedora} >= %{min_fedora}
     %define supported_platform 1
@@ -35,11 +35,10 @@
 
 Name:           mingw-libvirt
 Version:        @VERSION@
-Release:        1%{?dist}%{?extra_release}
+Release:        1%{?dist}
 Summary:        MinGW Windows libvirt virtualization library
 
 License:        LGPLv2+
-Group:          Development/Libraries
 URL:            https://libvirt.org/
 
 %if %(echo %{version} | grep -q "\.0$"; echo $?) == 1
@@ -73,11 +72,7 @@ BuildRequires:  pkgconfig
 BuildRequires:  gettext
 BuildRequires:  libxslt
 BuildRequires:  python3
-%if 0%{?fedora} >= 27
 BuildRequires:  perl-interpreter
-%else
-BuildRequires:  perl
-%endif
 BuildRequires:  perl(Getopt::Long)
 %if 0%{?enable_autotools}
 BuildRequires: autoconf
@@ -86,10 +81,8 @@ BuildRequires: gettext-devel
 BuildRequires: libtool
 %endif
 
-%if %{with_phyp}
 BuildRequires: mingw32-libssh2
 BuildRequires: mingw64-libssh2
-%endif
 %if %{with_esx}
 BuildRequires: mingw32-curl
 BuildRequires: mingw64-curl
@@ -177,7 +170,6 @@ autoreconf -if
   --without-avahi \
   --without-polkit \
   --without-libvirtd \
-  --without-uml \
   %{?_without_phyp} \
   %{?_without_esx} \
   %{?_without_hyperv} \
@@ -248,9 +240,12 @@ rm -rf $RPM_BUILD_ROOT%{mingw64_libexecdir}/libvirt-guests.sh
 %{mingw32_datadir}/libvirt/schemas/networkcommon.rng
 %{mingw32_datadir}/libvirt/schemas/nodedev.rng
 %{mingw32_datadir}/libvirt/schemas/nwfilter.rng
+%{mingw32_datadir}/libvirt/schemas/nwfilter_params.rng
+%{mingw32_datadir}/libvirt/schemas/nwfilterbinding.rng
 %{mingw32_datadir}/libvirt/schemas/secret.rng
 %{mingw32_datadir}/libvirt/schemas/storagecommon.rng
 %{mingw32_datadir}/libvirt/schemas/storagepool.rng
+%{mingw32_datadir}/libvirt/schemas/storagepoolcaps.rng
 %{mingw32_datadir}/libvirt/schemas/storagevol.rng
 %dir %{mingw32_datadir}/libvirt/api/
 %{mingw32_datadir}/libvirt/api/libvirt-api.xml
@@ -258,7 +253,7 @@ rm -rf $RPM_BUILD_ROOT%{mingw64_libexecdir}/libvirt-guests.sh
 %{mingw32_datadir}/libvirt/api/libvirt-qemu-api.xml
 %{mingw32_datadir}/libvirt/api/libvirt-admin-api.xml
 
-%{mingw32_datadir}/libvirt/cpu_map.xml
+%{mingw32_datadir}/libvirt/cpu_map/*.xml
 
 %{mingw32_datadir}/libvirt/test-screenshot.png
 
@@ -333,9 +328,12 @@ rm -rf $RPM_BUILD_ROOT%{mingw64_libexecdir}/libvirt-guests.sh
 %{mingw64_datadir}/libvirt/schemas/networkcommon.rng
 %{mingw64_datadir}/libvirt/schemas/nodedev.rng
 %{mingw64_datadir}/libvirt/schemas/nwfilter.rng
+%{mingw64_datadir}/libvirt/schemas/nwfilter_params.rng
+%{mingw64_datadir}/libvirt/schemas/nwfilterbinding.rng
 %{mingw64_datadir}/libvirt/schemas/secret.rng
 %{mingw64_datadir}/libvirt/schemas/storagecommon.rng
 %{mingw64_datadir}/libvirt/schemas/storagepool.rng
+%{mingw64_datadir}/libvirt/schemas/storagepoolcaps.rng
 %{mingw64_datadir}/libvirt/schemas/storagevol.rng
 %dir %{mingw64_datadir}/libvirt/api/
 %{mingw64_datadir}/libvirt/api/libvirt-api.xml
@@ -343,7 +341,7 @@ rm -rf $RPM_BUILD_ROOT%{mingw64_libexecdir}/libvirt-guests.sh
 %{mingw64_datadir}/libvirt/api/libvirt-qemu-api.xml
 %{mingw64_datadir}/libvirt/api/libvirt-admin-api.xml
 
-%{mingw64_datadir}/libvirt/cpu_map.xml
+%{mingw64_datadir}/libvirt/cpu_map/*.xml
 
 %{mingw64_datadir}/libvirt/test-screenshot.png
 

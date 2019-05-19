@@ -16,18 +16,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Daniel Veillard <veillard@redhat.com>
- * Karel Zak <kzak@redhat.com>
- * Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef VIRSH_H
-# define VIRSH_H
+#ifndef LIBVIRT_VIRSH_H
+# define LIBVIRT_VIRSH_H
 
-# include <stdio.h>
-# include <stdlib.h>
-# include <string.h>
 # include <stdarg.h>
 # include <unistd.h>
 # include <sys/stat.h>
@@ -82,6 +75,9 @@
      .completer_flags = cflags, \
     }
 
+# define VIRSH_COMMON_OPT_DOMAIN_FULL(cflags) \
+    VIRSH_COMMON_OPT_DOMAIN(N_("domain name, id or uuid"), cflags)
+
 # define VIRSH_COMMON_OPT_CONFIG(_helpstr) \
     {.name = "config", \
      .type = VSH_OT_BOOL, \
@@ -106,6 +102,31 @@
      .flags = VSH_OFLAG_REQ, \
      .help = _helpstr \
     }
+
+# define VIRSH_COMMON_OPT_DOMAIN_OT_STRING(_helpstr, oflags, cflags) \
+    {.name = "domain", \
+     .type = VSH_OT_STRING, \
+     .flags = oflags, \
+     .help = _helpstr, \
+     .completer = virshDomainNameCompleter, \
+     .completer_flags = cflags, \
+    }
+
+# define VIRSH_COMMON_OPT_DOMAIN_OT_STRING_FULL(oflags, cflags) \
+    VIRSH_COMMON_OPT_DOMAIN_OT_STRING(N_("domain name, id or uuid"), \
+                                      oflags, cflags)
+
+# define VIRSH_COMMON_OPT_DOMAIN_OT_ARGV(_helpstr, cflags) \
+    {.name = "domain", \
+     .type = VSH_OT_ARGV, \
+     .flags = VSH_OFLAG_NONE, \
+     .help = _helpstr, \
+     .completer = virshDomainNameCompleter, \
+     .completer_flags = cflags, \
+    }
+
+# define VIRSH_COMMON_OPT_DOMAIN_OT_ARGV_FULL(cflags) \
+    VIRSH_COMMON_OPT_DOMAIN_OT_ARGV(N_("domain name, id or uuid"), cflags)
 
 typedef struct _virshControl virshControl;
 typedef virshControl *virshControlPtr;
@@ -151,4 +172,4 @@ typedef enum {
 
 virConnectPtr virshConnect(vshControl *ctl, const char *uri, bool readonly);
 
-#endif /* VIRSH_H */
+#endif /* LIBVIRT_VIRSH_H */

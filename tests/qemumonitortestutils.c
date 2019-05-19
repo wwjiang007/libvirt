@@ -19,9 +19,6 @@
 
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <time.h>
 
 #include "testutils.h"
@@ -29,6 +26,7 @@
 #include "qemumonitortestutils.h"
 
 #include "virthread.h"
+#define LIBVIRT_QEMU_PROCESSPRIV_H_ALLOW
 #include "qemu/qemu_processpriv.h"
 #include "qemu/qemu_monitor.h"
 #include "qemu/qemu_agent.h"
@@ -564,7 +562,8 @@ qemuMonitorTestProcessCommandDefaultValidate(qemuMonitorTestPtr test,
     if (virAsprintf(&schemapath, "%s/arg-type", cmdname) < 0)
         goto cleanup;
 
-    if (virQEMUQAPISchemaPathGet(schemapath, test->qapischema, &schemaroot) < 0) {
+    if (virQEMUQAPISchemaPathGet(schemapath, test->qapischema, &schemaroot) < 0 ||
+        !schemaroot) {
         if (qemuMonitorReportError(test,
                                    "command '%s' not found in QAPI schema",
                                    cmdname) == 0)
@@ -1252,6 +1251,7 @@ qemuMonitorTestNew(bool json,
     if (!(test->mon = qemuMonitorOpen(test->vm,
                                       &src,
                                       json,
+                                      true,
                                       0,
                                       &qemuMonitorTestCallbacks,
                                       driver)))
@@ -1416,39 +1416,39 @@ qemuMonitorTestNewFromFileFull(const char *fileName,
     tmp = jsonstr;
     command = tmp;
     while ((tmp = strchr(tmp, '\n'))) {
-        bool eof = !tmp[1];
         line++;
 
+        /* eof */
+        if (!tmp[1])
+            break;
+
+        /* concatenate block which was broken up for readability */
         if (*(tmp + 1) != '\n') {
             *tmp = ' ';
             tmp++;
-        } else {
-            /* Cut off a single reply. */
-            *(tmp + 1) = '\0';
-
-            if (response) {
-                if (qemuMonitorTestFullAddItem(ret, fileName, command,
-                                               response, commandln) < 0)
-                    goto error;
-                command = NULL;
-                response = NULL;
-            }
-
-            if (!eof) {
-                /* Move the @tmp and @singleReply. */
-                tmp += 2;
-
-                if (!command) {
-                    commandln = line;
-                    command = tmp;
-                } else {
-                    response = tmp;
-                }
-            }
+            continue;
         }
 
-        if (eof)
-            break;
+        /* Cut off a single reply. */
+        *(tmp + 1) = '\0';
+
+        if (response) {
+            if (qemuMonitorTestFullAddItem(ret, fileName, command,
+                                           response, commandln) < 0)
+                goto error;
+            command = NULL;
+            response = NULL;
+        }
+
+        /* Move the @tmp and @singleReply. */
+        tmp += 2;
+
+        if (!command) {
+            commandln = line;
+            command = tmp;
+        } else {
+            response = tmp;
+        }
     }
 
     if (command) {

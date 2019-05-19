@@ -17,9 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Matthew J. Rosato <mjrosato@linux.vnet.ibm.com>
  */
 
 #include <config.h>
@@ -264,7 +261,7 @@ qemuInterfaceDirectConnect(virDomainDefPtr def,
     virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
     unsigned int macvlan_create_flags = VIR_NETDEV_MACVLAN_CREATE_WITH_TAP;
 
-    if (net->model && STREQ(net->model, "virtio"))
+    if (virDomainNetIsVirtioModel(net))
         macvlan_create_flags |= VIR_NETDEV_MACVLAN_VNET_HDR;
 
     if (virNetDevMacVLanCreateWithVPortProfile(net->ifname,
@@ -363,7 +360,7 @@ qemuCreateInBridgePortWithHelper(virQEMUDriverConfigPtr cfg,
         char ebuf[1024];
         char *errstr = NULL;
 
-        if (!(cmdstr = virCommandToString(cmd)))
+        if (!(cmdstr = virCommandToString(cmd, false)))
             goto cleanup;
         virCommandAbort(cmd);
 
@@ -374,7 +371,7 @@ qemuCreateInBridgePortWithHelper(virQEMUDriverConfigPtr cfg,
         virReportError(VIR_ERR_INTERNAL_ERROR,
             _("%s: failed to communicate with bridge helper: %s%s"),
             cmdstr, virStrerror(errno, ebuf, sizeof(ebuf)),
-            errstr ? errstr : "");
+            NULLSTR_EMPTY(errstr));
         VIR_FREE(errstr);
         goto cleanup;
     }
@@ -437,7 +434,7 @@ qemuInterfaceEthernetConnect(virDomainDefPtr def,
         template_ifname = true;
     }
 
-    if (net->model && STREQ(net->model, "virtio"))
+    if (virDomainNetIsVirtioModel(net))
         tap_create_flags |= VIR_NETDEV_TAP_CREATE_VNET_HDR;
 
     if (virNetDevTapCreate(&net->ifname, tunpath, tapfd, tapfdSize,
@@ -467,7 +464,7 @@ qemuInterfaceEthernetConnect(virDomainDefPtr def,
         goto cleanup;
 
     if (net->filter &&
-        virDomainConfNWFilterInstantiate(def->uuid, net) < 0) {
+        virDomainConfNWFilterInstantiate(def->name, def->uuid, net, false) < 0) {
         goto cleanup;
     }
 
@@ -536,7 +533,7 @@ qemuInterfaceBridgeConnect(virDomainDefPtr def,
         template_ifname = true;
     }
 
-    if (net->model && STREQ(net->model, "virtio"))
+    if (virDomainNetIsVirtioModel(net))
         tap_create_flags |= VIR_NETDEV_TAP_CREATE_VNET_HDR;
 
     if (virQEMUDriverIsPrivileged(driver)) {
@@ -586,7 +583,7 @@ qemuInterfaceBridgeConnect(virDomainDefPtr def,
         goto cleanup;
 
     if (net->filter &&
-        virDomainConfNWFilterInstantiate(def->uuid, net) < 0) {
+        virDomainConfNWFilterInstantiate(def->name, def->uuid, net, false) < 0) {
         goto cleanup;
     }
 
@@ -656,7 +653,7 @@ qemuInterfaceOpenVhostNet(virDomainDefPtr def,
     }
 
     /* If the nic model isn't virtio, don't try to open. */
-    if (!(net->model && STREQ(net->model, "virtio"))) {
+    if (!virDomainNetIsVirtioModel(net)) {
         if (net->driver.virtio.name == VIR_DOMAIN_NET_BACKEND_TYPE_VHOST) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            "%s", _("vhost-net is only supported for "

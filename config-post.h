@@ -19,7 +19,7 @@
 /*
  * Since virt-login-shell will be setuid, we must do everything
  * we can to avoid linking to other libraries. Many of them do
- * unsafe things in functions marked __atttribute__((constructor)).
+ * unsafe things in functions marked __attribute__((constructor)).
  * The only way to avoid such deps is to re-compile the
  * functions with the code in question disabled, and for that we
  * must override the main config.h rules. Hence this file :-(
@@ -36,7 +36,6 @@
 # undef WITH_DEVMAPPER
 # undef WITH_DTRACE_PROBES
 # undef WITH_GNUTLS
-# undef WITH_GNUTLS_GCRYPT
 # undef WITH_LIBSSH
 # undef WITH_MACVTAP
 # undef WITH_NUMACTL
@@ -45,7 +44,6 @@
 # undef WITH_SYSTEMD_DAEMON
 # undef WITH_VIRTUALPORT
 # undef WITH_YAJL
-# undef WITH_YAJL2
 #endif
 
 /*
@@ -62,7 +60,6 @@
 # undef WITH_DEVMAPPER
 # undef WITH_DTRACE_PROBES
 # undef WITH_GNUTLS
-# undef WITH_GNUTLS_GCRYPT
 # undef WITH_LIBSSH
 # undef WITH_MACVTAP
 # undef WITH_NUMACTL
@@ -71,7 +68,6 @@
 # undef WITH_VIRTUALPORT
 # undef WITH_SECDRIVER_SELINUX
 # undef WITH_SECDRIVER_APPARMOR
-# undef WITH_CAPNG
 #endif /* LIBVIRT_NSS */
 
 #ifndef __GNUC__

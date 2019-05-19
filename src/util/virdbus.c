@@ -21,6 +21,7 @@
 
 #include <config.h>
 
+#define LIBVIRT_VIRDBUSPRIV_H_ALLOW
 #include "virdbuspriv.h"
 #include "viralloc.h"
 #include "virerror.h"
@@ -144,6 +145,7 @@ void virDBusCloseSystemBus(void)
 {
     if (systembus && !sharedBus) {
         dbus_connection_close(systembus);
+        dbus_connection_unref(systembus);
         systembus = NULL;
     }
 }
@@ -196,10 +198,13 @@ static void virDBusWatchCallback(int fdatch ATTRIBUTE_UNUSED,
     if (events & VIR_EVENT_HANDLE_HANGUP)
         dbus_flags |= DBUS_WATCH_HANGUP;
 
-    (void)dbus_watch_handle(watch, dbus_flags);
+    if (dbus_watch_handle(watch, dbus_flags) == FALSE)
+        VIR_DEBUG("dbus_watch_handle() returned FALSE");
 
+    dbus_connection_ref(info->bus);
     while (dbus_connection_dispatch(info->bus) == DBUS_DISPATCH_DATA_REMAINS)
         /* keep dispatching while data remains */;
+    dbus_connection_unref(info->bus);
 }
 
 
@@ -232,7 +237,7 @@ static dbus_bool_t virDBusAddWatch(DBusWatch *watch,
     struct virDBusWatch *info;
 
     if (VIR_ALLOC(info) < 0)
-        return 0;
+        return FALSE;
 
     if (dbus_watch_get_enabled(watch))
         flags = virDBusTranslateWatchFlags(dbus_watch_get_flags(watch));
@@ -249,10 +254,10 @@ static dbus_bool_t virDBusAddWatch(DBusWatch *watch,
                                     watch, NULL);
     if (info->watch < 0) {
         dbus_watch_set_data(watch, NULL, NULL);
-        return 0;
+        return FALSE;
     }
 
-    return 1;
+    return TRUE;
 }
 
 
@@ -757,8 +762,7 @@ virDBusMessageIterEncode(DBusMessageIter *rootiter,
                 goto cleanup;
             }
             VIR_FREE(contsig);
-            iter = newiter;
-            newiter = NULL;
+            VIR_STEAL_PTR(iter, newiter);
             types = t + 1;
             nstruct = skiplen;
             narray = (size_t)va_arg(args, int);
@@ -784,8 +788,7 @@ virDBusMessageIterEncode(DBusMessageIter *rootiter,
                 VIR_FREE(newiter);
                 goto cleanup;
             }
-            iter = newiter;
-            newiter = NULL;
+            VIR_STEAL_PTR(iter, newiter);
             types = vsig;
             nstruct = strlen(types);
             narray = (size_t)-1;
@@ -816,8 +819,7 @@ virDBusMessageIterEncode(DBusMessageIter *rootiter,
                 goto cleanup;
             }
             VIR_FREE(contsig);
-            iter = newiter;
-            newiter = NULL;
+            VIR_STEAL_PTR(iter, newiter);
             types = t + 1;
             nstruct = skiplen - 2;
             narray = (size_t)-1;
@@ -1054,8 +1056,7 @@ virDBusMessageIterDecode(DBusMessageIter *rootiter,
                                      nstruct, narray) < 0)
                 goto cleanup;
             VIR_FREE(contsig);
-            iter = newiter;
-            newiter = NULL;
+            VIR_STEAL_PTR(iter, newiter);
             types = t + 1;
             nstruct = skiplen;
             if (arrayref) {
@@ -1085,8 +1086,7 @@ virDBusMessageIterDecode(DBusMessageIter *rootiter,
                 VIR_DEBUG("Push failed");
                 goto cleanup;
             }
-            iter = newiter;
-            newiter = NULL;
+            VIR_STEAL_PTR(iter, newiter);
             types = vsig;
             nstruct = strlen(types);
             narray = (size_t)-1;
@@ -1113,8 +1113,7 @@ virDBusMessageIterDecode(DBusMessageIter *rootiter,
                                      nstruct, narray) < 0)
                 goto cleanup;
             VIR_FREE(contsig);
-            iter = newiter;
-            newiter = NULL;
+            VIR_STEAL_PTR(iter, newiter);
             types = t + 1;
             nstruct = skiplen - 2;
             narray = (size_t)-1;
@@ -1229,9 +1228,23 @@ int virDBusMessageEncode(DBusMessage* msg,
 }
 
 
-int virDBusMessageDecode(DBusMessage* msg,
-                         const char *types,
-                         ...)
+/**
+ * virDBusMessageDecode:
+ * @msg: the reply to decode
+ * @types: type signature for following return values
+ * @...: pointers in which to store return values
+ *
+ * The @types type signature is the same format as
+ * that used for the virDBusCallMethod. The difference
+ * is that each variadic parameter must be a pointer to
+ * be filled with the values. eg instead of passing an
+ * 'int', pass an 'int *'.
+ *
+ */
+int
+virDBusMessageDecode(DBusMessage* msg,
+                     const char *types,
+                     ...)
 {
     int ret;
     va_list args;
@@ -1567,7 +1580,7 @@ virDBusCall(DBusConnection *conn,
             ret = 0;
         } else {
             virReportError(VIR_ERR_DBUS_SERVICE, _("%s: %s"), member,
-                localerror.message ? localerror.message : _("unknown error"));
+                           localerror.message ? : _("unknown error"));
         }
         goto cleanup;
     }
@@ -1654,32 +1667,6 @@ int virDBusCallMethod(DBusConnection *conn,
     return ret;
 }
 
-
-/**
- * virDBusMessageRead:
- * @msg: the reply to decode
- * @types: type signature for following return values
- * @...: pointers in which to store return values
- *
- * The @types type signature is the same format as
- * that used for the virDBusCallMethod. The difference
- * is that each variadic parameter must be a pointer to
- * be filled with the values. eg instead of passing an
- * 'int', pass an 'int *'.
- *
- */
-int virDBusMessageRead(DBusMessage *msg,
-                       const char *types, ...)
-{
-    va_list args;
-    int ret;
-
-    va_start(args, types);
-    ret = virDBusMessageDecodeArgs(msg, types, args);
-    va_end(args);
-
-    return ret;
-}
 
 static int virDBusIsServiceInList(const char *listMethod, const char *name)
 {
@@ -1855,13 +1842,6 @@ int virDBusCallMethod(DBusConnection *conn ATTRIBUTE_UNUSED,
     return -1;
 }
 
-int virDBusMessageRead(DBusMessage *msg ATTRIBUTE_UNUSED,
-                       const char *types ATTRIBUTE_UNUSED, ...)
-{
-    virReportError(VIR_ERR_INTERNAL_ERROR,
-                   "%s", _("DBus support not compiled into this binary"));
-    return -1;
-}
 
 int virDBusMessageEncode(DBusMessage* msg ATTRIBUTE_UNUSED,
                          const char *types ATTRIBUTE_UNUSED,

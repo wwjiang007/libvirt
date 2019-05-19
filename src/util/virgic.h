@@ -16,14 +16,13 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Andrea Bolognani <abologna@redhat.com>
  */
 
-#ifndef __VIR_GIC_H__
-# define __VIR_GIC_H__
+#ifndef LIBVIRT_VIRGIC_H
+# define LIBVIRT_VIRGIC_H
 
 # include "virutil.h"
+# include "virenum.h"
 
 typedef enum {
     VIR_GIC_VERSION_NONE = 0,
@@ -48,4 +47,4 @@ struct _virGICCapability {
     virGICImplementation implementation;
 };
 
-#endif /* __VIR_GIC_H__ */
+#endif /* LIBVIRT_VIRGIC_H */

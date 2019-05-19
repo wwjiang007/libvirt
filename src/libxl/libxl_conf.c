@@ -18,10 +18,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Jim Fehlig <jfehlig@novell.com>
- *     Markus Groß <gross@univention.de>
  */
 
 #include <config.h>
@@ -51,6 +47,8 @@
 #include "cpu/cpu.h"
 #include "xen_common.h"
 #include "xen_xl.h"
+#include "virnetdevvportprofile.h"
+#include "virenum.h"
 
 
 #define VIR_FROM_THIS VIR_FROM_LIBXL
@@ -69,7 +67,7 @@ static int libxlConfigOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(libxlConfig)
+VIR_ONCE_GLOBAL_INIT(libxlConfig);
 
 static void
 libxlDriverConfigDispose(void *obj)
@@ -81,6 +79,7 @@ libxlDriverConfigDispose(void *obj)
     if (cfg->logger)
         libxlLoggerFree(cfg->logger);
 
+    VIR_FREE(cfg->configBaseDir);
     VIR_FREE(cfg->configDir);
     VIR_FREE(cfg->autostartDir);
     VIR_FREE(cfg->logDir);
@@ -133,8 +132,19 @@ libxlMakeDomCreateInfo(libxl_ctx *ctx,
 
     libxl_domain_create_info_init(c_info);
 
-    if (def->os.type == VIR_DOMAIN_OSTYPE_HVM) {
+    if (def->os.type == VIR_DOMAIN_OSTYPE_HVM ||
+        def->os.type == VIR_DOMAIN_OSTYPE_XENPVH) {
+#ifdef HAVE_XEN_PVH
+        c_info->type = def->os.type == VIR_DOMAIN_OSTYPE_HVM ?
+            LIBXL_DOMAIN_TYPE_HVM : LIBXL_DOMAIN_TYPE_PVH;
+#else
+        if (def->os.type == VIR_DOMAIN_OSTYPE_XENPVH) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                    _("PVH guest os type not supported"));
+            return -1;
+        }
         c_info->type = LIBXL_DOMAIN_TYPE_HVM;
+#endif
         switch ((virTristateSwitch) def->features[VIR_DOMAIN_FEATURE_HAP]) {
         case VIR_TRISTATE_SWITCH_OFF:
             libxl_defbool_set(&c_info->hap, false);
@@ -276,16 +286,26 @@ libxlMakeDomBuildInfo(virDomainDefPtr def,
     virDomainClockDef clock = def->clock;
     libxl_ctx *ctx = cfg->ctx;
     libxl_domain_build_info *b_info = &d_config->b_info;
-    int hvm = def->os.type == VIR_DOMAIN_OSTYPE_HVM;
+    bool hvm = def->os.type == VIR_DOMAIN_OSTYPE_HVM;
+    bool pvh = def->os.type == VIR_DOMAIN_OSTYPE_XENPVH;
     size_t i;
     size_t nusbdevice = 0;
 
     libxl_domain_build_info_init(b_info);
 
-    if (hvm)
+    if (hvm) {
         libxl_domain_build_info_init_type(b_info, LIBXL_DOMAIN_TYPE_HVM);
-    else
+    } else if (pvh) {
+#ifdef HAVE_XEN_PVH
+        libxl_domain_build_info_init_type(b_info, LIBXL_DOMAIN_TYPE_PVH);
+#else
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                _("PVH guest os type not supported"));
+        return -1;
+#endif
+    } else {
         libxl_domain_build_info_init_type(b_info, LIBXL_DOMAIN_TYPE_PV);
+    }
 
     b_info->max_vcpus = virDomainDefGetVcpusMax(def);
     if (libxl_cpu_bitmap_alloc(ctx, &b_info->avail_vcpus, b_info->max_vcpus))
@@ -375,19 +395,16 @@ libxlMakeDomBuildInfo(virDomainDefPtr def,
     def->mem.cur_balloon = VIR_ROUND_UP(def->mem.cur_balloon, 1024);
     b_info->max_memkb = virDomainDefGetMemoryInitial(def);
     b_info->target_memkb = def->mem.cur_balloon;
-    if (hvm) {
-        char bootorder[VIR_DOMAIN_BOOT_LAST + 1];
 
-        libxl_defbool_set(&b_info->u.hvm.pae,
-                          def->features[VIR_DOMAIN_FEATURE_PAE] ==
-                          VIR_TRISTATE_SWITCH_ON);
-        libxl_defbool_set(&b_info->u.hvm.apic,
-                          def->features[VIR_DOMAIN_FEATURE_APIC] ==
-                          VIR_TRISTATE_SWITCH_ON);
-        libxl_defbool_set(&b_info->u.hvm.acpi,
-                          def->features[VIR_DOMAIN_FEATURE_ACPI] ==
-                          VIR_TRISTATE_SWITCH_ON);
+#ifdef LIBXL_HAVE_BUILDINFO_GRANT_LIMITS
+    for (i = 0; i < def->ncontrollers; i++) {
+        if (def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_XENBUS &&
+            def->controllers[i]->opts.xenbusopts.maxGrantFrames > 0)
+            b_info->max_grant_frames = def->controllers[i]->opts.xenbusopts.maxGrantFrames;
+    }
+#endif
 
+    if (hvm || pvh) {
         if (caps &&
             def->cpu && def->cpu->mode == (VIR_CPU_MODE_HOST_PASSTHROUGH)) {
             bool hasHwVirt = false;
@@ -455,7 +472,18 @@ libxlMakeDomBuildInfo(virDomainDefPtr def,
                     }
                 }
             }
-            libxl_defbool_set(&b_info->u.hvm.nested_hvm, hasHwVirt);
+#ifdef LIBXL_HAVE_BUILDINFO_NESTED_HVM
+            libxl_defbool_set(&b_info->nested_hvm, hasHwVirt);
+#else
+            if (hvm) {
+                libxl_defbool_set(&b_info->u.hvm.nested_hvm, hasHwVirt);
+            } else {
+                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("unsupported nested HVM setting for %s machine on this Xen version"),
+                        def->os.machine);
+                return -1;
+            }
+#endif
         }
 
         if (def->cpu && def->cpu->mode == VIR_CPU_MODE_CUSTOM) {
@@ -463,6 +491,20 @@ libxlMakeDomBuildInfo(virDomainDefPtr def,
                      "mode=host-passthrough to avoid risk of changed guest "
                      "semantics when mode=custom is supported in the future");
         }
+    }
+
+    if (hvm) {
+        char bootorder[VIR_DOMAIN_BOOT_LAST + 1];
+
+        libxl_defbool_set(&b_info->u.hvm.pae,
+                          def->features[VIR_DOMAIN_FEATURE_PAE] ==
+                          VIR_TRISTATE_SWITCH_ON);
+        libxl_defbool_set(&b_info->u.hvm.apic,
+                          def->features[VIR_DOMAIN_FEATURE_APIC] ==
+                          VIR_TRISTATE_SWITCH_ON);
+        libxl_defbool_set(&b_info->u.hvm.acpi,
+                          def->features[VIR_DOMAIN_FEATURE_ACPI] ==
+                          VIR_TRISTATE_SWITCH_ON);
 
         if (def->nsounds > 0) {
             /*
@@ -634,11 +676,22 @@ libxlMakeDomBuildInfo(virDomainDefPtr def,
             return -1;
         }
 #endif
-
-        /* Allow libxl to calculate shadow memory requirements */
-        b_info->shadow_memkb =
-            libxl_get_required_shadow_memory(b_info->max_memkb,
-                                             b_info->max_vcpus);
+    } else if (pvh) {
+        if (VIR_STRDUP(b_info->cmdline, def->os.cmdline) < 0)
+            return -1;
+        if (VIR_STRDUP(b_info->kernel, def->os.kernel) < 0)
+            return -1;
+        if (VIR_STRDUP(b_info->ramdisk, def->os.initrd) < 0)
+            return -1;
+#ifdef LIBXL_HAVE_BUILDINFO_BOOTLOADER
+        if (VIR_STRDUP(b_info->bootloader, def->os.bootloader) < 0)
+            return -1;
+        if (def->os.bootloaderArgs) {
+            if (!(b_info->bootloader_args =
+                  virStringSplit(def->os.bootloaderArgs, " \t\n", 0)))
+                return -1;
+        }
+#endif
     } else {
         /*
          * For compatibility with the legacy xen toolstack, default to pygrub
@@ -676,6 +729,8 @@ libxlMakeDomBuildInfo(virDomainDefPtr def,
         case VIR_DOMAIN_MEMBALLOON_MODEL_XEN:
             break;
         case VIR_DOMAIN_MEMBALLOON_MODEL_VIRTIO:
+        case VIR_DOMAIN_MEMBALLOON_MODEL_VIRTIO_TRANSITIONAL:
+        case VIR_DOMAIN_MEMBALLOON_MODEL_VIRTIO_NON_TRANSITIONAL:
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("unsupported balloon device model '%s'"),
                            virDomainMemballoonModelTypeToString(model));
@@ -691,6 +746,11 @@ libxlMakeDomBuildInfo(virDomainDefPtr def,
             return -1;
         }
     }
+
+    /* Allow libxl to calculate shadow memory requirements */
+    b_info->shadow_memkb =
+        libxl_get_required_shadow_memory(b_info->max_memkb,
+                                         b_info->max_vcpus);
 
     return 0;
 }
@@ -922,7 +982,7 @@ libxlMakeNetworkDiskSrc(virStorageSourcePtr src, char **srcstr)
 {
     virConnectPtr conn = NULL;
     uint8_t *secret = NULL;
-    char *base64secret = NULL;
+    VIR_AUTODISPOSE_STR base64secret = NULL;
     size_t secretlen = 0;
     char *username = NULL;
     int ret = -1;
@@ -950,7 +1010,6 @@ libxlMakeNetworkDiskSrc(virStorageSourcePtr src, char **srcstr)
 
  cleanup:
     VIR_DISPOSE_N(secret, secretlen);
-    VIR_DISPOSE_STRING(base64secret);
     virObjectUnref(conn);
     return ret;
 }
@@ -1179,6 +1238,11 @@ libxlMakeNic(virDomainDefPtr def,
     virNetworkPtr network = NULL;
     virConnectPtr conn = NULL;
     virNetDevBandwidthPtr actual_bw;
+    virNetDevVPortProfilePtr port_profile;
+    virNetDevVlanPtr virt_vlan;
+    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    size_t i;
+    const char *script = NULL;
     int ret = -1;
 
     /* TODO: Where is mtu stored?
@@ -1212,17 +1276,18 @@ libxlMakeNic(virDomainDefPtr def,
      * xen commit 32e9d0f ("libxl: nic type defaults to vif in hotplug for
      * hvm guest").
      */
-    if (l_nic->model) {
-        if (def->os.type == VIR_DOMAIN_OSTYPE_XEN &&
-            STRNEQ(l_nic->model, "netfront")) {
+    if (virDomainNetGetModelString(l_nic)) {
+        if ((def->os.type == VIR_DOMAIN_OSTYPE_XEN ||
+            def->os.type == VIR_DOMAIN_OSTYPE_XENPVH) &&
+            l_nic->model != VIR_DOMAIN_NET_MODEL_NETFRONT) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                            _("only model 'netfront' is supported for "
-                             "Xen PV domains"));
+                             "Xen PV(H) domains"));
             return -1;
         }
-        if (VIR_STRDUP(x_nic->model, l_nic->model) < 0)
+        if (VIR_STRDUP(x_nic->model, virDomainNetGetModelString(l_nic)) < 0)
             goto cleanup;
-        if (STREQ(l_nic->model, "netfront"))
+        if (l_nic->model == VIR_DOMAIN_NET_MODEL_NETFRONT)
             x_nic->nictype = LIBXL_NIC_TYPE_VIF;
         else
             x_nic->nictype = LIBXL_NIC_TYPE_VIF_IOEMU;
@@ -1236,14 +1301,50 @@ libxlMakeNic(virDomainDefPtr def,
     if (VIR_STRDUP(x_nic->ifname, l_nic->ifname) < 0)
         goto cleanup;
 
+    port_profile = virDomainNetGetActualVirtPortProfile(l_nic);
+    virt_vlan = virDomainNetGetActualVlan(l_nic);
+    script = l_nic->script;
     switch (actual_type) {
         case VIR_DOMAIN_NET_TYPE_BRIDGE:
+            virBufferAddStr(&buf, virDomainNetGetActualBridgeName(l_nic));
+            /*
+             * A bit of special handling if vif will be connected to an
+             * openvswitch bridge
+             */
+            if (port_profile &&
+                port_profile->virtPortType == VIR_NETDEV_VPORT_PROFILE_OPENVSWITCH) {
+                /*
+                 * If a custom script is not specified for openvswitch, use
+                 * Xen's vif-openvswitch script
+                 */
+                if (!script)
+                    script = "vif-openvswitch";
+                /*
+                 * libxl_device_nic->bridge supports an extended format for
+                 * specifying VLAN tags and trunks when using openvswitch
+                 *
+                 * BRIDGE_NAME[.VLAN][:TRUNK:TRUNK]
+                 *
+                 * See Xen's networking wiki for more details
+                 * https://wiki.xenproject.org/wiki/Xen_Networking#Open_vSwitch
+                 */
+                if (virt_vlan && virt_vlan->nTags > 0) {
+                    if (virt_vlan->trunk) {
+                        for (i = 0; i < virt_vlan->nTags; i++)
+                            virBufferAsprintf(&buf, ":%d", virt_vlan->tag[i]);
+                    } else {
+                        virBufferAsprintf(&buf, ".%d", virt_vlan->tag[0]);
+                    }
+                }
+            }
+            if (virBufferCheckError(&buf) < 0)
+                goto cleanup;
             if (VIR_STRDUP(x_nic->bridge,
-                           virDomainNetGetActualBridgeName(l_nic)) < 0)
+                           virBufferCurrentContent(&buf)) < 0)
                 goto cleanup;
             ATTRIBUTE_FALLTHROUGH;
         case VIR_DOMAIN_NET_TYPE_ETHERNET:
-            if (VIR_STRDUP(x_nic->script, l_nic->script) < 0)
+            if (VIR_STRDUP(x_nic->script, script) < 0)
                 goto cleanup;
             if (l_nic->guestIP.nips > 0) {
                 x_nic->ip = xenMakeIPList(&l_nic->guestIP);
@@ -1340,6 +1441,7 @@ libxlMakeNic(virDomainDefPtr def,
     ret = 0;
 
  cleanup:
+    virBufferFreeAndReset(&buf);
     virObjectUnref(network);
     virObjectUnref(conn);
 
@@ -1441,6 +1543,7 @@ libxlMakeVfb(virPortAllocatorRangePtr graphicsports,
         case VIR_DOMAIN_GRAPHICS_TYPE_RDP:
         case VIR_DOMAIN_GRAPHICS_TYPE_DESKTOP:
         case VIR_DOMAIN_GRAPHICS_TYPE_SPICE:
+        case VIR_DOMAIN_GRAPHICS_TYPE_EGL_HEADLESS:
         case VIR_DOMAIN_GRAPHICS_TYPE_LAST:
             break;
     }
@@ -2364,7 +2467,7 @@ libxlDriverNodeGetInfo(libxlDriverPrivatePtr driver, virNodeInfoPtr info)
         goto cleanup;
     }
 
-    if (virStrcpyStatic(info->model, virArchToString(hostarch)) == NULL) {
+    if (virStrcpyStatic(info->model, virArchToString(hostarch)) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("machine type %s too big for destination"),
                        virArchToString(hostarch));
@@ -2438,7 +2541,7 @@ libxlBuildDomainConfig(virPortAllocatorRangePtr graphicsports,
 
     /*
      * Now that any potential VFBs are defined, update the build info with
-     * the data of the primary display. Some day libxl might implicitely do
+     * the data of the primary display. Some day libxl might implicitly do
      * so but as it does not right now, better be explicit.
      */
     if (libxlMakeVideo(def, d_config) < 0)

@@ -1,9 +1,6 @@
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
-#include <string.h>
 
 #include <sys/types.h>
 #include <fcntl.h>
@@ -140,6 +137,19 @@ mymain(void)
                  TEST_COMPARE_DOM_XML2XML_RESULT_FAIL_PARSE);
     DO_TEST_FULL("cachetune-colliding-types", false, true,
                  TEST_COMPARE_DOM_XML2XML_RESULT_FAIL_PARSE);
+    DO_TEST_FULL("cachetune-colliding-monitor", false, true,
+                 TEST_COMPARE_DOM_XML2XML_RESULT_FAIL_PARSE);
+    DO_TEST("memorytune");
+    DO_TEST_FULL("memorytune-colliding-allocs", false, true,
+                 TEST_COMPARE_DOM_XML2XML_RESULT_FAIL_PARSE);
+    DO_TEST_FULL("memorytune-colliding-cachetune", false, true,
+                 TEST_COMPARE_DOM_XML2XML_RESULT_FAIL_PARSE);
+
+    DO_TEST("tseg");
+
+    DO_TEST("launch-security-sev");
+
+    DO_TEST_DIFFERENT("cputune");
 
     virObjectUnref(caps);
     virObjectUnref(xmlopt);

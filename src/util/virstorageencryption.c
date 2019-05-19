@@ -16,8 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Red Hat Author: Miloslav Trmač <mitr@redhat.com>
  */
 
 #include <config.h>
@@ -40,11 +38,14 @@
 #define VIR_FROM_THIS VIR_FROM_STORAGE
 
 VIR_ENUM_IMPL(virStorageEncryptionSecret,
-              VIR_STORAGE_ENCRYPTION_SECRET_TYPE_LAST, "passphrase")
+              VIR_STORAGE_ENCRYPTION_SECRET_TYPE_LAST,
+              "passphrase",
+);
 
 VIR_ENUM_IMPL(virStorageEncryptionFormat,
               VIR_STORAGE_ENCRYPTION_FORMAT_LAST,
-              "default", "qcow", "luks")
+              "default", "qcow", "luks",
+);
 
 static void
 virStorageEncryptionInfoDefFree(virStorageEncryptionInfoDefPtr def)
@@ -300,7 +301,7 @@ virStorageEncryptionParseNode(xmlNodePtr node,
             /* If no cipher node, then fail */
             if (!encdef->encinfo.cipher_name) {
                 virReportError(VIR_ERR_XML_ERROR, "%s",
-                                _("ivgen element found, but cipher is missing"));
+                               _("ivgen element found, but cipher is missing"));
                 goto cleanup;
             }
 

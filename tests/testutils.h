@@ -16,14 +16,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Karel Zak <kzak@redhat.com>
  */
 
-#ifndef __VIR_TEST_UTILS_H__
-# define __VIR_TEST_UTILS_H__
+#ifndef LIBVIRT_TESTUTILS_H
+# define LIBVIRT_TESTUTILS_H
 
-# include <stdio.h>
 # include "viralloc.h"
 # include "virfile.h"
 # include "virstring.h"
@@ -79,12 +76,12 @@ int virTestDifferenceBin(FILE *stream,
                          const char *expect,
                          const char *actual,
                          size_t length);
-int virTestCompareToFile(const char *strcontent,
+int virTestCompareToFile(const char *actual,
                          const char *filename);
-int virTestCompareToString(const char *strcontent,
-                           const char *strsrc);
-int virTestCompareToULL(unsigned long long content,
-                        unsigned long long src);
+int virTestCompareToString(const char *expect,
+                           const char *actual);
+int virTestCompareToULL(unsigned long long expect,
+                        unsigned long long actual);
 
 unsigned int virTestGetDebug(void);
 unsigned int virTestGetVerbose(void);
@@ -147,6 +144,8 @@ int virTestMain(int argc,
     }
 
 virCapsPtr virTestGenericCapsInit(void);
+int virTestCapsBuildNUMATopology(virCapsPtr caps,
+                                 int seq);
 virDomainXMLOptionPtr virTestGenericDomainXMLConfInit(void);
 
 typedef enum {
@@ -165,4 +164,4 @@ int testCompareDomXML2XMLFiles(virCapsPtr caps,
                                unsigned int parseFlags,
                                testCompareDomXML2XMLResult expectResult);
 
-#endif /* __VIR_TEST_UTILS_H__ */
+#endif /* LIBVIRT_TESTUTILS_H */

@@ -16,12 +16,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Dave Allan <dallan@redhat.com>
  */
 
+#pragma once
+
 #include <libudev.h>
-#include <stdint.h>
 
 #define SYSFS_DATA_SIZE 4096
 #define DMI_DEVPATH "/sys/devices/virtual/dmi/id"

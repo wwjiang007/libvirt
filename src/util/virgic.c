@@ -16,8 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Andrea Bolognani <abologna@redhat.com>
  */
 
 #include <config.h>
@@ -25,7 +23,8 @@
 #include "virgic.h"
 #include "virutil.h"
 
-VIR_ENUM_IMPL(virGICVersion, VIR_GIC_VERSION_LAST,
+VIR_ENUM_IMPL(virGICVersion,
+              VIR_GIC_VERSION_LAST,
               "none",
               "host",
               "2",

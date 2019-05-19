@@ -17,8 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel Veillard <veillard@redhat.com>
  */
 
 #include <config.h>
@@ -27,8 +25,6 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <stdlib.h>
-#include <stdio.h>
 
 #include "virerror.h"
 #include "virsysinfo.h"
@@ -38,15 +34,17 @@
 #include "virfile.h"
 #include "virstring.h"
 
-#define __VIR_SYSINFO_PRIV_H_ALLOW__
+#define LIBVIRT_VIRSYSINFOPRIV_H_ALLOW
 #include "virsysinfopriv.h"
 
 #define VIR_FROM_THIS VIR_FROM_SYSINFO
 
 VIR_LOG_INIT("util.sysinfo");
 
-VIR_ENUM_IMPL(virSysinfo, VIR_SYSINFO_LAST,
-              "smbios");
+VIR_ENUM_IMPL(virSysinfo,
+              VIR_SYSINFO_LAST,
+              "smbios",
+);
 
 static const char *sysinfoDmidecode = DMIDECODE;
 static const char *sysinfoSysinfo = "/proc/sysinfo";
@@ -846,8 +844,12 @@ virSysinfoParseX86BaseBoard(const char *base,
             nboards--;
     }
 
-    /* This is safe, as we can be only shrinking the memory */
-    ignore_value(VIR_REALLOC_N(boards, nboards));
+    if (nboards == 0) {
+        VIR_FREE(boards);
+    } else {
+        /* This is safe, as we can be only shrinking the memory */
+        ignore_value(VIR_REALLOC_N(boards, nboards));
+    }
 
     *baseBoard = boards;
     *nbaseBoard = nboards;
@@ -1214,13 +1216,12 @@ virSysinfoRead(void)
     return virSysinfoReadARM();
 #elif defined(__s390__) || defined(__s390x__)
     return virSysinfoReadS390();
-#elif defined(WIN32) || \
-    !(defined(__x86_64__) || \
-      defined(__i386__) || \
-      defined(__amd64__) || \
-      defined(__arm__) || \
-      defined(__aarch64__) || \
-      defined(__powerpc__))
+#elif !defined(WIN32) && \
+    (defined(__x86_64__) || \
+     defined(__i386__) || \
+     defined(__amd64__))
+    return virSysinfoReadX86();
+#else /* WIN32 || not supported arch */
     /*
      * this can probably be extracted from Windows using API or registry
      * http://www.microsoft.com/whdc/system/platform/firmware/SMBIOS.mspx
@@ -1228,9 +1229,7 @@ virSysinfoRead(void)
     virReportSystemError(ENOSYS, "%s",
                          _("Host sysinfo extraction not supported on this platform"));
     return NULL;
-#else /* !WIN32 && x86 */
-    return virSysinfoReadX86();
-#endif /* !WIN32 && x86 */
+#endif /* WIN32 || not supported arch */
 }
 
 
@@ -1603,7 +1602,7 @@ virSysinfoBaseBoardIsEqual(virSysinfoBaseBoardDefPtr src,
 
 static bool
 virSysinfoChassisIsEqual(virSysinfoChassisDefPtr src,
-                           virSysinfoChassisDefPtr dst)
+                         virSysinfoChassisDefPtr dst)
 {
     bool identical = false;
 

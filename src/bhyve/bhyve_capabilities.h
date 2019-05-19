@@ -19,8 +19,8 @@
  *
  */
 
-#ifndef _BHYVE_CAPABILITIES
-# define _BHYVE_CAPABILITIES
+#ifndef LIBVIRT_BHYVE_CAPABILITIES_H
+# define LIBVIRT_BHYVE_CAPABILITIES_H
 
 # include "capabilities.h"
 # include "conf/domain_capabilities.h"
@@ -49,9 +49,10 @@ typedef enum {
     BHYVE_CAP_LPC_BOOTROM = 1 << 3,
     BHYVE_CAP_FBUF = 1 << 4,
     BHYVE_CAP_XHCI = 1 << 5,
+    BHYVE_CAP_CPUTOPOLOGY = 1 << 6,
 } virBhyveCapsFlags;
 
 int virBhyveProbeGrubCaps(virBhyveGrubCapsFlags *caps);
 int virBhyveProbeCaps(unsigned int *caps);
 
-#endif
+#endif /* LIBVIRT_BHYVE_CAPABILITIES_H */

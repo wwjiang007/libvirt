@@ -19,10 +19,11 @@
  *
  */
 
-#ifndef __VIRT_ERROR_H_
-# define __VIRT_ERROR_H_
+#ifndef LIBVIRT_VIRERROR_H
+# define LIBVIRT_VIRERROR_H
 
 # include "internal.h"
+# include "virautoclean.h"
 
 # define VIR_ERROR_MAX_LENGTH 1024
 
@@ -205,4 +206,6 @@ bool virLastErrorIsSystemErrno(int errnum);
 void virErrorPreserveLast(virErrorPtr *saveerr);
 void virErrorRestore(virErrorPtr *savederr);
 
-#endif
+VIR_DEFINE_AUTOPTR_FUNC(virError, virFreeError);
+
+#endif /* LIBVIRT_VIRERROR_H */

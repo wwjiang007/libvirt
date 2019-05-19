@@ -14,11 +14,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Daniel Veillard <veillard@redhat.com>
- *     Laine Stump <laine@laine.org>
- *     Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -26,8 +21,8 @@
 #include "virsocketaddr.h"
 #include "virerror.h"
 #include "virstring.h"
-#include "viralloc.h"
 #include "virbuffer.h"
+#include "viralloc.h"
 
 #include <netdb.h>
 
@@ -433,10 +428,10 @@ virSocketAddrFormatFull(const virSocketAddr *addr,
         if (withService) {
             if (virAsprintf(&addrstr, VIR_LOOPBACK_IPV4_ADDR"%s0",
                             separator ? separator : ":") < 0)
-                goto error;
+                return NULL;
         } else {
             if (VIR_STRDUP(addrstr, VIR_LOOPBACK_IPV4_ADDR) < 0)
-                goto error;
+                return NULL;
         }
         return addrstr;
     }
@@ -453,33 +448,27 @@ virSocketAddrFormatFull(const virSocketAddr *addr,
     }
 
     if (withService) {
-        char *ipv6_host = NULL;
+        VIR_AUTOFREE(char *) ipv6_host = NULL;
         /* sasl_new_client demands the socket address to be in an odd format:
          * a.b.c.d;port or e:f:g:h:i:j:k:l;port, so use square brackets for
          * IPv6 only if no separator is passed to the function
          */
         if (!separator && VIR_SOCKET_ADDR_FAMILY(addr) == AF_INET6) {
             if (virAsprintf(&ipv6_host, "[%s]", host) < 0)
-                goto error;
+                return NULL;
         }
 
         if (virAsprintf(&addrstr, "%s%s%s",
                         ipv6_host ? ipv6_host : host,
                         separator ? separator : ":", port) == -1) {
-            VIR_FREE(ipv6_host);
-            goto error;
+            return NULL;
         }
-
-        VIR_FREE(ipv6_host);
     } else {
         if (VIR_STRDUP(addrstr, host) < 0)
-            goto error;
+            return NULL;
     }
 
     return addrstr;
-
- error:
-    return NULL;
 }
 
 
@@ -760,24 +749,26 @@ virSocketAddrGetRange(virSocketAddrPtr start, virSocketAddrPtr end,
     int ret = 0;
     size_t i;
     virSocketAddr netmask;
-    char *startStr = NULL, *endStr = NULL, *netStr = NULL;
+    VIR_AUTOFREE(char *) startStr = NULL;
+    VIR_AUTOFREE(char *) endStr = NULL;
+    VIR_AUTOFREE(char *) netStr = NULL;
 
     if (start == NULL || end == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("NULL argument - %p %p"), start, end);
-        goto error;
+        return -1;
     }
 
     startStr = virSocketAddrFormat(start);
     endStr = virSocketAddrFormat(end);
     if (!startStr || !endStr)
-        goto error; /*error already reported */
+        return -1; /*error already reported */
 
     if (VIR_SOCKET_ADDR_FAMILY(start) != VIR_SOCKET_ADDR_FAMILY(end)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("mismatch of address family in range %s - %s"),
                        startStr, endStr);
-        goto error;
+        return -1;
     }
 
     if (network) {
@@ -785,14 +776,14 @@ virSocketAddrGetRange(virSocketAddrPtr start, virSocketAddrPtr end,
          * network the range should be within
          */
         if (!(netStr = virSocketAddrFormat(network)))
-            goto error;
+            return -1;
 
         if (VIR_SOCKET_ADDR_FAMILY(start) != VIR_SOCKET_ADDR_FAMILY(network)) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("mismatch of address family in "
                              "range %s - %s for network %s"),
                            startStr, endStr, netStr);
-            goto error;
+            return -1;
         }
 
         if (prefix < 0 ||
@@ -802,7 +793,7 @@ virSocketAddrGetRange(virSocketAddrPtr start, virSocketAddrPtr end,
                            _("bad prefix %d for network %s when "
                              " checking range %s - %s"),
                            prefix, netStr, startStr, endStr);
-            goto error;
+            return -1;
         }
 
         /* both start and end of range need to be within network */
@@ -812,7 +803,7 @@ virSocketAddrGetRange(virSocketAddrPtr start, virSocketAddrPtr end,
                            _("range %s - %s is not entirely within "
                              "network %s/%d"),
                            startStr, endStr, netStr, prefix);
-            goto error;
+            return -1;
         }
 
         if (VIR_SOCKET_ADDR_IS_FAMILY(start, AF_INET)) {
@@ -824,7 +815,7 @@ virSocketAddrGetRange(virSocketAddrPtr start, virSocketAddrPtr end,
                                _("failed to construct broadcast or network "
                                  "address for network %s/%d"),
                                netStr, prefix);
-                goto error;
+                return -1;
             }
 
             /* Don't allow the start of the range to be the network
@@ -839,7 +830,7 @@ virSocketAddrGetRange(virSocketAddrPtr start, virSocketAddrPtr end,
                                _("start of range %s - %s in network %s/%d "
                                  "is the network address"),
                                startStr, endStr, netStr, prefix);
-                goto error;
+                return -1;
             }
 
             if (virSocketAddrEqual(end, &broadcast)) {
@@ -847,7 +838,7 @@ virSocketAddrGetRange(virSocketAddrPtr start, virSocketAddrPtr end,
                                _("end of range %s - %s in network %s/%d "
                                  "is the broadcast address"),
                                startStr, endStr, netStr, prefix);
-                goto error;
+                return -1;
             }
         }
     }
@@ -861,7 +852,7 @@ virSocketAddrGetRange(virSocketAddrPtr start, virSocketAddrPtr end,
                            _("failed to get IPv4 address "
                              "for start or end of range %s - %s"),
                            startStr, endStr);
-            goto error;
+            return -1;
         }
 
         /* legacy check that everything except the last two bytes
@@ -869,10 +860,10 @@ virSocketAddrGetRange(virSocketAddrPtr start, virSocketAddrPtr end,
          */
         for (i = 0; i < 2; i++) {
             if (t1[i] != t2[i]) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("range %s - %s is too large (> 65535)"),
-                           startStr, endStr);
-            goto error;
+                virReportError(VIR_ERR_INTERNAL_ERROR,
+                               _("range %s - %s is too large (> 65535)"),
+                               startStr, endStr);
+                return -1;
             }
         }
         ret = (t2[2] - t1[2]) * 256 + (t2[3] - t1[3]);
@@ -880,7 +871,7 @@ virSocketAddrGetRange(virSocketAddrPtr start, virSocketAddrPtr end,
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("range %s - %s is reversed "),
                            startStr, endStr);
-            goto error;
+            return -1;
         }
         ret++;
     } else if (VIR_SOCKET_ADDR_IS_FAMILY(start, AF_INET6)) {
@@ -892,7 +883,7 @@ virSocketAddrGetRange(virSocketAddrPtr start, virSocketAddrPtr end,
                            _("failed to get IPv6 address "
                              "for start or end of range %s - %s"),
                            startStr, endStr);
-            goto error;
+            return -1;
         }
 
         /* legacy check that everything except the last two bytes are
@@ -903,7 +894,7 @@ virSocketAddrGetRange(virSocketAddrPtr start, virSocketAddrPtr end,
                 virReportError(VIR_ERR_INTERNAL_ERROR,
                                _("range %s - %s is too large (> 65535)"),
                                startStr, endStr);
-                goto error;
+                return -1;
             }
         }
         ret = t2[7] - t1[7];
@@ -911,7 +902,7 @@ virSocketAddrGetRange(virSocketAddrPtr start, virSocketAddrPtr end,
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("range %s - %s start larger than end"),
                            startStr, endStr);
-            goto error;
+            return -1;
         }
         ret++;
     } else {
@@ -919,18 +910,10 @@ virSocketAddrGetRange(virSocketAddrPtr start, virSocketAddrPtr end,
                        _("unsupported address family "
                          "for range %s - %s, must be ipv4 or ipv6"),
                        startStr, endStr);
-        goto error;
+        return -1;
     }
 
- cleanup:
-    VIR_FREE(startStr);
-    VIR_FREE(endStr);
-    VIR_FREE(netStr);
     return ret;
-
- error:
-    ret = -1;
-    goto cleanup;
 }
 
 
@@ -1050,6 +1033,7 @@ virSocketAddrPrefixToNetmask(unsigned int prefix,
         ip = prefix ? ~((1 << (32 - prefix)) - 1) : 0;
         netmask->data.inet4.sin_addr.s_addr = htonl(ip);
         netmask->data.stor.ss_family = AF_INET;
+        netmask->len = sizeof(struct sockaddr_in);
         result = 0;
 
     } else if (family == AF_INET6) {
@@ -1073,6 +1057,7 @@ virSocketAddrPrefixToNetmask(unsigned int prefix,
             netmask->data.inet6.sin6_addr.s6_addr[i++] = 0;
         }
         netmask->data.stor.ss_family = AF_INET6;
+        netmask->len = sizeof(struct sockaddr_in6);
         result = 0;
     }
 
@@ -1181,7 +1166,7 @@ virSocketAddrIsNumericLocalhost(const char *addr)
     switch (res.data.stor.ss_family) {
     case AF_INET:
         return memcmp(&res.data.inet4.sin_addr.s_addr, &tmp.s_addr,
-                     sizeof(res.data.inet4.sin_addr.s_addr)) == 0;
+                      sizeof(res.data.inet4.sin_addr.s_addr)) == 0;
     case AF_INET6:
         return IN6_IS_ADDR_LOOPBACK(&res.data.inet6.sin6_addr);
     }
@@ -1252,4 +1237,10 @@ virSocketAddrPTRDomain(const virSocketAddr *addr,
  unsupported:
     ret = -2;
     goto cleanup;
+}
+
+void
+virSocketAddrFree(virSocketAddrPtr addr)
+{
+    VIR_FREE(addr);
 }

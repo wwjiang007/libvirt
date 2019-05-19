@@ -23,31 +23,18 @@ AC_DEFUN([LIBVIRT_ARG_YAJL],[
 
 AC_DEFUN([LIBVIRT_CHECK_YAJL],[
   dnl YAJL JSON library http://lloyd.github.com/yajl/
-  if test "$with_qemu:$with_yajl" = yes:check; then
-    dnl Some versions of qemu require the use of yajl; try to detect them
-    dnl here, although we do not require qemu to exist in order to compile.
-    dnl This check mirrors src/qemu/qemu_capabilities.c
-    AC_PATH_PROGS([QEMU], [qemu-kvm qemu kvm qemu-system-x86_64],
-                  [], [$PATH:/usr/bin:/usr/libexec])
-    if test -x "$QEMU"; then
-      if $QEMU -help 2>/dev/null | grep -q libvirt; then
-        with_yajl=yes
-      else
-        [qemu_version_sed='s/.*ersion \([0-9.,]*\).*/\1/']
-        qemu_version=`$QEMU -version | sed "$qemu_version_sed"`
-        case $qemu_version in
-          [[1-9]].* | 0.15.* ) with_yajl=yes ;;
-          0.* | '' ) ;;
-          *) AC_MSG_ERROR([Unexpected qemu version string]) ;;
-        esac
-      fi
-    fi
-  fi
 
-  LIBVIRT_CHECK_LIB_ALT([YAJL], [yajl],
-                        [yajl_parse_complete], [yajl/yajl_common.h],
-                        [YAJL2], [yajl],
-                        [yajl_tree_parse], [yajl/yajl_common.h])
+  PKG_CHECK_EXISTS([readline], [use_pkgconfig=1], [use_pkgconfig=0])
+
+  if test $use_pkgconfig = 1; then
+    dnl 2.0.3 was the version where the pkg-config file was first added
+    LIBVIRT_CHECK_PKG([YAJL], [yajl], [2.0.3])
+  else
+    dnl SLES 12 and openSUSE Leap 42.3 still use 2.0.1
+    dnl TODO: delete this in July 2020
+    LIBVIRT_CHECK_LIB([YAJL], [yajl],
+                      [yajl_tree_parse], [yajl/yajl_common.h])
+  fi
 ])
 
 AC_DEFUN([LIBVIRT_RESULT_YAJL],[

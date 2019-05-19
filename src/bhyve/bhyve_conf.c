@@ -25,6 +25,7 @@
 #include "virlog.h"
 #include "virstring.h"
 #include "bhyve_conf.h"
+#include "bhyve_domain.h"
 #include "configmake.h"
 
 #define VIR_FROM_THIS VIR_FROM_BHYVE
@@ -36,13 +37,13 @@ static void virBhyveDriverConfigDispose(void *obj);
 
 static int virBhyveConfigOnceInit(void)
 {
-     if (!VIR_CLASS_NEW(virBhyveDriverConfig, virClassForObject()))
-         return -1;
+    if (!VIR_CLASS_NEW(virBhyveDriverConfig, virClassForObject()))
+        return -1;
 
-     return 0;
+    return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(virBhyveConfig)
+VIR_ONCE_GLOBAL_INIT(virBhyveConfig);
 
 virBhyveDriverConfigPtr
 virBhyveDriverConfigNew(void)
@@ -106,4 +107,19 @@ virBhyveDriverConfigDispose(void *obj)
     virBhyveDriverConfigPtr cfg = obj;
 
     VIR_FREE(cfg->firmwareDir);
+}
+
+void
+bhyveDomainCmdlineDefFree(bhyveDomainCmdlineDefPtr def)
+{
+    size_t i;
+
+    if (!def)
+        return;
+
+    for (i = 0; i < def->num_args; i++)
+        VIR_FREE(def->args[i]);
+
+    VIR_FREE(def->args);
+    VIR_FREE(def);
 }

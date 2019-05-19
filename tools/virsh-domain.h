@@ -16,18 +16,21 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- *  Daniel Veillard <veillard@redhat.com>
- *  Karel Zak <kzak@redhat.com>
- *  Daniel P. Berrange <berrange@redhat.com>
- *
  */
 
-#ifndef VIRSH_DOMAIN_H
-# define VIRSH_DOMAIN_H
+#ifndef LIBVIRT_VIRSH_DOMAIN_H
+# define LIBVIRT_VIRSH_DOMAIN_H
 
 # include "virsh.h"
 
+struct virshDomainEventCallback {
+    const char *name;
+    virConnectDomainEventGenericCallback cb;
+};
+typedef struct virshDomainEventCallback virshDomainEventCallback;
+
+extern virshDomainEventCallback virshDomainEventCallbacks[];
+
 extern const vshCmdDef domManagementCmds[];
 
-#endif /* VIRSH_DOMAIN_H */
+#endif /* LIBVIRT_VIRSH_DOMAIN_H */

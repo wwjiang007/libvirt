@@ -16,9 +16,6 @@
 # You should have received a copy of the GNU Lesser General Public
 # License along with this library.  If not, see
 # <http://www.gnu.org/licenses/>.
-#
-# Authors:
-#     Daniel P. Berrange <berrange@redhat.com>
 
 use strict;
 use warnings;
@@ -44,9 +41,6 @@ foreach my $file (@ARGV) {
 
         # Kill any quoted strings
         $data =~ s,"(?:[^\\\"]|\\.)*","XXX",g;
-
-        # Kill any C++ style comments
-        $data =~ s,//.*$,//,;
 
         next if $data =~ /^#/;
 

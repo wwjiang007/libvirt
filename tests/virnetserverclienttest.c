@@ -14,8 +14,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -73,9 +71,7 @@ static int testIdentity(const void *opaque ATTRIBUTE_UNUSED)
     sv[0] = -1;
 
     if (!(client = virNetServerClientNew(1, sock, 0, false, 1,
-# ifdef WITH_GNUTLS
                                          NULL,
-# endif
                                          testClientNew,
                                          NULL,
                                          testClientFree,
@@ -152,7 +148,8 @@ static int testIdentity(const void *opaque ATTRIBUTE_UNUSED)
     ret = 0;
  cleanup:
     virObjectUnref(sock);
-    virNetServerClientClose(client);
+    if (client)
+        virNetServerClientClose(client);
     virObjectUnref(client);
     virObjectUnref(ident);
     VIR_FORCE_CLOSE(sv[0]);

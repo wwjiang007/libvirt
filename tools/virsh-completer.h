@@ -16,13 +16,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- *  Michal Privoznik <mprivozn@redhat.com>
- *
  */
 
-#ifndef VIRSH_COMPLETER
-# define VIRSH_COMPLETER
+#ifndef LIBVIRT_VIRSH_COMPLETER_H
+# define LIBVIRT_VIRSH_COMPLETER_H
 
 # include "vsh.h"
 
@@ -37,6 +34,10 @@ enum {
 char ** virshDomainInterfaceCompleter(vshControl *ctl,
                                       const vshCmd *cmd,
                                       unsigned int flags);
+
+char ** virshDomainDiskTargetCompleter(vshControl *ctl,
+                                       const vshCmd *cmd,
+                                       unsigned int flags);
 
 char ** virshStoragePoolNameCompleter(vshControl *ctl,
                                       const vshCmd *cmd,
@@ -54,6 +55,10 @@ char ** virshNetworkNameCompleter(vshControl *ctl,
                                   const vshCmd *cmd,
                                   unsigned int flags);
 
+char ** virshNetworkEventNameCompleter(vshControl *ctl,
+                                       const vshCmd *cmd,
+                                       unsigned int flags);
+
 char ** virshNodeDeviceNameCompleter(vshControl *ctl,
                                      const vshCmd *cmd,
                                      unsigned int flags);
@@ -61,6 +66,10 @@ char ** virshNodeDeviceNameCompleter(vshControl *ctl,
 char ** virshNWFilterNameCompleter(vshControl *ctl,
                                    const vshCmd *cmd,
                                    unsigned int flags);
+
+char ** virshNWFilterBindingNameCompleter(vshControl *ctl,
+                                          const vshCmd *cmd,
+                                          unsigned int flags);
 
 char ** virshSecretUUIDCompleter(vshControl *ctl,
                                  const vshCmd *cmd,
@@ -70,4 +79,39 @@ char ** virshSnapshotNameCompleter(vshControl *ctl,
                                    const vshCmd *cmd,
                                    unsigned int flags);
 
-#endif
+char ** virshAllocpagesPagesizeCompleter(vshControl *ctl,
+                                         const vshCmd *cmd,
+                                         unsigned int flags);
+
+char ** virshSecretEventNameCompleter(vshControl *ctl,
+                                      const vshCmd *cmd,
+                                      unsigned int flags);
+
+char ** virshDomainEventNameCompleter(vshControl *ctl,
+                                      const vshCmd *cmd,
+                                      unsigned int flags);
+
+char ** virshPoolEventNameCompleter(vshControl *ctl,
+                                    const vshCmd *cmd,
+                                    unsigned int flags);
+
+char ** virshDomainInterfaceStateCompleter(vshControl *ctl,
+                                           const vshCmd *cmd,
+                                           unsigned int flags);
+
+char ** virshNodedevEventNameCompleter(vshControl *ctl,
+                                       const vshCmd *cmd,
+                                       unsigned int flags);
+
+char ** virshDomainDeviceAliasCompleter(vshControl *ctl,
+                                        const vshCmd *cmd,
+                                        unsigned int flags);
+
+char ** virshCellnoCompleter(vshControl *ctl,
+                             const vshCmd *cmd,
+                             unsigned int flags);
+
+char ** virshDomainShutdownModeCompleter(vshControl *ctl,
+                                         const vshCmd *cmd,
+                                         unsigned int flags);
+#endif /* LIBVIRT_VIRSH_COMPLETER_H */

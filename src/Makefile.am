@@ -16,16 +16,10 @@
 ## License along with this library.  If not, see
 ## <http://www.gnu.org/licenses/>.
 
-# old automake does not provide abs_{src,build}dir variables
-abs_builddir = $(shell pwd)
-abs_topbuilddir = $(shell cd .. && pwd)
-abs_srcdir = $(shell cd $(srcdir) && pwd)
-abs_topsrcdir = $(shell cd $(top_srcdir) && pwd)
-
 # No libraries with the exception of LIBXML should be listed
 # here. List them against the individual XXX_la_CFLAGS targets
-# that actually use them. Also keep GETTEXT_CPPFLAGS at the end.
-INCLUDES =	-I../gnulib/lib \
+# that actually use them.
+AM_CPPFLAGS =	-I../gnulib/lib \
 		-I$(top_srcdir)/gnulib/lib \
 		-I$(top_srcdir) \
 		-I../include \
@@ -33,9 +27,9 @@ INCLUDES =	-I../gnulib/lib \
 		-I$(srcdir)/util \
 		-I./util \
 		-DIN_LIBVIRT \
-		-Dabs_topbuilddir="\"$(abs_topbuilddir)\"" \
-		-Dabs_topsrcdir="\"$(abs_topsrcdir)\"" \
-		$(GETTEXT_CPPFLAGS)
+		-Dabs_top_builddir="\"$(abs_top_builddir)\"" \
+		-Dabs_top_srcdir="\"$(abs_top_srcdir)\"" \
+		$(NULL)
 
 WARN_CFLAGS += $(STRICT_FRAME_LIMIT_CFLAGS)
 
@@ -43,15 +37,18 @@ AM_CFLAGS =	$(LIBXML_CFLAGS) \
 		$(WARN_CFLAGS) \
 		$(LOCK_CHECKING_CFLAGS) \
 		$(WIN32_EXTRA_CFLAGS) \
-		$(COVERAGE_CFLAGS)
+		$(NULL)
 AM_LDFLAGS =	$(DRIVER_MODULES_LDFLAGS) \
-		$(COVERAGE_LDFLAGS) \
 		$(RELRO_LDFLAGS) \
 		$(NO_INDIRECT_LDFLAGS) \
 		$(CYGWIN_EXTRA_LDFLAGS) \
 		$(MINGW_EXTRA_LDFLAGS) \
 		$(NULL)
-AM_LDFLAGS_MOD = -module -avoid-version $(AM_LDFLAGS)
+AM_LDFLAGS_MOD = \
+	-module \
+	-avoid-version \
+	$(LIBVIRT_NODELETE) \
+	$(AM_LDFLAGS)
 AM_LDFLAGS_MOD_NOUNDEF = $(AM_LDFLAGS_MOD) $(NO_UNDEFINED_LDFLAGS)
 
 POD2MAN = pod2man -c "Virtualization Support" -r "$(PACKAGE)-$(VERSION)"
@@ -68,6 +65,8 @@ STATEFUL_DRIVER_SOURCE_FILES =
 noinst_LTLIBRARIES =
 mod_LTLIBRARIES =
 INSTALL_DATA_DIRS =
+INSTALL_DATA_LOCAL =
+UNINSTALL_LOCAL =
 libvirt_la_BUILT_LIBADD =
 SYM_FILES =
 USED_SYM_FILES =
@@ -85,8 +84,6 @@ LOGROTATE_FILES_IN =
 PODFILES =
 MANINFILES =
 SYSTEMD_UNIT_FILES_IN =
-SYSVINIT_FILES_IN =
-UPSTART_FILES =
 SYSCONF_FILES =
 sbin_PROGRAMS =
 man8_MANS =
@@ -96,13 +93,13 @@ man7_MANS =
 include util/Makefile.inc.am
 include conf/Makefile.inc.am
 include cpu/Makefile.inc.am
+include cpu_map/Makefile.inc.am
 include security/Makefile.inc.am
 include access/Makefile.inc.am
 include logging/Makefile.inc.am
 include locking/Makefile.inc.am
 include admin/Makefile.inc.am
 include rpc/Makefile.inc.am
-include uml/Makefile.inc.am
 include phyp/Makefile.inc.am
 include test/Makefile.inc.am
 include esx/Makefile.inc.am
@@ -360,12 +357,6 @@ check-local: check-protocol check-symfile check-symsorting \
 .PHONY: check-protocol $(PROTOCOL_STRUCTS:structs=struct)
 
 
-
-
-pkgdata_DATA =	cpu/cpu_map.xml
-
-EXTRA_DIST +=	$(pkgdata_DATA)
-
 #########################
 #
 # Build up list of libvirt.la source files based on configure conditions
@@ -413,7 +404,6 @@ check-local: check-augeas
 check-augeas: $(AUGEAS_DIRS:%=check-augeas-%)
 
 AUG_GENTEST = $(PERL) $(top_srcdir)/build-aux/augeas-gentest.pl
-EXTRA_DIST += $(top_srcdir)/build-aux/augeas-gentest.pl
 
 
 #
@@ -448,12 +438,6 @@ USED_SYM_FILES += $(srcdir)/libvirt_sasl.syms
 else ! WITH_SASL
 SYM_FILES += $(srcdir)/libvirt_sasl.syms
 endif ! WITH_SASL
-
-if WITH_GNUTLS
-USED_SYM_FILES += $(srcdir)/libvirt_gnutls.syms
-else ! WITH_GNUTLS
-SYM_FILES += $(srcdir)/libvirt_gnutls.syms
-endif ! WITH_GNUTLS
 
 if WITH_SSH2
 USED_SYM_FILES += $(srcdir)/libvirt_libssh2.syms
@@ -529,7 +513,9 @@ libvirt_admin_la_SOURCES = \
 libvirt_admin_la_LDFLAGS = \
 		$(VERSION_SCRIPT_FLAGS)$(LIBVIRT_ADMIN_SYMBOL_FILE) \
 		-version-info $(LIBVIRT_VERSION_INFO) \
-		$(AM_LDFLAGS)
+		$(LIBVIRT_NODELETE) \
+		$(AM_LDFLAGS) \
+		$(NULL)
 
 libvirt_admin_la_LIBADD = \
 		libvirt.la \
@@ -644,6 +630,7 @@ libvirt_qemu_la_SOURCES = libvirt-qemu.c
 libvirt_qemu_la_LDFLAGS = \
 		$(VERSION_SCRIPT_FLAGS)$(LIBVIRT_QEMU_SYMBOL_FILE) \
 		-version-info $(LIBVIRT_VERSION_INFO) \
+		$(LIBVIRT_NODELETE) \
 		$(AM_LDFLAGS) \
 		$(NULL)
 libvirt_qemu_la_CFLAGS = $(AM_CFLAGS)
@@ -653,6 +640,7 @@ libvirt_lxc_la_SOURCES = libvirt-lxc.c
 libvirt_lxc_la_LDFLAGS = \
 		$(VERSION_SCRIPT_FLAGS)$(LIBVIRT_LXC_SYMBOL_FILE) \
 		-version-info $(LIBVIRT_VERSION_INFO) \
+		$(LIBVIRT_NODELETE) \
 		$(AM_LDFLAGS) \
 		$(NULL)
 libvirt_lxc_la_CFLAGS = $(AM_CFLAGS)
@@ -660,7 +648,7 @@ libvirt_lxc_la_LIBADD = libvirt.la $(CYGWIN_EXTRA_LIBADD)
 
 # Since virt-login-shell will be setuid, we must do everything
 # we can to avoid linking to other libraries. Many of them do
-# unsafe things in functions marked __atttribute__((constructor)).
+# unsafe things in functions marked __attribute__((constructor)).
 # This library is built to include the bare minimum required to
 # have a RPC client for local UNIX socket access only. We use
 # the ../config-post.h header to disable all external deps that
@@ -673,12 +661,17 @@ libvirt_setuid_rpc_client_la_SOURCES = \
 		util/virarch.c \
 		util/viratomic.c \
 		util/viratomic.h \
+		util/virautoclean.h \
 		util/virbitmap.c \
 		util/virbuffer.c \
 		util/vircgroup.c \
+		util/vircgroupbackend.c \
+		util/vircgroupv1.c \
+		util/vircgroupv2.c \
 		util/vircommand.c \
 		util/virconf.c \
 		util/virdbus.c \
+		util/virenum.c \
 		util/virerror.c \
 		util/virevent.c \
 		util/vireventpoll.c \
@@ -760,7 +753,7 @@ install-sysconfig:
 	for f in $(SYSCONF_FILES:%.sysconf=%) ; \
 	do \
 	  tgt=`basename $$f`; \
-	  $(INSTALL_SCRIPT) $(srcdir)/$$f.sysconf \
+	  $(INSTALL_DATA) $(srcdir)/$$f.sysconf \
 	      $(DESTDIR)$(sysconfdir)/sysconfig/$$tgt; \
 	done
 
@@ -771,14 +764,6 @@ uninstall-sysconfig:
 	  rm -f $(DESTDIR)$(sysconfdir)/sysconfig/$$tgt; \
 	done
 	rmdir $(DESTDIR)$(sysconfdir)/sysconfig || :
-
-SYSVINIT_FILES_IN += \
-	locking/virtlockd.init.in \
-	$(NULL)
-
-SYSVINIT_FILES = $(notdir $(SYSVINIT_FILES_IN:%.in=%))
-
-EXTRA_DIST += $(SYSVINIT_FILES_IN)
 
 LOGROTATE_FILES := $(LOGROTATE_FILES_IN:remote/%.in=%)
 
@@ -806,29 +791,10 @@ install-logrotate: $(LOGROTATE_FILES)
 uninstall-logrotate:
 	rm -f $(LOGROTATE_FILES:%.logrotate=$(DESTDIR)$(sysconfdir)/logrotate.d/%)
 	rmdir $(DESTDIR)$(sysconfdir)/logrotate.d || :
-else ! WITH_LIBVIRTD
-install-logrotate:
-uninstall-logrotate:
-endif ! WITH_LIBVIRTD
 
-if LIBVIRT_INIT_SCRIPT_RED_HAT
-install-init:: $(SYSVINIT_FILES) install-sysconfig
-	$(MKDIR_P) $(DESTDIR)$(sysconfdir)/rc.d/init.d
-	for f in $(SYSVINIT_FILES:%.init=%) ; \
-	do \
-	  $(INSTALL_SCRIPT) $$f.init $(DESTDIR)$(sysconfdir)/rc.d/init.d/$$f; \
-	done
-
-uninstall-init:: uninstall-sysconfig
-	rm -f $(SYSVINIT_FILES:%.init=$(DESTDIR)$(sysconfdir)/rc.d/init.d/%)
-	rmdir $(DESTDIR)$(sysconfdir)/rc.d/init.d || :
-
-BUILT_SOURCES += $(SYSVINIT_FILES)
-DISTCLEANFILES += $(SYSVINIT_FILES)
-else ! LIBVIRT_INIT_SCRIPT_RED_HAT
-install-init::
-uninstall-init::
-endif ! LIBVIRT_INIT_SCRIPT_RED_HAT
+INSTALL_DATA_LOCAL += install-logrotate
+UNINSTALL_LOCAL += uninstall-logrotate
+endif WITH_LIBVIRTD
 
 
 %.8: %.8.in $(top_srcdir)/configure.ac
@@ -867,45 +833,11 @@ install-systemd: $(SYSTEMD_UNIT_FILES) install-sysconfig
 uninstall-systemd: uninstall-sysconfig
 	rm -f $(SYSTEMD_UNIT_FILES:%=$(DESTDIR)$(SYSTEMD_UNIT_DIR)/%)
 	rmdir $(DESTDIR)$(SYSTEMD_UNIT_DIR) || :
-else ! LIBVIRT_INIT_SCRIPT_SYSTEMD
-install-systemd:
-uninstall-systemd:
-endif ! LIBVIRT_INIT_SCRIPT_SYSTEMD
-else ! WITH_LIBVIRTD
-install-systemd:
-uninstall-systemd:
-endif ! WITH_LIBVIRTD
 
-
-EXTRA_DIST += $(UPSTART_FILES)
-
-if WITH_LIBVIRTD
-if LIBVIRT_INIT_SCRIPT_UPSTART
-
-install-upstart: install-sysconfig
-	$(MKDIR_P) $(DESTDIR)$(sysconfdir)/event.d
-	for f in $(UPSTART_FILES:%.upstart=%); \
-	do \
-	  tgt=`basename $$f` ; \
-	  $(INSTALL_SCRIPT) $(srcdir)/$$f.upstart \
-	      $(DESTDIR)$(sysconfdir)/event.d/$$tgt ; \
-	done
-
-uninstall-upstart: uninstall-sysconfig
-	for f in $(UPSTART_FILES:%.upstart=%); \
-	do \
-	  tgt=`basename $$f` ; \
-	  rm -f $(DESTDIR)$(sysconfdir)/event.d/$$tgt ; \
-	done
-	rmdir $(DESTDIR)$(sysconfdir)/event.d || :
-else ! LIBVIRT_INIT_SCRIPT_UPSTART
-install-upstart:
-uninstall-upstart:
-endif ! LIBVIRT_INIT_SCRIPT_UPSTART
-else ! WITH_LIBVIRTD
-install-upstart:
-uninstall-upstart:
-endif ! WITH_LIBVIRTD
+INSTALL_DATA_LOCAL += install-systemd
+UNINSTALL_LOCAL += uninstall-systemd
+endif LIBVIRT_INIT_SCRIPT_SYSTEMD
+endif WITH_LIBVIRTD
 
 
 EXTRA_DIST += dtrace2systemtap.pl
@@ -919,7 +851,7 @@ libvirt_iohelper_LDFLAGS = \
 		$(PIE_LDFLAGS) \
 		$(NULL)
 libvirt_iohelper_LDADD = \
-		libvirt_util.la \
+		libvirt.la \
 		../gnulib/lib/libgnu.la
 if WITH_DTRACE_PROBES
 libvirt_iohelper_LDADD += libvirt_probes.lo
@@ -943,12 +875,15 @@ libvirt_nss_la_SOURCES = \
 		util/viralloc.h \
 		util/viratomic.c \
 		util/viratomic.h \
+		util/virautoclean.h \
 		util/virbitmap.c \
 		util/virbitmap.h \
 		util/virbuffer.c \
 		util/virbuffer.h \
 		util/vircommand.c \
 		util/vircommand.h \
+		util/virenum.c \
+		util/virenum.h \
 		util/virerror.c \
 		util/virerror.h \
 		util/virfile.c \
@@ -1004,17 +939,15 @@ libvirt_nss_la_LIBADD = \
 endif WITH_NSS
 
 
-install-data-local: install-init install-systemd install-upstart \
-		install-sysctl install-polkit install-sasl \
-		install-logrotate $(INSTALL_DATA_DIRS:%=install-data-%)
+install-data-local: $(INSTALL_DATA_LOCAL) \
+		$(INSTALL_DATA_DIRS:%=install-data-%)
 	$(MKDIR_P) "$(DESTDIR)$(localstatedir)/cache/libvirt"
 	$(MKDIR_P) "$(DESTDIR)$(localstatedir)/lib/libvirt/images"
 	$(MKDIR_P) "$(DESTDIR)$(localstatedir)/lib/libvirt/filesystems"
 	$(MKDIR_P) "$(DESTDIR)$(localstatedir)/lib/libvirt/boot"
 
-uninstall-local:: uninstall-init uninstall-systemd uninstall-upstart \
-		uninstall-sysctl uninstall-polkit uninstall-sasl \
-		uninstall-logrotate $(INSTALL_DATA_DIRS:%=uninstall-data-%)
+uninstall-local: $(UNINSTALL_LOCAL) \
+		$(INSTALL_DATA_DIRS:%=uninstall-data-%)
 	rmdir "$(DESTDIR)$(localstatedir)/cache/libvirt" ||:
 	rmdir "$(DESTDIR)$(localstatedir)/lib/libvirt/images" ||:
 	rmdir "$(DESTDIR)$(localstatedir)/lib/libvirt/filesystems" ||:

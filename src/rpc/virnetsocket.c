@@ -17,8 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -130,7 +128,7 @@ static int virNetSocketOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(virNetSocket)
+VIR_ONCE_GLOBAL_INIT(virNetSocket);
 
 
 #ifndef WIN32
@@ -231,7 +229,7 @@ static virNetSocketPtr virNetSocketNew(virSocketAddrPtr localAddr,
 
     VIR_DEBUG("localAddr=%p remoteAddr=%p fd=%d errfd=%d pid=%lld",
               localAddr, remoteAddr,
-              fd, errfd, (long long) pid);
+              fd, errfd, (long long)pid);
 
     if (virSetCloseExec(fd) < 0) {
         virReportSystemError(errno, "%s",
@@ -286,7 +284,7 @@ static virNetSocketPtr virNetSocketNew(virSocketAddrPtr localAddr,
 
     PROBE(RPC_SOCKET_NEW,
           "sock=%p fd=%d errfd=%d pid=%lld localAddr=%s, remoteAddr=%s",
-          sock, fd, errfd, (long long) pid,
+          sock, fd, errfd, (long long)pid,
           NULLSTR(sock->localAddrStrSASL), NULLSTR(sock->remoteAddrStrSASL));
 
     return sock;
@@ -310,8 +308,8 @@ int virNetSocketNewListenTCP(const char *nodename,
     struct addrinfo hints;
     int fd = -1;
     size_t i;
-    bool addrInUse = false;
-    bool familyNotSupported = false;
+    int socketErrno = 0;
+    int bindErrno = 0;
     virSocketAddr tmp_addr;
 
     *retsocks = NULL;
@@ -351,7 +349,7 @@ int virNetSocketNewListenTCP(const char *nodename,
         if ((fd = socket(runp->ai_family, runp->ai_socktype,
                          runp->ai_protocol)) < 0) {
             if (errno == EAFNOSUPPORT) {
-                familyNotSupported = true;
+                socketErrno = errno;
                 runp = runp->ai_next;
                 continue;
             }
@@ -382,11 +380,11 @@ int virNetSocketNewListenTCP(const char *nodename,
 #endif
 
         if (bind(fd, runp->ai_addr, runp->ai_addrlen) < 0) {
-            if (errno != EADDRINUSE) {
+            if (errno != EADDRINUSE && errno != EADDRNOTAVAIL) {
                 virReportSystemError(errno, "%s", _("Unable to bind to port"));
                 goto error;
             }
-            addrInUse = true;
+            bindErrno = errno;
             VIR_FORCE_CLOSE(fd);
             runp = runp->ai_next;
             continue;
@@ -409,14 +407,13 @@ int virNetSocketNewListenTCP(const char *nodename,
         fd = -1;
     }
 
-    if (nsocks == 0 && familyNotSupported) {
-        virReportSystemError(EAFNOSUPPORT, "%s", _("Unable to bind to port"));
-        goto error;
-    }
-
-    if (nsocks == 0 &&
-        addrInUse) {
-        virReportSystemError(EADDRINUSE, "%s", _("Unable to bind to port"));
+    if (nsocks == 0) {
+        if (bindErrno)
+            virReportSystemError(bindErrno, "%s", _("Unable to bind to port"));
+        else if (socketErrno)
+            virReportSystemError(socketErrno, "%s", _("Unable to create socket"));
+        else
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("No addresses to bind to"));
         goto error;
     }
 
@@ -459,7 +456,7 @@ int virNetSocketNewListenUNIX(const char *path,
     }
 
     addr.data.un.sun_family = AF_UNIX;
-    if (virStrcpyStatic(addr.data.un.sun_path, path) == NULL) {
+    if (virStrcpyStatic(addr.data.un.sun_path, path) < 0) {
         virReportSystemError(ENAMETOOLONG,
                              _("Path %s too long for unix socket"), path);
         goto error;
@@ -486,7 +483,7 @@ int virNetSocketNewListenUNIX(const char *path,
     if (grp != 0 && chown(path, user, grp)) {
         virReportSystemError(errno,
                              _("Failed to change ownership of '%s' to %d:%d"),
-                             path, (int) user, (int) grp);
+                             path, (int)user, (int)grp);
         goto error;
     }
 
@@ -690,7 +687,7 @@ int virNetSocketNewConnectUNIX(const char *path,
     }
 
     remoteAddr.data.un.sun_family = AF_UNIX;
-    if (virStrcpyStatic(remoteAddr.data.un.sun_path, path) == NULL) {
+    if (virStrcpyStatic(remoteAddr.data.un.sun_path, path) < 0) {
         virReportSystemError(ENOMEM, _("Path %s too long for unix socket"), path);
         goto cleanup;
     }

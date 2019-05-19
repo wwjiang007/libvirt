@@ -16,13 +16,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *      Jiri Denemark <jdenemar@redhat.com>
  */
 
-#ifndef __VIR_CPU_H__
-# define __VIR_CPU_H__
+#ifndef LIBVIRT_CPU_H
+# define LIBVIRT_CPU_H
 
 # include "virerror.h"
 # include "datatypes.h"
@@ -73,10 +70,11 @@ typedef int
                      virDomainCapsCPUModelsPtr models);
 
 typedef virCPUDefPtr
-(*cpuArchBaseline)  (virCPUDefPtr *cpus,
-                     unsigned int ncpus,
-                     virDomainCapsCPUModelsPtr models,
-                     bool migratable);
+(*virCPUArchBaseline)(virCPUDefPtr *cpus,
+                      unsigned int ncpus,
+                      virDomainCapsCPUModelsPtr models,
+                      const char **features,
+                      bool migratable);
 
 typedef int
 (*virCPUArchUpdate)(virCPUDefPtr guest,
@@ -129,7 +127,7 @@ struct cpuArchDriver {
     cpuArchEncode       encode;
     cpuArchDataFree     dataFree;
     virCPUArchGetHost   getHost;
-    cpuArchBaseline     baseline;
+    virCPUArchBaseline baseline;
     virCPUArchUpdate    update;
     virCPUArchUpdateLive updateLive;
     virCPUArchCheckFeature checkFeature;
@@ -194,10 +192,12 @@ virCPUDefPtr
 virCPUProbeHost(virArch arch);
 
 virCPUDefPtr
-cpuBaseline (virCPUDefPtr *cpus,
-             unsigned int ncpus,
-             virDomainCapsCPUModelsPtr models,
-             bool migratable);
+virCPUBaseline(virArch arch,
+               virCPUDefPtr *cpus,
+               unsigned int ncpus,
+               virDomainCapsCPUModelsPtr models,
+               const char **features,
+               bool migratable);
 
 int
 virCPUUpdate(virArch arch,
@@ -265,4 +265,4 @@ char *virCPUDataFormat(const virCPUData *data)
 virCPUDataPtr virCPUDataParse(const char *xmlStr)
     ATTRIBUTE_NONNULL(1);
 
-#endif /* __VIR_CPU_H__ */
+#endif /* LIBVIRT_CPU_H */

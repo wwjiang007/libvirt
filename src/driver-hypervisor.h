@@ -18,8 +18,8 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_DRIVER_HYPERVISOR_H__
-# define __VIR_DRIVER_HYPERVISOR_H__
+#ifndef LIBVIRT_DRIVER_HYPERVISOR_H
+# define LIBVIRT_DRIVER_HYPERVISOR_H
 
 # ifndef __VIR_DRIVER_H_INCLUDES___
 #  error "Don't include this file directly, only use driver.h"
@@ -407,6 +407,13 @@ typedef int
                            unsigned int flags);
 
 typedef int
+(*virDrvDomainSetIOThreadParams)(virDomainPtr domain,
+                                 unsigned int iothread_id,
+                                 virTypedParameterPtr params,
+                                 int nparams,
+                                 unsigned int flags);
+
+typedef int
 (*virDrvDomainGetSecurityLabel)(virDomainPtr domain,
                                 virSecurityLabelPtr seclabel);
 
@@ -439,6 +446,11 @@ typedef int
 typedef int
 (*virDrvDomainUpdateDeviceFlags)(virDomainPtr domain,
                                  const char *xml,
+                                 unsigned int flags);
+
+typedef int
+(*virDrvDomainDetachDeviceAlias)(virDomainPtr domain,
+                                 const char *alias,
                                  unsigned int flags);
 
 typedef int
@@ -673,11 +685,29 @@ typedef int
                            const char *cpu,
                            unsigned int flags);
 
+typedef int
+(*virDrvConnectCompareHypervisorCPU)(virConnectPtr conn,
+                                     const char *emulator,
+                                     const char *arch,
+                                     const char *machine,
+                                     const char *virttype,
+                                     const char *xmlCPU,
+                                     unsigned int flags);
+
 typedef char *
 (*virDrvConnectBaselineCPU)(virConnectPtr conn,
                             const char **xmlCPUs,
                             unsigned int ncpus,
                             unsigned int flags);
+typedef char *
+(*virDrvConnectBaselineHypervisorCPU)(virConnectPtr conn,
+                                      const char *emulator,
+                                      const char *arch,
+                                      const char *machine,
+                                      const char *virttype,
+                                      const char **xmlCPUs,
+                                      unsigned int ncpus,
+                                      unsigned int flags);
 
 typedef int
 (*virDrvConnectGetCPUModelNames)(virConnectPtr conn,
@@ -1286,6 +1316,18 @@ typedef int
                                   unsigned int action,
                                   unsigned int flags);
 
+typedef int
+(*virDrvNodeGetSEVInfo)(virConnectPtr conn,
+                        virTypedParameterPtr *params,
+                        int *nparams,
+                        unsigned int flags);
+
+typedef int
+(*virDrvDomainGetLaunchSecurityInfo)(virDomainPtr domain,
+                                        virTypedParameterPtr *params,
+                                        int *nparams,
+                                        unsigned int flags);
+
 
 typedef struct _virHypervisorDriver virHypervisorDriver;
 typedef virHypervisorDriver *virHypervisorDriverPtr;
@@ -1372,6 +1414,7 @@ struct _virHypervisorDriver {
     virDrvDomainPinIOThread domainPinIOThread;
     virDrvDomainAddIOThread domainAddIOThread;
     virDrvDomainDelIOThread domainDelIOThread;
+    virDrvDomainSetIOThreadParams domainSetIOThreadParams;
     virDrvDomainGetSecurityLabel domainGetSecurityLabel;
     virDrvDomainGetSecurityLabelList domainGetSecurityLabelList;
     virDrvNodeGetSecurityModel nodeGetSecurityModel;
@@ -1392,6 +1435,7 @@ struct _virHypervisorDriver {
     virDrvDomainDetachDevice domainDetachDevice;
     virDrvDomainDetachDeviceFlags domainDetachDeviceFlags;
     virDrvDomainUpdateDeviceFlags domainUpdateDeviceFlags;
+    virDrvDomainDetachDeviceAlias domainDetachDeviceAlias;
     virDrvDomainGetAutostart domainGetAutostart;
     virDrvDomainSetAutostart domainSetAutostart;
     virDrvDomainGetSchedulerType domainGetSchedulerType;
@@ -1532,7 +1576,11 @@ struct _virHypervisorDriver {
     virDrvDomainSetVcpu domainSetVcpu;
     virDrvDomainSetBlockThreshold domainSetBlockThreshold;
     virDrvDomainSetLifecycleAction domainSetLifecycleAction;
+    virDrvConnectCompareHypervisorCPU connectCompareHypervisorCPU;
+    virDrvConnectBaselineHypervisorCPU connectBaselineHypervisorCPU;
+    virDrvNodeGetSEVInfo nodeGetSEVInfo;
+    virDrvDomainGetLaunchSecurityInfo domainGetLaunchSecurityInfo;
 };
 
 
-#endif /* __VIR_DRIVER_HYPERVISOR_H__ */
+#endif /* LIBVIRT_DRIVER_HYPERVISOR_H */

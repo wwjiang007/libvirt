@@ -16,17 +16,15 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Eric Farman <farman@linux.vnet.ibm.com>
  */
 
-#ifndef __VIR_SCSIHOST_H__
-# define __VIR_SCSIHOST_H__
+#ifndef LIBVIRT_VIRSCSIVHOST_H
+# define LIBVIRT_VIRSCSIVHOST_H
 
 # include "internal.h"
 # include "virobject.h"
 # include "virutil.h"
+# include "virautoclean.h"
 
 typedef struct _virSCSIVHostDevice virSCSIVHostDevice;
 typedef virSCSIVHostDevice *virSCSIVHostDevicePtr;
@@ -63,4 +61,6 @@ void virSCSIVHostDeviceGetUsedBy(virSCSIVHostDevicePtr dev,
 void virSCSIVHostDeviceFree(virSCSIVHostDevicePtr dev);
 int virSCSIVHostOpenVhostSCSI(int *vhostfd) ATTRIBUTE_NOINLINE;
 
-#endif /* __VIR_SCSIHOST_H__ */
+VIR_DEFINE_AUTOPTR_FUNC(virSCSIVHostDevice, virSCSIVHostDeviceFree);
+
+#endif /* LIBVIRT_VIRSCSIVHOST_H */

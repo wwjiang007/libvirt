@@ -39,6 +39,7 @@
 #include "qemu_hotplug.h"
 #include "qemu_blockjob.h"
 #include "qemu_security.h"
+#include "qemu_block.h"
 
 #include "domain_audit.h"
 #include "virlog.h"
@@ -59,12 +60,14 @@
 #include "virtypedparam.h"
 #include "virprocess.h"
 #include "nwfilter_conf.h"
+#include "virdomainsnapshotobjlist.h"
 
 #define VIR_FROM_THIS VIR_FROM_QEMU
 
 VIR_LOG_INIT("qemu.qemu_migration");
 
-VIR_ENUM_IMPL(qemuMigrationJobPhase, QEMU_MIGRATION_PHASE_LAST,
+VIR_ENUM_IMPL(qemuMigrationJobPhase,
+              QEMU_MIGRATION_PHASE_LAST,
               "none",
               "perform2",
               "begin3",
@@ -180,7 +183,7 @@ qemuMigrationDstPrecreateDisk(virConnectPtr conn,
 
     VIR_DEBUG("Precreate disk type=%s", virStorageTypeToString(disk->src->type));
 
-    switch ((virStorageType) disk->src->type) {
+    switch ((virStorageType)disk->src->type) {
     case VIR_STORAGE_TYPE_FILE:
         if (!virDomainDiskGetSource(disk)) {
             VIR_DEBUG("Dropping sourceless disk '%s'",
@@ -369,7 +372,8 @@ qemuMigrationDstStartNBDServer(virQEMUDriverPtr driver,
                                const char *listenAddr,
                                size_t nmigrate_disks,
                                const char **migrate_disks,
-                               int nbdPort)
+                               int nbdPort,
+                               const char *tls_alias)
 {
     int ret = -1;
     qemuDomainObjPrivatePtr priv = vm->privateData;
@@ -398,7 +402,7 @@ qemuMigrationDstStartNBDServer(virQEMUDriverPtr driver,
         }
 
         VIR_FREE(diskAlias);
-        if (!(diskAlias = qemuAliasFromDisk(disk)))
+        if (!(diskAlias = qemuAliasDiskDriveFromDisk(disk)))
             goto cleanup;
 
         if (qemuDomainObjEnterMonitorAsync(driver, vm,
@@ -411,7 +415,7 @@ qemuMigrationDstStartNBDServer(virQEMUDriverPtr driver,
             else if (virPortAllocatorAcquire(driver->migrationPorts, &port) < 0)
                 goto exit_monitor;
 
-            if (qemuMonitorNBDServerStart(priv->mon, listenAddr, port) < 0)
+            if (qemuMonitorNBDServerStart(priv->mon, listenAddr, port, tls_alias) < 0)
                 goto exit_monitor;
         }
 
@@ -461,23 +465,35 @@ qemuMigrationDstStopNBDServer(virQEMUDriverPtr driver,
 }
 
 
+static void
+qemuMigrationNBDReportMirrorError(qemuBlockJobDataPtr job,
+                                  const char *diskdst)
+{
+    if (job->errmsg) {
+        virReportError(VIR_ERR_OPERATION_FAILED,
+                       _("migration of disk %s failed: %s"),
+                       diskdst, job->errmsg);
+    } else {
+        virReportError(VIR_ERR_OPERATION_FAILED,
+                       _("migration of disk %s failed"), diskdst);
+    }
+}
+
+
 /**
- * qemuMigrationSrcDriveMirrorReady:
- * @driver: qemu driver
+ * qemuMigrationSrcNBDStorageCopyReady:
  * @vm: domain
  *
- * Check the status of all drive-mirrors started by
- * qemuMigrationSrcDriveMirror. Any pending block job events
- * for the mirrored disks will be processed.
+ * Check the status of all drives copied via qemuMigrationSrcNBDStorageCopy.
+ * Any pending block job events for the mirrored disks will be processed.
  *
  * Returns 1 if all mirrors are "ready",
  *         0 if some mirrors are still performing initial sync,
  *        -1 on error.
  */
 static int
-qemuMigrationSrcDriveMirrorReady(virQEMUDriverPtr driver,
-                                 virDomainObjPtr vm,
-                                 qemuDomainAsyncJob asyncJob)
+qemuMigrationSrcNBDStorageCopyReady(virDomainObjPtr vm,
+                                    qemuDomainAsyncJob asyncJob)
 {
     size_t i;
     size_t notReady = 0;
@@ -486,25 +502,25 @@ qemuMigrationSrcDriveMirrorReady(virQEMUDriverPtr driver,
     for (i = 0; i < vm->def->ndisks; i++) {
         virDomainDiskDefPtr disk = vm->def->disks[i];
         qemuDomainDiskPrivatePtr diskPriv = QEMU_DOMAIN_DISK_PRIVATE(disk);
-        char *error = NULL;
+        qemuBlockJobDataPtr job;
 
         if (!diskPriv->migrating)
             continue;
 
-        status = qemuBlockJobUpdate(driver, vm, asyncJob, disk, &error);
-        if (status == VIR_DOMAIN_BLOCK_JOB_FAILED) {
-            if (error) {
-                virReportError(VIR_ERR_OPERATION_FAILED,
-                               _("migration of disk %s failed: %s"),
-                               disk->dst, error);
-                VIR_FREE(error);
-            } else {
-                virReportError(VIR_ERR_OPERATION_FAILED,
-                               _("migration of disk %s failed"), disk->dst);
-            }
+        if (!(job = qemuBlockJobDiskGetJob(disk))) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("missing block job data for disk '%s'"), disk->dst);
             return -1;
         }
-        VIR_FREE(error);
+
+        status = qemuBlockJobUpdate(vm, job, asyncJob);
+        if (status == VIR_DOMAIN_BLOCK_JOB_FAILED) {
+            qemuMigrationNBDReportMirrorError(job, disk->dst);
+            virObjectUnref(job);
+            return -1;
+        }
+
+        virObjectUnref(job);
 
         if (disk->mirrorState != VIR_DOMAIN_DISK_MIRROR_STATE_READY)
             notReady++;
@@ -531,10 +547,9 @@ qemuMigrationSrcDriveMirrorReady(virQEMUDriverPtr driver,
  *         -2 all mirrors are gone but some of them failed.
  */
 static int
-qemuMigrationDriveMirrorCancelled(virQEMUDriverPtr driver,
-                                  virDomainObjPtr vm,
-                                  qemuDomainAsyncJob asyncJob,
-                                  bool check)
+qemuMigrationSrcNBDCopyCancelled(virDomainObjPtr vm,
+                                 qemuDomainAsyncJob asyncJob,
+                                 bool check)
 {
     size_t i;
     size_t active = 0;
@@ -546,29 +561,24 @@ qemuMigrationDriveMirrorCancelled(virQEMUDriverPtr driver,
     for (i = 0; i < vm->def->ndisks; i++) {
         virDomainDiskDefPtr disk = vm->def->disks[i];
         qemuDomainDiskPrivatePtr diskPriv = QEMU_DOMAIN_DISK_PRIVATE(disk);
-        char *error = NULL;
+        qemuBlockJobDataPtr job;
 
         if (!diskPriv->migrating)
             continue;
 
-        status = qemuBlockJobUpdate(driver, vm, asyncJob, disk, &error);
+        if (!(job = qemuBlockJobDiskGetJob(disk)))
+            continue;
+
+        status = qemuBlockJobUpdate(vm, job, asyncJob);
         switch (status) {
         case VIR_DOMAIN_BLOCK_JOB_FAILED:
             if (check) {
-                if (error) {
-                    virReportError(VIR_ERR_OPERATION_FAILED,
-                                   _("migration of disk %s failed: %s"),
-                                   disk->dst, error);
-                } else {
-                    virReportError(VIR_ERR_OPERATION_FAILED,
-                                   _("migration of disk %s failed"), disk->dst);
-                }
+                qemuMigrationNBDReportMirrorError(job, disk->dst);
                 failed = true;
             }
             ATTRIBUTE_FALLTHROUGH;
         case VIR_DOMAIN_BLOCK_JOB_CANCELED:
         case VIR_DOMAIN_BLOCK_JOB_COMPLETED:
-            qemuBlockJobSyncEnd(driver, vm, asyncJob, disk);
             diskPriv->migrating = false;
             break;
 
@@ -579,7 +589,7 @@ qemuMigrationDriveMirrorCancelled(virQEMUDriverPtr driver,
         if (status == VIR_DOMAIN_BLOCK_JOB_COMPLETED)
             completed++;
 
-        VIR_FREE(error);
+        virObjectUnref(job);
     }
 
     /* Updating completed block job drops the lock thus we have to recheck
@@ -619,32 +629,25 @@ qemuMigrationDriveMirrorCancelled(virQEMUDriverPtr driver,
  *         -1 on error or when job failed and failNoJob is true.
  */
 static int
-qemuMigrationSrcCancelOneDriveMirror(virQEMUDriverPtr driver,
-                                     virDomainObjPtr vm,
-                                     virDomainDiskDefPtr disk,
-                                     bool failNoJob,
-                                     qemuDomainAsyncJob asyncJob)
+qemuMigrationSrcNBDCopyCancelOne(virQEMUDriverPtr driver,
+                                 virDomainObjPtr vm,
+                                 virDomainDiskDefPtr disk,
+                                 qemuBlockJobDataPtr job,
+                                 bool failNoJob,
+                                 qemuDomainAsyncJob asyncJob)
 {
     qemuDomainObjPrivatePtr priv = vm->privateData;
     char *diskAlias = NULL;
-    char *error = NULL;
     int ret = -1;
     int status;
     int rv;
 
-    status = qemuBlockJobUpdate(driver, vm, asyncJob, disk, &error);
+    status = qemuBlockJobUpdate(vm, job, asyncJob);
     switch (status) {
     case VIR_DOMAIN_BLOCK_JOB_FAILED:
     case VIR_DOMAIN_BLOCK_JOB_CANCELED:
         if (failNoJob) {
-            if (error) {
-                virReportError(VIR_ERR_OPERATION_FAILED,
-                               _("migration of disk %s failed: %s"),
-                               disk->dst, error);
-            } else {
-                virReportError(VIR_ERR_OPERATION_FAILED,
-                               _("migration of disk %s failed"), disk->dst);
-            }
+            qemuMigrationNBDReportMirrorError(job, disk->dst);
             goto cleanup;
         }
         ATTRIBUTE_FALLTHROUGH;
@@ -653,7 +656,7 @@ qemuMigrationSrcCancelOneDriveMirror(virQEMUDriverPtr driver,
         goto cleanup;
     }
 
-    if (!(diskAlias = qemuAliasFromDisk(disk)))
+    if (!(diskAlias = qemuAliasDiskDriveFromDisk(disk)))
         return -1;
 
     if (qemuDomainObjEnterMonitorAsync(driver, vm, asyncJob) < 0)
@@ -668,29 +671,29 @@ qemuMigrationSrcCancelOneDriveMirror(virQEMUDriverPtr driver,
 
  cleanup:
     VIR_FREE(diskAlias);
-    VIR_FREE(error);
     return ret;
 }
 
 
 /**
- * qemuMigrationSrcCancelDriveMirror:
+ * qemuMigrationSrcNBDCopyCancel:
  * @driver: qemu driver
  * @vm: domain
  * @check: if true report an error when some of the mirrors fails
  *
- * Cancel all drive-mirrors started by qemuMigrationDriveMirror.
- * Any pending block job events for the affected disks will be
- * processed.
+ * Cancel all drive-mirrors started by qemuMigrationSrcNBDStorageCopy.
+ * Any pending block job events for the affected disks will be processed and
+ * synchronous block job terminated regardless of return value unless qemu
+ * has crashed.
  *
  * Returns 0 on success, -1 otherwise.
  */
 static int
-qemuMigrationSrcCancelDriveMirror(virQEMUDriverPtr driver,
-                                  virDomainObjPtr vm,
-                                  bool check,
-                                  qemuDomainAsyncJob asyncJob,
-                                  virConnectPtr dconn)
+qemuMigrationSrcNBDCopyCancel(virQEMUDriverPtr driver,
+                              virDomainObjPtr vm,
+                              bool check,
+                              qemuDomainAsyncJob asyncJob,
+                              virConnectPtr dconn)
 {
     virErrorPtr err = NULL;
     int ret = -1;
@@ -703,25 +706,33 @@ qemuMigrationSrcCancelDriveMirror(virQEMUDriverPtr driver,
     for (i = 0; i < vm->def->ndisks; i++) {
         virDomainDiskDefPtr disk = vm->def->disks[i];
         qemuDomainDiskPrivatePtr diskPriv = QEMU_DOMAIN_DISK_PRIVATE(disk);
+        qemuBlockJobDataPtr job;
 
-        if (!diskPriv->migrating)
+        if (!(job = qemuBlockJobDiskGetJob(disk)) ||
+            !qemuBlockJobIsRunning(job))
+            diskPriv->migrating = false;
+
+        if (!diskPriv->migrating) {
+            virObjectUnref(job);
             continue;
+        }
 
-        rv = qemuMigrationSrcCancelOneDriveMirror(driver, vm, disk,
-                                                  check, asyncJob);
+        rv = qemuMigrationSrcNBDCopyCancelOne(driver, vm, disk, job,
+                                              check, asyncJob);
         if (rv != 0) {
             if (rv < 0) {
                 if (!err)
                     err = virSaveLastError();
                 failed = true;
             }
-            qemuBlockJobSyncEnd(driver, vm, asyncJob, disk);
+            qemuBlockJobSyncEnd(vm, job, asyncJob);
             diskPriv->migrating = false;
         }
+
+        virObjectUnref(job);
     }
 
-    while ((rv = qemuMigrationDriveMirrorCancelled(driver, vm, asyncJob,
-                                                   check)) != 1) {
+    while ((rv = qemuMigrationSrcNBDCopyCancelled(vm, asyncJob, check)) != 1) {
         if (check && !failed &&
             dconn && virConnectIsAlive(dconn) <= 0) {
             virReportError(VIR_ERR_OPERATION_FAILED, "%s",
@@ -742,6 +753,19 @@ qemuMigrationSrcCancelDriveMirror(virQEMUDriverPtr driver,
             goto cleanup;
     }
 
+    for (i = 0; i < vm->def->ndisks; i++) {
+        virDomainDiskDefPtr disk = vm->def->disks[i];
+        qemuDomainDiskPrivatePtr diskPriv = QEMU_DOMAIN_DISK_PRIVATE(disk);
+
+        if (!diskPriv->migrSource)
+            continue;
+
+        qemuBlockStorageSourceDetachOneBlockdev(driver, vm, asyncJob,
+                                                diskPriv->migrSource);
+        virObjectUnref(diskPriv->migrSource);
+        diskPriv->migrSource = NULL;
+    }
+
     ret = failed ? -1 : 0;
 
  cleanup:
@@ -753,8 +777,181 @@ qemuMigrationSrcCancelDriveMirror(virQEMUDriverPtr driver,
 }
 
 
+static int
+qemuMigrationSrcNBDStorageCopyBlockdev(virQEMUDriverPtr driver,
+                                       virDomainObjPtr vm,
+                                       virDomainDiskDefPtr disk,
+                                       const char *diskAlias,
+                                       const char *host,
+                                       int port,
+                                       unsigned long long mirror_speed,
+                                       unsigned int mirror_flags,
+                                       const char *tlsAlias)
+{
+    VIR_AUTOPTR(qemuBlockStorageSourceAttachData) data = NULL;
+    qemuDomainDiskPrivatePtr diskPriv = QEMU_DOMAIN_DISK_PRIVATE(disk);
+    int mon_ret = 0;
+    int ret = -1;
+    VIR_AUTOUNREF(virStorageSourcePtr) copysrc = NULL;
+
+    VIR_DEBUG("starting blockdev mirror for disk=%s to host=%s", diskAlias, host);
+
+    if (!(copysrc = virStorageSourceNew()))
+        goto cleanup;
+
+    copysrc->type = VIR_STORAGE_TYPE_NETWORK;
+    copysrc->protocol = VIR_STORAGE_NET_PROTOCOL_NBD;
+    copysrc->format = VIR_STORAGE_FILE_RAW;
+
+    if (!(copysrc->backingStore = virStorageSourceNew()))
+        goto cleanup;
+
+    if (VIR_STRDUP(copysrc->path, diskAlias) < 0)
+        goto cleanup;
+
+    if (VIR_ALLOC_N(copysrc->hosts, 1) < 0)
+        goto cleanup;
+
+    copysrc->nhosts = 1;
+    copysrc->hosts->transport = VIR_STORAGE_NET_HOST_TRANS_TCP;
+    copysrc->hosts->port = port;
+    if (VIR_STRDUP(copysrc->hosts->name, host) < 0)
+        goto cleanup;
+
+    if (VIR_STRDUP(copysrc->tlsAlias, tlsAlias) < 0)
+        goto cleanup;
+
+    if (virAsprintf(&copysrc->nodestorage, "migration-%s-storage", disk->dst) < 0 ||
+        virAsprintf(&copysrc->nodeformat, "migration-%s-format", disk->dst) < 0)
+        goto cleanup;
+
+    if (!(data = qemuBlockStorageSourceAttachPrepareBlockdev(copysrc)))
+        goto cleanup;
+
+    if (qemuDomainObjEnterMonitorAsync(driver, vm,
+                                       QEMU_ASYNC_JOB_MIGRATION_OUT) < 0)
+        goto cleanup;
+
+    mon_ret = qemuBlockStorageSourceAttachApply(qemuDomainGetMonitor(vm), data);
+
+    if (mon_ret == 0)
+        mon_ret = qemuMonitorBlockdevMirror(qemuDomainGetMonitor(vm), NULL,
+                                            diskAlias, copysrc->nodeformat,
+                                            mirror_speed, 0, 0, mirror_flags);
+
+    if (mon_ret != 0)
+        qemuBlockStorageSourceAttachRollback(qemuDomainGetMonitor(vm), data);
+
+    if (qemuDomainObjExitMonitor(driver, vm) < 0 || mon_ret < 0)
+        goto cleanup;
+
+    VIR_STEAL_PTR(diskPriv->migrSource, copysrc);
+
+    ret = 0;
+
+ cleanup:
+    return ret;
+}
+
+
+static int
+qemuMigrationSrcNBDStorageCopyDriveMirror(virQEMUDriverPtr driver,
+                                          virDomainObjPtr vm,
+                                          const char *diskAlias,
+                                          const char *host,
+                                          int port,
+                                          unsigned long long mirror_speed,
+                                          unsigned int mirror_flags)
+{
+    char *nbd_dest = NULL;
+    int mon_ret;
+    int ret = -1;
+
+    if (strchr(host, ':')) {
+        if (virAsprintf(&nbd_dest, "nbd:[%s]:%d:exportname=%s",
+                        host, port, diskAlias) < 0)
+            goto cleanup;
+    } else {
+        if (virAsprintf(&nbd_dest, "nbd:%s:%d:exportname=%s",
+                        host, port, diskAlias) < 0)
+            goto cleanup;
+    }
+
+    if (qemuDomainObjEnterMonitorAsync(driver, vm,
+                                       QEMU_ASYNC_JOB_MIGRATION_OUT) < 0)
+        goto cleanup;
+
+    mon_ret = qemuMonitorDriveMirror(qemuDomainGetMonitor(vm),
+                                     diskAlias, nbd_dest, "raw",
+                                     mirror_speed, 0, 0, mirror_flags);
+
+    if (qemuDomainObjExitMonitor(driver, vm) < 0 || mon_ret < 0)
+        goto cleanup;
+
+    ret = 0;
+
+ cleanup:
+    VIR_FREE(nbd_dest);
+    return ret;
+}
+
+
+static int
+qemuMigrationSrcNBDStorageCopyOne(virQEMUDriverPtr driver,
+                                  virDomainObjPtr vm,
+                                  virDomainDiskDefPtr disk,
+                                  const char *host,
+                                  int port,
+                                  unsigned long long mirror_speed,
+                                  unsigned int mirror_flags,
+                                  const char *tlsAlias,
+                                  unsigned int flags)
+{
+    qemuDomainDiskPrivatePtr diskPriv = QEMU_DOMAIN_DISK_PRIVATE(disk);
+    qemuBlockJobDataPtr job = NULL;
+    char *diskAlias = NULL;
+    int rc;
+    int ret = -1;
+
+    if (!(diskAlias = qemuAliasDiskDriveFromDisk(disk)))
+        goto cleanup;
+
+    if (!(job = qemuBlockJobDiskNew(disk, QEMU_BLOCKJOB_TYPE_COPY, diskAlias)))
+        goto cleanup;
+
+    qemuBlockJobSyncBegin(job);
+
+    if (flags & VIR_MIGRATE_TLS) {
+        rc = qemuMigrationSrcNBDStorageCopyBlockdev(driver, vm,
+                                                    disk, diskAlias,
+                                                    host, port,
+                                                    mirror_speed,
+                                                    mirror_flags,
+                                                    tlsAlias);
+    } else {
+        rc = qemuMigrationSrcNBDStorageCopyDriveMirror(driver, vm, diskAlias,
+                                                       host, port,
+                                                       mirror_speed,
+                                                       mirror_flags);
+    }
+
+    if (rc < 0)
+        goto cleanup;
+
+    diskPriv->migrating = true;
+    qemuBlockJobStarted(job);
+
+    ret = 0;
+
+ cleanup:
+    qemuBlockJobStartupFinalize(job);
+    VIR_FREE(diskAlias);
+    return ret;
+}
+
+
 /**
- * qemuMigrationDriveMirror:
+ * qemuMigrationSrcNBDStorageCopy:
  * @driver: qemu driver
  * @vm: domain
  * @mig: migration cookie
@@ -762,35 +959,33 @@ qemuMigrationSrcCancelDriveMirror(virQEMUDriverPtr driver,
  * @speed: bandwidth limit in MiB/s
  * @migrate_flags: migrate monitor command flags
  *
- * Run drive-mirror to feed NBD server running on dst and wait
- * till the process switches into another phase where writes go
- * simultaneously to both source and destination. On success,
- * update @migrate_flags so we don't tell 'migrate' command
+ * Migrate non-shared storage using the NBD protocol to the server running
+ * inside the qemu process on dst and wait until the copy converges.
+ * On success update @migrate_flags so we don't tell 'migrate' command
  * to do the very same operation. On failure, the caller is
- * expected to call qemuMigrationSrcCancelDriveMirror to stop all
- * running mirrors.
+ * expected to call qemuMigrationSrcNBDCopyCancel to stop all
+ * running copy operations.
  *
  * Returns 0 on success (@migrate_flags updated),
  *        -1 otherwise.
  */
 static int
-qemuMigrationSrcDriveMirror(virQEMUDriverPtr driver,
-                            virDomainObjPtr vm,
-                            qemuMigrationCookiePtr mig,
-                            const char *host,
-                            unsigned long speed,
-                            unsigned int *migrate_flags,
-                            size_t nmigrate_disks,
-                            const char **migrate_disks,
-                            virConnectPtr dconn)
+qemuMigrationSrcNBDStorageCopy(virQEMUDriverPtr driver,
+                               virDomainObjPtr vm,
+                               qemuMigrationCookiePtr mig,
+                               const char *host,
+                               unsigned long speed,
+                               unsigned int *migrate_flags,
+                               size_t nmigrate_disks,
+                               const char **migrate_disks,
+                               virConnectPtr dconn,
+                               const char *tlsAlias,
+                               unsigned int flags)
 {
     qemuDomainObjPrivatePtr priv = vm->privateData;
     int ret = -1;
     int port;
     size_t i;
-    char *diskAlias = NULL;
-    char *nbd_dest = NULL;
-    char *hoststr = NULL;
     unsigned long long mirror_speed = speed;
     unsigned int mirror_flags = VIR_DOMAIN_BLOCK_REBASE_REUSE_EXT;
     int rv;
@@ -810,47 +1005,20 @@ qemuMigrationSrcDriveMirror(virQEMUDriverPtr driver,
     port = mig->nbd->port;
     mig->nbd->port = 0;
 
-    /* escape literal IPv6 address */
-    if (strchr(host, ':')) {
-        if (virAsprintf(&hoststr, "[%s]", host) < 0)
-            goto cleanup;
-    } else if (VIR_STRDUP(hoststr, host) < 0) {
-        goto cleanup;
-    }
-
     if (*migrate_flags & QEMU_MONITOR_MIGRATE_NON_SHARED_INC)
         mirror_flags |= VIR_DOMAIN_BLOCK_REBASE_SHALLOW;
 
     for (i = 0; i < vm->def->ndisks; i++) {
         virDomainDiskDefPtr disk = vm->def->disks[i];
-        qemuDomainDiskPrivatePtr diskPriv = QEMU_DOMAIN_DISK_PRIVATE(disk);
-        int mon_ret;
 
         /* check whether disk should be migrated */
         if (!qemuMigrationAnyCopyDisk(disk, nmigrate_disks, migrate_disks))
             continue;
 
-        if (!(diskAlias = qemuAliasFromDisk(disk)) ||
-            (virAsprintf(&nbd_dest, "nbd:%s:%d:exportname=%s",
-                         hoststr, port, diskAlias) < 0))
+        if (qemuMigrationSrcNBDStorageCopyOne(driver, vm, disk, host, port,
+                                              mirror_speed, mirror_flags,
+                                              tlsAlias, flags) < 0)
             goto cleanup;
-
-        if (qemuDomainObjEnterMonitorAsync(driver, vm,
-                                           QEMU_ASYNC_JOB_MIGRATION_OUT) < 0)
-            goto cleanup;
-
-        qemuBlockJobSyncBegin(disk);
-        /* Force "raw" format for NBD export */
-        mon_ret = qemuMonitorDriveMirror(priv->mon, diskAlias, nbd_dest,
-                                         "raw", mirror_speed, 0, 0, mirror_flags);
-        VIR_FREE(diskAlias);
-        VIR_FREE(nbd_dest);
-
-        if (qemuDomainObjExitMonitor(driver, vm) < 0 || mon_ret < 0) {
-            qemuBlockJobSyncEnd(driver, vm, QEMU_ASYNC_JOB_MIGRATION_OUT, disk);
-            goto cleanup;
-        }
-        diskPriv->migrating = true;
 
         if (virDomainSaveStatus(driver->xmlopt, cfg->stateDir, vm, driver->caps) < 0) {
             VIR_WARN("Failed to save status on vm %s", vm->def->name);
@@ -858,8 +1026,7 @@ qemuMigrationSrcDriveMirror(virQEMUDriverPtr driver,
         }
     }
 
-    while ((rv = qemuMigrationSrcDriveMirrorReady(driver, vm,
-                                                  QEMU_ASYNC_JOB_MIGRATION_OUT)) != 1) {
+    while ((rv = qemuMigrationSrcNBDStorageCopyReady(vm, QEMU_ASYNC_JOB_MIGRATION_OUT)) != 1) {
         if (rv < 0)
             goto cleanup;
 
@@ -891,9 +1058,6 @@ qemuMigrationSrcDriveMirror(virQEMUDriverPtr driver,
 
  cleanup:
     virObjectUnref(cfg);
-    VIR_FREE(diskAlias);
-    VIR_FREE(nbd_dest);
-    VIR_FREE(hoststr);
     return ret;
 }
 
@@ -902,7 +1066,7 @@ qemuMigrationSrcDriveMirror(virQEMUDriverPtr driver,
  * qemuMigrationSrcIsAllowedHostdev:
  * @def: domain definition
  *
- * Checks that @def does not contain any host devices unsupported accross
+ * Checks that @def does not contain any host devices unsupported across
  * migrations. Returns true if the vm is allowed to migrate.
  */
 static bool
@@ -1072,7 +1236,7 @@ qemuMigrationSrcIsSafe(virDomainDefPtr def,
             continue;
 
         /* However, disks on local FS (e.g. ext4) are not safe. */
-        if (virDomainDiskGetType(disk) == VIR_STORAGE_TYPE_FILE) {
+        if (virStorageSourceGetActualType(disk->src) == VIR_STORAGE_TYPE_FILE) {
             if ((rc = virFileIsSharedFS(src)) < 0) {
                 return false;
             } else if (rc == 0) {
@@ -1084,8 +1248,8 @@ qemuMigrationSrcIsSafe(virDomainDefPtr def,
                 return false;
             else if (rc == 1)
                 continue;
-        } else if (disk->src->type == VIR_STORAGE_TYPE_NETWORK &&
-                   disk->src->protocol == VIR_STORAGE_NET_PROTOCOL_RBD) {
+        } else if (virStorageSourceGetActualType(disk->src) == VIR_STORAGE_TYPE_NETWORK) {
+            /* But network disks are safe again. */
             continue;
         }
 
@@ -1103,29 +1267,6 @@ qemuMigrationSrcIsSafe(virDomainDefPtr def,
     }
 
     return true;
-}
-
-/** qemuMigrationSrcSetOffline
- * Pause domain for non-live migration.
- */
-int
-qemuMigrationSrcSetOffline(virQEMUDriverPtr driver,
-                           virDomainObjPtr vm)
-{
-    int ret;
-    VIR_DEBUG("driver=%p vm=%p", driver, vm);
-    ret = qemuProcessStopCPUs(driver, vm, VIR_DOMAIN_PAUSED_MIGRATION,
-                              QEMU_ASYNC_JOB_MIGRATION_OUT);
-    if (ret == 0) {
-        virObjectEventPtr event;
-
-        event = virDomainEventLifecycleNewFromObj(vm,
-                                         VIR_DOMAIN_EVENT_SUSPENDED,
-                                         VIR_DOMAIN_EVENT_SUSPENDED_MIGRATED);
-        qemuDomainEventQueue(driver, event);
-    }
-
-    return ret;
 }
 
 
@@ -1150,19 +1291,10 @@ qemuMigrationAnyPostcopyFailed(virQEMUDriverPtr driver,
              "leaving the domain paused", vm->def->name);
 
     if (state == VIR_DOMAIN_RUNNING) {
-        virObjectEventPtr event;
-
         if (qemuProcessStopCPUs(driver, vm,
                                 VIR_DOMAIN_PAUSED_POSTCOPY_FAILED,
-                                QEMU_ASYNC_JOB_MIGRATION_IN) < 0) {
+                                QEMU_ASYNC_JOB_MIGRATION_IN) < 0)
             VIR_WARN("Unable to pause guest CPUs for %s", vm->def->name);
-            return;
-        }
-
-        event = virDomainEventLifecycleNewFromObj(vm,
-                                VIR_DOMAIN_EVENT_SUSPENDED,
-                                VIR_DOMAIN_EVENT_SUSPENDED_POSTCOPY_FAILED);
-        qemuDomainEventQueue(driver, event);
     } else {
         virDomainObjSetState(vm, VIR_DOMAIN_PAUSED,
                              VIR_DOMAIN_PAUSED_POSTCOPY_FAILED);
@@ -1175,8 +1307,7 @@ qemuMigrationSrcWaitForSpice(virDomainObjPtr vm)
 {
     qemuDomainObjPrivatePtr priv = vm->privateData;
 
-    if (!virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_SEAMLESS_MIGRATION) ||
-        !priv->job.spiceMigration)
+    if (!priv->job.spiceMigration)
         return 0;
 
     VIR_DEBUG("Waiting for SPICE to finish migration");
@@ -1365,7 +1496,7 @@ qemuMigrationAnyCompleted(virQEMUDriverPtr driver,
 
     /* This flag should only be set when run on src host */
     if (flags & QEMU_MIGRATION_COMPLETED_CHECK_STORAGE &&
-        qemuMigrationSrcDriveMirrorReady(driver, vm, asyncJob) < 0)
+        qemuMigrationSrcNBDStorageCopyReady(vm, asyncJob) < 0)
         goto error;
 
     if (flags & QEMU_MIGRATION_COMPLETED_ABORT_ON_ERROR &&
@@ -1461,7 +1592,8 @@ qemuMigrationSrcWaitForCompletion(virQEMUDriverPtr driver,
 
         if (events) {
             if (virDomainObjWait(vm) < 0) {
-                jobInfo->status = QEMU_DOMAIN_JOB_STATUS_FAILED;
+                if (virDomainObjIsActive(vm))
+                    jobInfo->status = QEMU_DOMAIN_JOB_STATUS_FAILED;
                 return -2;
             }
         } else {
@@ -1854,48 +1986,37 @@ qemuMigrationSrcBeginPhase(virQEMUDriverPtr driver,
     }
 
     if (flags & (VIR_MIGRATE_NON_SHARED_DISK | VIR_MIGRATE_NON_SHARED_INC)) {
-        bool has_drive_mirror =  virQEMUCapsGet(priv->qemuCaps,
-                                                QEMU_CAPS_DRIVE_MIRROR);
-
         if (nmigrate_disks) {
-            if (has_drive_mirror) {
-                size_t i, j;
-                /* Check user requested only known disk targets. */
-                for (i = 0; i < nmigrate_disks; i++) {
-                    for (j = 0; j < vm->def->ndisks; j++) {
-                        if (STREQ(vm->def->disks[j]->dst, migrate_disks[i]))
-                            break;
-                    }
-
-                    if (j == vm->def->ndisks) {
-                        virReportError(VIR_ERR_INVALID_ARG,
-                                       _("disk target %s not found"),
-                                       migrate_disks[i]);
-                        goto cleanup;
-                    }
+            size_t i, j;
+            /* Check user requested only known disk targets. */
+            for (i = 0; i < nmigrate_disks; i++) {
+                for (j = 0; j < vm->def->ndisks; j++) {
+                    if (STREQ(vm->def->disks[j]->dst, migrate_disks[i]))
+                        break;
                 }
 
-                if (flags & VIR_MIGRATE_TUNNELLED) {
-                    virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
-                                   _("Selecting disks to migrate is not "
-                                     "implemented for tunnelled migration"));
+                if (j == vm->def->ndisks) {
+                    virReportError(VIR_ERR_INVALID_ARG,
+                                   _("disk target %s not found"),
+                                   migrate_disks[i]);
                     goto cleanup;
                 }
-            } else {
+            }
+
+            if (flags & VIR_MIGRATE_TUNNELLED) {
                 virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
-                               _("qemu does not support drive-mirror command"));
+                               _("Selecting disks to migrate is not "
+                                 "implemented for tunnelled migration"));
                 goto cleanup;
             }
         }
 
-        if (has_drive_mirror) {
-            /* TODO support NBD for TUNNELLED migration */
-            if (flags & VIR_MIGRATE_TUNNELLED) {
-                VIR_WARN("NBD in tunnelled migration is currently not supported");
-            } else {
-                cookieFlags |= QEMU_MIGRATION_COOKIE_NBD;
-                priv->nbdPort = 0;
-            }
+        /* TODO support NBD for TUNNELLED migration */
+        if (flags & VIR_MIGRATE_TUNNELLED) {
+            VIR_WARN("NBD in tunnelled migration is currently not supported");
+        } else {
+            cookieFlags |= QEMU_MIGRATION_COOKIE_NBD;
+            priv->nbdPort = 0;
         }
     }
 
@@ -1917,7 +2038,8 @@ qemuMigrationSrcBeginPhase(virQEMUDriverPtr driver,
     if (!(flags & VIR_MIGRATE_OFFLINE))
         cookieFlags |= QEMU_MIGRATION_COOKIE_CAPS;
 
-    if (!(mig = qemuMigrationEatCookie(driver, vm, NULL, 0, 0)))
+    if (!(mig = qemuMigrationEatCookie(driver, vm->def,
+                                       priv->origname, priv, NULL, 0, 0)))
         goto cleanup;
 
     if (qemuMigrationBakeCookie(mig, driver, vm,
@@ -1998,11 +2120,8 @@ qemuMigrationSrcBegin(virConnectPtr conn,
 
     qemuMigrationSrcStoreDomainState(vm);
 
-    if (!virDomainObjIsActive(vm) && !(flags & VIR_MIGRATE_OFFLINE)) {
-        virReportError(VIR_ERR_OPERATION_INVALID,
-                       "%s", _("domain is not running"));
+    if (!(flags & VIR_MIGRATE_OFFLINE) && virDomainObjCheckActive(vm) < 0)
         goto endjob;
-    }
 
     /* Check if there is any ejected media.
      * We don't want to require them on the destination.
@@ -2161,6 +2280,7 @@ qemuMigrationDstPrepareAny(virQEMUDriverPtr driver,
 {
     virDomainObjPtr vm = NULL;
     virObjectEventPtr event = NULL;
+    virErrorPtr origErr;
     int ret = -1;
     int dataFD[2] = { -1, -1 };
     qemuDomainObjPrivatePtr priv = NULL;
@@ -2176,7 +2296,6 @@ qemuMigrationDstPrepareAny(virQEMUDriverPtr driver,
     bool relabel = false;
     int rv;
     char *tlsAlias = NULL;
-    char *secAlias = NULL;
 
     virNWFilterReadLockFilterUpdates();
 
@@ -2273,25 +2392,11 @@ qemuMigrationDstPrepareAny(virQEMUDriverPtr driver,
         }
     }
 
-    if (!(vm = virDomainObjListAdd(driver->domains, *def,
-                                   driver->xmlopt,
-                                   VIR_DOMAIN_OBJ_LIST_ADD_LIVE |
-                                   VIR_DOMAIN_OBJ_LIST_ADD_CHECK_LIVE,
-                                   NULL)))
-        goto cleanup;
-
-    virObjectRef(vm);
-    *def = NULL;
-    priv = vm->privateData;
-    if (VIR_STRDUP(priv->origname, origname) < 0)
-        goto cleanup;
-
-    if (taint_hook) {
-        /* Domain XML has been altered by a hook script. */
-        priv->hookRun = true;
-    }
-
-    if (!(mig = qemuMigrationEatCookie(driver, vm, cookiein, cookieinlen,
+    /* Parse cookie earlier than adding the domain onto the
+     * domain list. Parsing/validation may fail and there's no
+     * point in having the domain in the list at that point. */
+    if (!(mig = qemuMigrationEatCookie(driver, *def, origname, NULL,
+                                       cookiein, cookieinlen,
                                        QEMU_MIGRATION_COOKIE_LOCKSTATE |
                                        QEMU_MIGRATION_COOKIE_NBD |
                                        QEMU_MIGRATION_COOKIE_MEMORY_HOTPLUG |
@@ -2300,6 +2405,23 @@ qemuMigrationDstPrepareAny(virQEMUDriverPtr driver,
                                        QEMU_MIGRATION_COOKIE_ALLOW_REBOOT |
                                        QEMU_MIGRATION_COOKIE_CAPS)))
         goto cleanup;
+
+    if (!(vm = virDomainObjListAdd(driver->domains, *def,
+                                   driver->xmlopt,
+                                   VIR_DOMAIN_OBJ_LIST_ADD_LIVE |
+                                   VIR_DOMAIN_OBJ_LIST_ADD_CHECK_LIVE,
+                                   NULL)))
+        goto cleanup;
+    *def = NULL;
+
+    priv = vm->privateData;
+    if (VIR_STRDUP(priv->origname, origname) < 0)
+        goto cleanup;
+
+    if (taint_hook) {
+        /* Domain XML has been altered by a hook script. */
+        priv->hookRun = true;
+    }
 
     if (STREQ_NULLABLE(protocol, "rdma") &&
         !virMemoryLimitIsSet(vm->def->mem.hard_limit)) {
@@ -2386,7 +2508,7 @@ qemuMigrationDstPrepareAny(virQEMUDriverPtr driver,
     if (flags & VIR_MIGRATE_TLS) {
         if (qemuMigrationParamsEnableTLS(driver, vm, true,
                                          QEMU_ASYNC_JOB_MIGRATION_IN,
-                                         &tlsAlias, &secAlias, NULL,
+                                         &tlsAlias, NULL,
                                          migParams) < 0)
             goto stopjob;
     } else {
@@ -2401,9 +2523,21 @@ qemuMigrationDstPrepareAny(virQEMUDriverPtr driver,
     if (mig->nbd &&
         flags & (VIR_MIGRATE_NON_SHARED_DISK | VIR_MIGRATE_NON_SHARED_INC) &&
         virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_NBD_SERVER)) {
+        const char *nbdTLSAlias = NULL;
+
+        if (flags & VIR_MIGRATE_TLS) {
+            if (!virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_NBD_TLS)) {
+                virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
+                               _("QEMU NBD server does not support TLS transport"));
+                goto stopjob;
+            }
+
+            nbdTLSAlias = tlsAlias;
+        }
+
         if (qemuMigrationDstStartNBDServer(driver, vm, incoming->address,
                                            nmigrate_disks, migrate_disks,
-                                           nbdPort) < 0) {
+                                           nbdPort, nbdTLSAlias) < 0) {
             goto stopjob;
         }
         cookieFlags |= QEMU_MIGRATION_COOKIE_NBD;
@@ -2464,8 +2598,8 @@ qemuMigrationDstPrepareAny(virQEMUDriverPtr driver,
     ret = 0;
 
  cleanup:
+    virErrorPreserveLast(&origErr);
     VIR_FREE(tlsAlias);
-    VIR_FREE(secAlias);
     qemuProcessIncomingDefFree(incoming);
     VIR_FREE(xmlout);
     VIR_FORCE_CLOSE(dataFD[0]);
@@ -2484,10 +2618,11 @@ qemuMigrationDstPrepareAny(virQEMUDriverPtr driver,
         qemuDomainRemoveInactiveJob(driver, vm);
     }
     virDomainObjEndAPI(&vm);
-    qemuDomainEventQueue(driver, event);
+    virObjectEventStateQueue(driver->domainEventState, event);
     qemuMigrationCookieFree(mig);
     virObjectUnref(caps);
     virNWFilterUnlockFilterUpdates();
+    virErrorRestore(&origErr);
     return ret;
 
  stopjob:
@@ -2789,7 +2924,8 @@ qemuMigrationSrcConfirmPhase(virQEMUDriverPtr driver,
                              ? QEMU_MIGRATION_PHASE_CONFIRM3
                              : QEMU_MIGRATION_PHASE_CONFIRM3_CANCELLED);
 
-    if (!(mig = qemuMigrationEatCookie(driver, vm, cookiein, cookieinlen,
+    if (!(mig = qemuMigrationEatCookie(driver, vm->def, priv->origname, priv,
+                                       cookiein, cookieinlen,
                                        QEMU_MIGRATION_COOKIE_STATS)))
         goto cleanup;
 
@@ -2838,28 +2974,24 @@ qemuMigrationSrcConfirmPhase(virQEMUDriverPtr driver,
         event = virDomainEventLifecycleNewFromObj(vm,
                                          VIR_DOMAIN_EVENT_STOPPED,
                                          VIR_DOMAIN_EVENT_STOPPED_MIGRATED);
-        qemuDomainEventQueue(driver, event);
+        virObjectEventStateQueue(driver->domainEventState, event);
         qemuDomainEventEmitJobCompleted(driver, vm);
     } else {
         virErrorPtr orig_err = virSaveLastError();
         int reason;
 
         /* cancel any outstanding NBD jobs */
-        qemuMigrationSrcCancelDriveMirror(driver, vm, false,
-                                          QEMU_ASYNC_JOB_MIGRATION_OUT, NULL);
+        qemuMigrationSrcNBDCopyCancel(driver, vm, false,
+                                      QEMU_ASYNC_JOB_MIGRATION_OUT, NULL);
 
         virSetError(orig_err);
         virFreeError(orig_err);
 
         if (virDomainObjGetState(vm, &reason) == VIR_DOMAIN_PAUSED &&
-            reason == VIR_DOMAIN_PAUSED_POSTCOPY) {
+            reason == VIR_DOMAIN_PAUSED_POSTCOPY)
             qemuMigrationAnyPostcopyFailed(driver, vm);
-        } else if (qemuMigrationSrcRestoreDomainState(driver, vm)) {
-            event = virDomainEventLifecycleNewFromObj(vm,
-                                                      VIR_DOMAIN_EVENT_RESUMED,
-                                                      VIR_DOMAIN_EVENT_RESUMED_MIGRATED);
-            qemuDomainEventQueue(driver, event);
-        }
+        else
+            qemuMigrationSrcRestoreDomainState(driver, vm);
 
         qemuMigrationParamsReset(driver, vm, QEMU_ASYNC_JOB_MIGRATION_OUT,
                                  priv->job.migParams, priv->job.apiFlags);
@@ -2909,7 +3041,7 @@ qemuMigrationSrcConfirm(virQEMUDriverPtr driver,
 
     qemuMigrationJobFinish(driver, vm);
     if (!virDomainObjIsActive(vm)) {
-        if (flags & VIR_MIGRATE_UNDEFINE_SOURCE) {
+        if (!cancelled && ret == 0 && flags & VIR_MIGRATE_UNDEFINE_SOURCE) {
             virDomainDeleteConfig(cfg->configDir, cfg->autostartDir, vm);
             vm->persistent = 0;
         }
@@ -3240,7 +3372,6 @@ qemuMigrationSrcRun(virQEMUDriverPtr driver,
     qemuDomainObjPrivatePtr priv = vm->privateData;
     qemuMigrationCookiePtr mig = NULL;
     char *tlsAlias = NULL;
-    char *secAlias = NULL;
     qemuMigrationIOThreadPtr iothread = NULL;
     int fd = -1;
     unsigned long migrate_speed = resource ? resource : priv->migMaxBandwidth;
@@ -3299,7 +3430,8 @@ qemuMigrationSrcRun(virQEMUDriverPtr driver,
         }
     }
 
-    mig = qemuMigrationEatCookie(driver, vm, cookiein, cookieinlen,
+    mig = qemuMigrationEatCookie(driver, vm->def, priv->origname, priv,
+                                 cookiein, cookieinlen,
                                  cookieFlags |
                                  QEMU_MIGRATION_COOKIE_GRAPHICS |
                                  QEMU_MIGRATION_COOKIE_CAPS);
@@ -3324,7 +3456,7 @@ qemuMigrationSrcRun(virQEMUDriverPtr driver,
 
         if (qemuMigrationParamsEnableTLS(driver, vm, false,
                                          QEMU_ASYNC_JOB_MIGRATION_OUT,
-                                         &tlsAlias, &secAlias, hostname,
+                                         &tlsAlias, hostname,
                                          migParams) < 0)
             goto error;
     } else {
@@ -3339,14 +3471,25 @@ qemuMigrationSrcRun(virQEMUDriverPtr driver,
     if (migrate_flags & (QEMU_MONITOR_MIGRATE_NON_SHARED_DISK |
                          QEMU_MONITOR_MIGRATE_NON_SHARED_INC)) {
         if (mig->nbd) {
+            /* Currently libvirt does not support setting up of the NBD
+             * non-shared storage migration with TLS. As we need to honour the
+             * VIR_MIGRATE_TLS flag, we need to reject such migration until
+             * we implement TLS for NBD. */
+            if (flags & VIR_MIGRATE_TLS &&
+                !virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_BLOCKDEV_DEL)) {
+                virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
+                               _("NBD migration with TLS is not supported"));
+                goto error;
+            }
+
             /* This will update migrate_flags on success */
-            if (qemuMigrationSrcDriveMirror(driver, vm, mig,
-                                            spec->dest.host.name,
-                                            migrate_speed,
-                                            &migrate_flags,
-                                            nmigrate_disks,
-                                            migrate_disks,
-                                            dconn) < 0) {
+            if (qemuMigrationSrcNBDStorageCopy(driver, vm, mig,
+                                               spec->dest.host.name,
+                                               migrate_speed,
+                                               &migrate_flags,
+                                               nmigrate_disks,
+                                               migrate_disks,
+                                               dconn, tlsAlias, flags) < 0) {
                 goto error;
             }
         } else {
@@ -3357,10 +3500,11 @@ qemuMigrationSrcRun(virQEMUDriverPtr driver,
         }
     }
 
-    /* Before EnterMonitor, since qemuMigrationSetOffline already does that */
+    /* Before EnterMonitor, since already qemuProcessStopCPUs does that */
     if (!(flags & VIR_MIGRATE_LIVE) &&
         virDomainObjGetState(vm, NULL) == VIR_DOMAIN_RUNNING) {
-        if (qemuMigrationSrcSetOffline(driver, vm) < 0)
+        if (qemuProcessStopCPUs(driver, vm, VIR_DOMAIN_PAUSED_MIGRATION,
+                                QEMU_ASYNC_JOB_MIGRATION_OUT) < 0)
             goto error;
     }
 
@@ -3470,14 +3614,15 @@ qemuMigrationSrcRun(virQEMUDriverPtr driver,
                 goto error;
         }
     } else if (virDomainObjGetState(vm, NULL) == VIR_DOMAIN_RUNNING &&
-               qemuMigrationSrcSetOffline(driver, vm) < 0) {
+               qemuProcessStopCPUs(driver, vm, VIR_DOMAIN_PAUSED_MIGRATION,
+                                   QEMU_ASYNC_JOB_MIGRATION_OUT) < 0) {
         goto error;
     }
 
     if (mig->nbd &&
-        qemuMigrationSrcCancelDriveMirror(driver, vm, true,
-                                          QEMU_ASYNC_JOB_MIGRATION_OUT,
-                                          dconn) < 0)
+        qemuMigrationSrcNBDCopyCancel(driver, vm, true,
+                                      QEMU_ASYNC_JOB_MIGRATION_OUT,
+                                      dconn) < 0)
         goto error;
 
     /* When migration was paused before serializing device state we need to
@@ -3533,7 +3678,6 @@ qemuMigrationSrcRun(virQEMUDriverPtr driver,
 
  cleanup:
     VIR_FREE(tlsAlias);
-    VIR_FREE(secAlias);
     VIR_FORCE_CLOSE(fd);
     virDomainDefFree(persistDef);
     qemuMigrationCookieFree(mig);
@@ -3551,26 +3695,27 @@ qemuMigrationSrcRun(virQEMUDriverPtr driver,
  error:
     orig_err = virSaveLastError();
 
-    if (cancel &&
-        priv->job.current->status != QEMU_DOMAIN_JOB_STATUS_QEMU_COMPLETED &&
-        virDomainObjIsActive(vm) &&
-        qemuDomainObjEnterMonitorAsync(driver, vm,
-                                       QEMU_ASYNC_JOB_MIGRATION_OUT) == 0) {
-        qemuMonitorMigrateCancel(priv->mon);
-        ignore_value(qemuDomainObjExitMonitor(driver, vm));
-    }
+    if (virDomainObjIsActive(vm)) {
+        if (cancel &&
+            priv->job.current->status != QEMU_DOMAIN_JOB_STATUS_QEMU_COMPLETED &&
+            qemuDomainObjEnterMonitorAsync(driver, vm,
+                                           QEMU_ASYNC_JOB_MIGRATION_OUT) == 0) {
+            qemuMonitorMigrateCancel(priv->mon);
+            ignore_value(qemuDomainObjExitMonitor(driver, vm));
+        }
 
-    /* cancel any outstanding NBD jobs */
-    if (mig && mig->nbd)
-        qemuMigrationSrcCancelDriveMirror(driver, vm, false,
+        /* cancel any outstanding NBD jobs */
+        if (mig && mig->nbd)
+            qemuMigrationSrcNBDCopyCancel(driver, vm, false,
                                           QEMU_ASYNC_JOB_MIGRATION_OUT,
                                           dconn);
 
+        if (priv->job.current->status != QEMU_DOMAIN_JOB_STATUS_CANCELED)
+            priv->job.current->status = QEMU_DOMAIN_JOB_STATUS_FAILED;
+    }
+
     if (iothread)
         qemuMigrationSrcStopTunnel(iothread, true);
-
-    if (priv->job.current->status != QEMU_DOMAIN_JOB_STATUS_CANCELED)
-        priv->job.current->status = QEMU_DOMAIN_JOB_STATUS_FAILED;
 
     goto cleanup;
 
@@ -3636,10 +3781,13 @@ qemuMigrationSrcPerformNative(virQEMUDriverPtr driver,
         }
     }
 
-    if (STRNEQ(uribits->scheme, "rdma"))
-        spec.destType = MIGRATION_DEST_CONNECT_HOST;
-    else
+    /* RDMA and multi-fd migration requires QEMU to connect to the destination
+     * itself.
+     */
+    if (STREQ(uribits->scheme, "rdma") || (flags & VIR_MIGRATE_PARALLEL))
         spec.destType = MIGRATION_DEST_HOST;
+    else
+        spec.destType = MIGRATION_DEST_CONNECT_HOST;
     spec.dest.host.protocol = uribits->scheme;
     spec.dest.host.name = uribits->server;
     spec.dest.host.port = uribits->port;
@@ -3781,26 +3929,19 @@ qemuMigrationSrcPerformPeer2Peer2(virQEMUDriverPtr driver,
         qemuDomainObjEnterRemote(vm);
         ret = dconn->driver->domainMigratePrepareTunnel
             (dconn, st, destflags, dname, resource, dom_xml);
-        qemuDomainObjExitRemote(vm);
+        if (qemuDomainObjExitRemote(vm, true) < 0)
+            goto cleanup;
     } else {
         qemuDomainObjEnterRemote(vm);
         ret = dconn->driver->domainMigratePrepare2
             (dconn, &cookie, &cookielen, NULL, &uri_out,
              destflags, dname, resource, dom_xml);
-        qemuDomainObjExitRemote(vm);
+        if (qemuDomainObjExitRemote(vm, true) < 0)
+            goto cleanup;
     }
     VIR_FREE(dom_xml);
     if (ret == -1)
         goto cleanup;
-
-    /* the domain may have shutdown or crashed while we had the locks dropped
-     * in qemuDomainObjEnterRemote, so check again
-     */
-    if (!virDomainObjIsActive(vm)) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("guest unexpectedly quit"));
-        goto cleanup;
-    }
 
     if (!(flags & VIR_MIGRATE_TUNNELLED) &&
         (uri_out == NULL)) {
@@ -3848,7 +3989,8 @@ qemuMigrationSrcPerformPeer2Peer2(virQEMUDriverPtr driver,
     ddomain = dconn->driver->domainMigrateFinish2
         (dconn, dname, cookie, cookielen,
          uri_out ? uri_out : dconnuri, destflags, cancelled);
-    qemuDomainObjExitRemote(vm);
+    /* The domain is already gone at this point */
+    ignore_value(qemuDomainObjExitRemote(vm, false));
     if (cancelled && ddomain)
         VIR_ERROR(_("finish step ignored that migration was cancelled"));
 
@@ -3913,6 +4055,7 @@ qemuMigrationSrcPerformPeer2Peer3(virQEMUDriverPtr driver,
     int nparams = 0;
     int maxparams = 0;
     size_t i;
+    bool offline = !!(flags & VIR_MIGRATE_OFFLINE);
 
     VIR_DEBUG("driver=%p, sconn=%p, dconn=%p, dconnuri=%s, vm=%p, xmlin=%s, "
               "dname=%s, uri=%s, graphicsuri=%s, listenAddress=%s, "
@@ -3988,9 +4131,8 @@ qemuMigrationSrcPerformPeer2Peer3(virQEMUDriverPtr driver,
                           VIR_MIGRATE_AUTO_CONVERGE);
 
     VIR_DEBUG("Prepare3 %p", dconn);
-    cookiein = cookieout;
+    VIR_STEAL_PTR(cookiein, cookieout);
     cookieinlen = cookieoutlen;
-    cookieout = NULL;
     cookieoutlen = 0;
     if (flags & VIR_MIGRATE_TUNNELLED) {
         if (!(st = virStreamNew(dconn, 0)))
@@ -4006,7 +4148,8 @@ qemuMigrationSrcPerformPeer2Peer3(virQEMUDriverPtr driver,
                 (dconn, st, cookiein, cookieinlen, &cookieout, &cookieoutlen,
                  destflags, dname, bandwidth, dom_xml);
         }
-        qemuDomainObjExitRemote(vm);
+        if (qemuDomainObjExitRemote(vm, !offline) < 0)
+            goto cleanup;
     } else {
         qemuDomainObjEnterRemote(vm);
         if (useParams) {
@@ -4018,13 +4161,14 @@ qemuMigrationSrcPerformPeer2Peer3(virQEMUDriverPtr driver,
                 (dconn, cookiein, cookieinlen, &cookieout, &cookieoutlen,
                  uri, &uri_out, destflags, dname, bandwidth, dom_xml);
         }
-        qemuDomainObjExitRemote(vm);
+        if (qemuDomainObjExitRemote(vm, !offline) < 0)
+            goto cleanup;
     }
     VIR_FREE(dom_xml);
     if (ret == -1)
         goto cleanup;
 
-    if (flags & VIR_MIGRATE_OFFLINE) {
+    if (offline) {
         VIR_DEBUG("Offline migration, skipping Perform phase");
         VIR_FREE(cookieout);
         cookieoutlen = 0;
@@ -4055,9 +4199,8 @@ qemuMigrationSrcPerformPeer2Peer3(virQEMUDriverPtr driver,
     VIR_DEBUG("Perform3 %p uri=%s", sconn, NULLSTR(uri));
     qemuMigrationJobSetPhase(driver, vm, QEMU_MIGRATION_PHASE_PERFORM3);
     VIR_FREE(cookiein);
-    cookiein = cookieout;
+    VIR_STEAL_PTR(cookiein, cookieout);
     cookieinlen = cookieoutlen;
-    cookieout = NULL;
     cookieoutlen = 0;
     if (flags & VIR_MIGRATE_TUNNELLED) {
         ret = qemuMigrationSrcPerformTunnel(driver, vm, st, persist_xml,
@@ -4097,9 +4240,8 @@ qemuMigrationSrcPerformPeer2Peer3(virQEMUDriverPtr driver,
      */
     VIR_DEBUG("Finish3 %p ret=%d", dconn, ret);
     VIR_FREE(cookiein);
-    cookiein = cookieout;
+    VIR_STEAL_PTR(cookiein, cookieout);
     cookieinlen = cookieoutlen;
-    cookieout = NULL;
     cookieoutlen = 0;
 
     if (useParams) {
@@ -4114,7 +4256,8 @@ qemuMigrationSrcPerformPeer2Peer3(virQEMUDriverPtr driver,
             ddomain = dconn->driver->domainMigrateFinish3Params
                 (dconn, params, nparams, cookiein, cookieinlen,
                  &cookieout, &cookieoutlen, destflags, cancelled);
-            qemuDomainObjExitRemote(vm);
+            if (qemuDomainObjExitRemote(vm, !offline) < 0)
+                goto cleanup;
         }
     } else {
         dname = dname ? dname : vm->def->name;
@@ -4122,7 +4265,8 @@ qemuMigrationSrcPerformPeer2Peer3(virQEMUDriverPtr driver,
         ddomain = dconn->driver->domainMigrateFinish3
             (dconn, dname, cookiein, cookieinlen, &cookieout, &cookieoutlen,
              dconnuri, uri, destflags, cancelled);
-        qemuDomainObjExitRemote(vm);
+        if (qemuDomainObjExitRemote(vm, !offline) < 0)
+            goto cleanup;
     }
 
     if (cancelled) {
@@ -4176,9 +4320,8 @@ qemuMigrationSrcPerformPeer2Peer3(virQEMUDriverPtr driver,
      */
     VIR_DEBUG("Confirm3 %p cancelled=%d vm=%p", sconn, cancelled, vm);
     VIR_FREE(cookiein);
-    cookiein = cookieout;
+    VIR_STEAL_PTR(cookiein, cookieout);
     cookieinlen = cookieoutlen;
-    cookieout = NULL;
     cookieoutlen = 0;
     ret = qemuMigrationSrcConfirmPhase(driver, vm,
                                        cookiein, cookieinlen,
@@ -4260,7 +4403,8 @@ qemuMigrationSrcPerformPeer2Peer(virQEMUDriverPtr driver,
     virConnectPtr dconn = NULL;
     bool p2p;
     virErrorPtr orig_err = NULL;
-    bool offline = false;
+    bool offline = !!(flags & VIR_MIGRATE_OFFLINE);
+    bool dstOffline = false;
     virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
     bool useParams;
 
@@ -4300,7 +4444,9 @@ qemuMigrationSrcPerformPeer2Peer(virQEMUDriverPtr driver,
 
     qemuDomainObjEnterRemote(vm);
     dconn = virConnectOpenAuth(dconnuri, &virConnectAuthConfig, 0);
-    qemuDomainObjExitRemote(vm);
+    if (qemuDomainObjExitRemote(vm, !offline) < 0)
+        goto cleanup;
+
     if (dconn == NULL) {
         virReportError(VIR_ERR_OPERATION_FAILED,
                        _("Failed to connect to remote libvirt URI %s: %s"),
@@ -4329,10 +4475,11 @@ qemuMigrationSrcPerformPeer2Peer(virQEMUDriverPtr driver,
                                         VIR_DRV_FEATURE_MIGRATION_V3);
     useParams = VIR_DRV_SUPPORTS_FEATURE(dconn->driver, dconn,
                                          VIR_DRV_FEATURE_MIGRATION_PARAMS);
-    if (flags & VIR_MIGRATE_OFFLINE)
-        offline = VIR_DRV_SUPPORTS_FEATURE(dconn->driver, dconn,
-                                           VIR_DRV_FEATURE_MIGRATION_OFFLINE);
-    qemuDomainObjExitRemote(vm);
+    if (offline)
+        dstOffline = VIR_DRV_SUPPORTS_FEATURE(dconn->driver, dconn,
+                                              VIR_DRV_FEATURE_MIGRATION_OFFLINE);
+    if (qemuDomainObjExitRemote(vm, !offline) < 0)
+        goto cleanup;
 
     if (!p2p) {
         virReportError(VIR_ERR_OPERATION_FAILED, "%s",
@@ -4349,17 +4496,10 @@ qemuMigrationSrcPerformPeer2Peer(virQEMUDriverPtr driver,
         goto cleanup;
     }
 
-    if (flags & VIR_MIGRATE_OFFLINE && !offline) {
+    if (offline && !dstOffline) {
         virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED, "%s",
                        _("offline migration is not supported by "
                          "the destination host"));
-        goto cleanup;
-    }
-
-    /* domain may have been stopped while we were talking to remote daemon */
-    if (!virDomainObjIsActive(vm) && !(flags & VIR_MIGRATE_OFFLINE)) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("guest unexpectedly quit"));
         goto cleanup;
     }
 
@@ -4387,7 +4527,7 @@ qemuMigrationSrcPerformPeer2Peer(virQEMUDriverPtr driver,
     qemuDomainObjEnterRemote(vm);
     virConnectUnregisterCloseCallback(dconn, qemuMigrationSrcConnectionClosed);
     virObjectUnref(dconn);
-    qemuDomainObjExitRemote(vm);
+    ignore_value(qemuDomainObjExitRemote(vm, false));
     if (orig_err) {
         virSetError(orig_err);
         virFreeError(orig_err);
@@ -4435,11 +4575,8 @@ qemuMigrationSrcPerformJob(virQEMUDriverPtr driver,
                               flags) < 0)
         goto cleanup;
 
-    if (!virDomainObjIsActive(vm) && !(flags & VIR_MIGRATE_OFFLINE)) {
-        virReportError(VIR_ERR_OPERATION_INVALID,
-                       "%s", _("domain is not running"));
+    if (!(flags & VIR_MIGRATE_OFFLINE) && virDomainObjCheckActive(vm) < 0)
         goto endjob;
-    }
 
     if (!qemuMigrationSrcIsAllowed(driver, vm, true, flags))
         goto endjob;
@@ -4491,11 +4628,7 @@ qemuMigrationSrcPerformJob(virQEMUDriverPtr driver,
         qemuMigrationParamsReset(driver, vm, QEMU_ASYNC_JOB_MIGRATION_OUT,
                                  priv->job.migParams, priv->job.apiFlags);
 
-    if (qemuMigrationSrcRestoreDomainState(driver, vm)) {
-        event = virDomainEventLifecycleNewFromObj(vm,
-                                         VIR_DOMAIN_EVENT_RESUMED,
-                                         VIR_DOMAIN_EVENT_RESUMED_MIGRATED);
-    }
+    qemuMigrationSrcRestoreDomainState(driver, vm);
 
     qemuMigrationJobFinish(driver, vm);
     if (!virDomainObjIsActive(vm) && ret == 0) {
@@ -4512,8 +4645,7 @@ qemuMigrationSrcPerformJob(virQEMUDriverPtr driver,
     }
 
  cleanup:
-    virDomainObjEndAPI(&vm);
-    qemuDomainEventQueue(driver, event);
+    virObjectEventStateQueue(driver->domainEventState, event);
     virObjectUnref(cfg);
     return ret;
 }
@@ -4539,7 +4671,6 @@ qemuMigrationSrcPerformPhase(virQEMUDriverPtr driver,
                              unsigned long resource)
 {
     qemuDomainObjPrivatePtr priv = vm->privateData;
-    virObjectEventPtr event = NULL;
     int ret = -1;
 
     /* If we didn't start the job in the begin phase, start it now. */
@@ -4561,11 +4692,7 @@ qemuMigrationSrcPerformPhase(virQEMUDriverPtr driver,
                                         nmigrate_disks, migrate_disks, migParams);
 
     if (ret < 0) {
-        if (qemuMigrationSrcRestoreDomainState(driver, vm)) {
-            event = virDomainEventLifecycleNewFromObj(vm,
-                                                      VIR_DOMAIN_EVENT_RESUMED,
-                                                      VIR_DOMAIN_EVENT_RESUMED_MIGRATED);
-        }
+        qemuMigrationSrcRestoreDomainState(driver, vm);
         goto endjob;
     }
 
@@ -4588,8 +4715,6 @@ qemuMigrationSrcPerformPhase(virQEMUDriverPtr driver,
         qemuDomainRemoveInactiveJob(driver, vm);
 
  cleanup:
-    virDomainObjEndAPI(&vm);
-    qemuDomainEventQueue(driver, event);
     return ret;
 }
 
@@ -4753,7 +4878,7 @@ qemuMigrationDstPersist(virQEMUDriverPtr driver,
                                               oldPersist ?
                                               VIR_DOMAIN_EVENT_DEFINED_UPDATED :
                                               VIR_DOMAIN_EVENT_DEFINED_ADDED);
-    qemuDomainEventQueue(driver, event);
+    virObjectEventStateQueue(driver->domainEventState, event);
 
     ret = 0;
 
@@ -4826,8 +4951,8 @@ qemuMigrationDstFinish(virQEMUDriverPtr driver,
      * even though VIR_MIGRATE_PERSIST_DEST was not used. */
     cookie_flags |= QEMU_MIGRATION_COOKIE_PERSISTENT;
 
-    if (!(mig = qemuMigrationEatCookie(driver, vm, cookiein,
-                                       cookieinlen, cookie_flags)))
+    if (!(mig = qemuMigrationEatCookie(driver, vm->def, priv->origname, priv,
+                                       cookiein, cookieinlen, cookie_flags)))
         goto endjob;
 
     if (flags & VIR_MIGRATE_OFFLINE) {
@@ -4921,7 +5046,7 @@ qemuMigrationDstFinish(virQEMUDriverPtr driver,
                                  inPostCopy ? VIR_DOMAIN_RUNNING_POSTCOPY
                                             : VIR_DOMAIN_RUNNING_MIGRATED,
                                  QEMU_ASYNC_JOB_MIGRATION_IN) < 0) {
-            if (virGetLastError() == NULL)
+            if (virGetLastErrorCode() == VIR_ERR_OK)
                 virReportError(VIR_ERR_INTERNAL_ERROR,
                                "%s", _("resume operation failed"));
             /* Need to save the current error, in case shutting
@@ -4941,13 +5066,8 @@ qemuMigrationDstFinish(virQEMUDriverPtr driver,
                 goto endjob;
         }
 
-        if (inPostCopy) {
+        if (inPostCopy)
             doKill = false;
-            event = virDomainEventLifecycleNewFromObj(vm,
-                                        VIR_DOMAIN_EVENT_RESUMED,
-                                        VIR_DOMAIN_EVENT_RESUMED_POSTCOPY);
-            qemuDomainEventQueue(driver, event);
-        }
     }
 
     if (mig->jobInfo) {
@@ -4978,17 +5098,27 @@ qemuMigrationDstFinish(virQEMUDriverPtr driver,
 
     dom = virGetDomain(dconn, vm->def->name, vm->def->uuid, vm->def->id);
 
-    event = virDomainEventLifecycleNewFromObj(vm,
-                                              VIR_DOMAIN_EVENT_RESUMED,
-                                              VIR_DOMAIN_EVENT_RESUMED_MIGRATED);
-    qemuDomainEventQueue(driver, event);
+    if (inPostCopy) {
+        /* The only RESUME event during post-copy migration is triggered by
+         * QEMU when the running domain moves from the source to the
+         * destination host, but then the migration keeps running until all
+         * modified memory is transferred from the source host. This will
+         * result in VIR_DOMAIN_EVENT_RESUMED with RESUMED_POSTCOPY detail.
+         * However, our API documentation says we need to fire another RESUMED
+         * event at the very end of migration with RESUMED_MIGRATED detail.
+         */
+        event = virDomainEventLifecycleNewFromObj(vm,
+                                                  VIR_DOMAIN_EVENT_RESUMED,
+                                                  VIR_DOMAIN_EVENT_RESUMED_MIGRATED);
+        virObjectEventStateQueue(driver->domainEventState, event);
+    }
 
     if (virDomainObjGetState(vm, NULL) == VIR_DOMAIN_PAUSED) {
         virDomainObjSetState(vm, VIR_DOMAIN_PAUSED, VIR_DOMAIN_PAUSED_USER);
         event = virDomainEventLifecycleNewFromObj(vm,
                                                   VIR_DOMAIN_EVENT_SUSPENDED,
                                                   VIR_DOMAIN_EVENT_SUSPENDED_PAUSED);
-        qemuDomainEventQueue(driver, event);
+        virObjectEventStateQueue(driver->domainEventState, event);
     }
 
     if (virDomainObjIsActive(vm) &&
@@ -5010,7 +5140,7 @@ qemuMigrationDstFinish(virQEMUDriverPtr driver,
             event = virDomainEventLifecycleNewFromObj(vm,
                                 VIR_DOMAIN_EVENT_STOPPED,
                                 VIR_DOMAIN_EVENT_STOPPED_FAILED);
-            qemuDomainEventQueue(driver, event);
+            virObjectEventStateQueue(driver->domainEventState, event);
         } else {
             qemuMigrationAnyPostcopyFailed(driver, vm);
         }
@@ -5020,6 +5150,7 @@ qemuMigrationDstFinish(virQEMUDriverPtr driver,
         if (jobInfo) {
             VIR_STEAL_PTR(priv->job.completed, jobInfo);
             priv->job.completed->status = QEMU_DOMAIN_JOB_STATUS_COMPLETED;
+            priv->job.completed->statsType = QEMU_DOMAIN_JOB_STATS_TYPE_MIGRATION;
         }
 
         if (qemuMigrationBakeCookie(mig, driver, vm,
@@ -5059,7 +5190,7 @@ qemuMigrationDstFinish(virQEMUDriverPtr driver,
     /* Set a special error if Finish is expected to return NULL as a result of
      * successful call with retcode != 0
      */
-    if (retcode != 0 && !dom && !virGetLastError())
+    if (retcode != 0 && !dom && virGetLastErrorCode() == VIR_ERR_OK)
         virReportError(VIR_ERR_MIGRATE_FINISH_OK, NULL);
     return dom;
 }
@@ -5209,7 +5340,6 @@ qemuMigrationSrcCancel(virQEMUDriverPtr driver,
                        virDomainObjPtr vm)
 {
     qemuDomainObjPrivatePtr priv = vm->privateData;
-    virHashTablePtr blockJobs = NULL;
     bool storage = false;
     size_t i;
     int ret = -1;
@@ -5217,67 +5347,37 @@ qemuMigrationSrcCancel(virQEMUDriverPtr driver,
     VIR_DEBUG("Canceling unfinished outgoing migration of domain %s",
               vm->def->name);
 
-    for (i = 0; i < vm->def->ndisks; i++) {
-        virDomainDiskDefPtr disk = vm->def->disks[i];
-        if (QEMU_DOMAIN_DISK_PRIVATE(disk)->migrating) {
-            qemuBlockJobSyncBegin(disk);
-            storage = true;
-        }
-    }
-
     qemuDomainObjEnterMonitor(driver, vm);
-
     ignore_value(qemuMonitorMigrateCancel(priv->mon));
-    if (storage)
-        blockJobs = qemuMonitorGetAllBlockJobInfo(priv->mon);
-
-    if (qemuDomainObjExitMonitor(driver, vm) < 0 || (storage && !blockJobs))
-        goto endsyncjob;
-
-    if (!storage) {
-        ret = 0;
+    if (qemuDomainObjExitMonitor(driver, vm) < 0)
         goto cleanup;
-    }
 
     for (i = 0; i < vm->def->ndisks; i++) {
         virDomainDiskDefPtr disk = vm->def->disks[i];
         qemuDomainDiskPrivatePtr diskPriv = QEMU_DOMAIN_DISK_PRIVATE(disk);
+        qemuBlockJobDataPtr job;
 
-        if (!diskPriv->migrating)
-            continue;
-
-        if (virHashLookup(blockJobs, disk->info.alias)) {
-            VIR_DEBUG("Drive mirror on disk %s is still running", disk->dst);
-        } else {
-            VIR_DEBUG("Drive mirror on disk %s is gone", disk->dst);
-            qemuBlockJobSyncEnd(driver, vm, QEMU_ASYNC_JOB_NONE, disk);
+        if (!(job = qemuBlockJobDiskGetJob(disk)) ||
+            !qemuBlockJobIsRunning(job))
             diskPriv->migrating = false;
+
+        if (diskPriv->migrating) {
+            qemuBlockJobSyncBegin(job);
+            storage = true;
         }
+
+        virObjectUnref(job);
     }
 
-    if (qemuMigrationSrcCancelDriveMirror(driver, vm, false,
-                                          QEMU_ASYNC_JOB_NONE, NULL) < 0)
-        goto endsyncjob;
+    if (storage &&
+        qemuMigrationSrcNBDCopyCancel(driver, vm, false,
+                                      QEMU_ASYNC_JOB_NONE, NULL) < 0)
+        goto cleanup;
 
     ret = 0;
 
  cleanup:
-    virHashFree(blockJobs);
     return ret;
-
- endsyncjob:
-    if (storage) {
-        for (i = 0; i < vm->def->ndisks; i++) {
-            virDomainDiskDefPtr disk = vm->def->disks[i];
-            qemuDomainDiskPrivatePtr diskPriv = QEMU_DOMAIN_DISK_PRIVATE(disk);
-
-            if (diskPriv->migrating) {
-                qemuBlockJobSyncEnd(driver, vm, QEMU_ASYNC_JOB_NONE, disk);
-                diskPriv->migrating = false;
-            }
-        }
-    }
-    goto cleanup;
 }
 
 

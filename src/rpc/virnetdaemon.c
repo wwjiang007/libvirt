@@ -16,14 +16,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Martin Kletzander <mkletzan@redhat.com>
  */
 
 #include <config.h>
 
 #include <unistd.h>
-#include <string.h>
 #include <fcntl.h>
 
 #include "virnetdaemon.h"
@@ -116,7 +113,7 @@ virNetDaemonOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(virNetDaemon)
+VIR_ONCE_GLOBAL_INIT(virNetDaemon);
 
 
 virNetDaemonPtr
@@ -322,12 +319,7 @@ virNetDaemonNewPostExecRestart(virJSONValuePtr object,
             goto error;
     } else if (virJSONValueIsArray(servers)) {
         size_t i;
-        ssize_t n = virJSONValueArraySize(servers);
-        if (n < 0) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Server count %zd should be positive"), n);
-            goto error;
-        }
+        size_t n = virJSONValueArraySize(servers);
         if (n > nDefServerNames) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("Server count %zd greater than default name count %zu"),

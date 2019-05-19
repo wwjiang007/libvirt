@@ -29,20 +29,12 @@
 #include "virlog.h"
 #include "virstring.h"
 #include "virutil.h"
+#include "virbuffer.h"
+#include "virenum.h"
 
 #if WITH_YAJL
 # include <yajl/yajl_gen.h>
 # include <yajl/yajl_parse.h>
-
-# ifdef WITH_YAJL2
-#  define yajl_size_t size_t
-#  define VIR_YAJL_STATUS_OK(status) ((status) == yajl_status_ok)
-# else
-#  define yajl_size_t unsigned int
-#  define yajl_complete_parse yajl_parse_complete
-#  define VIR_YAJL_STATUS_OK(status) \
-    ((status) == yajl_status_ok || (status) == yajl_status_insufficient_data)
-# endif
 
 #endif
 
@@ -78,7 +70,6 @@ struct _virJSONArray {
 
 struct _virJSONValue {
     int type; /* enum virJSONType */
-    bool protect; /* prevents deletion when embedded in another object */
 
     union {
         virJSONObject object;
@@ -144,6 +135,8 @@ virJSONValueGetType(const virJSONValue *value)
  *
  * b: boolean value
  * B: boolean value, omitted if false
+ * T: boolean value specified by a virTristate(Bool|Switch) value, omitted on
+ * the _ABSENT value
  *
  * d: double precision floating point number
  * n: json null value
@@ -267,12 +260,23 @@ virJSONValueObjectAddVArgs(virJSONValuePtr obj,
             rc = virJSONValueObjectAppendNumberDouble(obj, key, val);
         }   break;
 
+        case 'T':
         case 'B':
         case 'b': {
             int val = va_arg(args, int);
 
             if (!val && type == 'B')
                 continue;
+
+            if (type == 'T') {
+                if (val == VIR_TRISTATE_BOOL_ABSENT)
+                    continue;
+
+                if (val == VIR_TRISTATE_BOOL_NO)
+                    val = 0;
+                else
+                    val = 1;
+            }
 
             rc = virJSONValueObjectAppendBoolean(obj, key, val);
         }   break;
@@ -395,7 +399,7 @@ void
 virJSONValueFree(virJSONValuePtr value)
 {
     size_t i;
-    if (!value || value->protect)
+    if (!value)
         return;
 
     switch ((virJSONType) value->type) {
@@ -498,65 +502,50 @@ virJSONValueNewNumber(const char *data)
 virJSONValuePtr
 virJSONValueNewNumberInt(int data)
 {
-    virJSONValuePtr val = NULL;
-    char *str;
+    VIR_AUTOFREE(char *) str = NULL;
     if (virAsprintf(&str, "%i", data) < 0)
         return NULL;
-    val = virJSONValueNewNumber(str);
-    VIR_FREE(str);
-    return val;
+    return virJSONValueNewNumber(str);
 }
 
 
 virJSONValuePtr
 virJSONValueNewNumberUint(unsigned int data)
 {
-    virJSONValuePtr val = NULL;
-    char *str;
+    VIR_AUTOFREE(char *) str = NULL;
     if (virAsprintf(&str, "%u", data) < 0)
         return NULL;
-    val = virJSONValueNewNumber(str);
-    VIR_FREE(str);
-    return val;
+    return virJSONValueNewNumber(str);
 }
 
 
 virJSONValuePtr
 virJSONValueNewNumberLong(long long data)
 {
-    virJSONValuePtr val = NULL;
-    char *str;
+    VIR_AUTOFREE(char *) str = NULL;
     if (virAsprintf(&str, "%lld", data) < 0)
         return NULL;
-    val = virJSONValueNewNumber(str);
-    VIR_FREE(str);
-    return val;
+    return virJSONValueNewNumber(str);
 }
 
 
 virJSONValuePtr
 virJSONValueNewNumberUlong(unsigned long long data)
 {
-    virJSONValuePtr val = NULL;
-    char *str;
+    VIR_AUTOFREE(char *) str = NULL;
     if (virAsprintf(&str, "%llu", data) < 0)
         return NULL;
-    val = virJSONValueNewNumber(str);
-    VIR_FREE(str);
-    return val;
+    return virJSONValueNewNumber(str);
 }
 
 
 virJSONValuePtr
 virJSONValueNewNumberDouble(double data)
 {
-    virJSONValuePtr val = NULL;
-    char *str;
+    VIR_AUTOFREE(char *) str = NULL;
     if (virDoubleToStr(&str, data) < 0)
         return NULL;
-    val = virJSONValueNewNumber(str);
-    VIR_FREE(str);
-    return val;
+    return virJSONValueNewNumber(str);
 }
 
 
@@ -622,28 +611,28 @@ virJSONValueObjectAppend(virJSONValuePtr object,
                          const char *key,
                          virJSONValuePtr value)
 {
-    char *newkey;
+    virJSONObjectPair pair = { NULL, value };
+    int ret = -1;
 
-    if (object->type != VIR_JSON_TYPE_OBJECT)
-        return -1;
-
-    if (virJSONValueObjectHasKey(object, key))
-        return -1;
-
-    if (VIR_STRDUP(newkey, key) < 0)
-        return -1;
-
-    if (VIR_REALLOC_N(object->data.object.pairs,
-                      object->data.object.npairs + 1) < 0) {
-        VIR_FREE(newkey);
+    if (object->type != VIR_JSON_TYPE_OBJECT) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("expecting JSON object"));
         return -1;
     }
 
-    object->data.object.pairs[object->data.object.npairs].key = newkey;
-    object->data.object.pairs[object->data.object.npairs].value = value;
-    object->data.object.npairs++;
+    if (virJSONValueObjectHasKey(object, key)) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("duplicate key '%s'"), key);
+        return -1;
+    }
 
-    return 0;
+    if (VIR_STRDUP(pair.key, key) < 0)
+        return -1;
+
+    ret = VIR_APPEND_ELEMENT(object->data.object.pairs,
+                             object->data.object.npairs, pair);
+
+    VIR_FREE(pair.key);
+    return ret;
 }
 
 
@@ -778,8 +767,10 @@ int
 virJSONValueArrayAppend(virJSONValuePtr array,
                         virJSONValuePtr value)
 {
-    if (array->type != VIR_JSON_TYPE_ARRAY)
+    if (array->type != VIR_JSON_TYPE_ARRAY) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("expecting JSON array"));
         return -1;
+    }
 
     if (VIR_REALLOC_N(array->data.array.values,
                       array->data.array.nvalues + 1) < 0)
@@ -788,6 +779,21 @@ virJSONValueArrayAppend(virJSONValuePtr array,
     array->data.array.values[array->data.array.nvalues] = value;
     array->data.array.nvalues++;
 
+    return 0;
+}
+
+
+int
+virJSONValueArrayAppendString(virJSONValuePtr object,
+                              const char *value)
+{
+    virJSONValuePtr jvalue = virJSONValueNewString(value);
+    if (!jvalue)
+        return -1;
+    if (virJSONValueArrayAppend(object, jvalue) < 0) {
+        virJSONValueFree(jvalue);
+        return -1;
+    }
     return 0;
 }
 
@@ -971,12 +977,9 @@ virJSONValueIsArray(virJSONValuePtr array)
 }
 
 
-ssize_t
+size_t
 virJSONValueArraySize(const virJSONValue *array)
 {
-    if (array->type != VIR_JSON_TYPE_ARRAY)
-        return -1;
-
     return array->data.array.nvalues;
 }
 
@@ -1176,10 +1179,9 @@ int
 virJSONValueGetArrayAsBitmap(const virJSONValue *val,
                              virBitmapPtr *bitmap)
 {
-    int ret = -1;
     virJSONValuePtr elem;
     size_t i;
-    unsigned long long *elems = NULL;
+    VIR_AUTOFREE(unsigned long long *) elems = NULL;
     unsigned long long maxelem = 0;
 
     *bitmap = NULL;
@@ -1196,25 +1198,20 @@ virJSONValueGetArrayAsBitmap(const virJSONValue *val,
 
         if (elem->type != VIR_JSON_TYPE_NUMBER ||
             virStrToLong_ullp(elem->data.number, NULL, 10, &elems[i]) < 0)
-            goto cleanup;
+            return -1;
 
         if (elems[i] > maxelem)
             maxelem = elems[i];
     }
 
     if (!(*bitmap = virBitmapNewQuiet(maxelem + 1)))
-        goto cleanup;
+        return -1;
 
     /* second pass sets the correct bits in the map */
     for (i = 0; i < val->data.array.nvalues; i++)
         ignore_value(virBitmapSetBit(*bitmap, elems[i]));
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(elems);
-
-    return ret;
+    return 0;
 }
 
 
@@ -1613,7 +1610,7 @@ virJSONParserHandleBoolean(void *ctx,
 static int
 virJSONParserHandleNumber(void *ctx,
                           const char *s,
-                          yajl_size_t l)
+                          size_t l)
 {
     virJSONParserPtr parser = ctx;
     char *str;
@@ -1641,7 +1638,7 @@ virJSONParserHandleNumber(void *ctx,
 static int
 virJSONParserHandleString(void *ctx,
                           const unsigned char *stringVal,
-                          yajl_size_t stringLen)
+                          size_t stringLen)
 {
     virJSONParserPtr parser = ctx;
     virJSONValuePtr value = virJSONValueNewStringLen((const char *)stringVal,
@@ -1664,7 +1661,7 @@ virJSONParserHandleString(void *ctx,
 static int
 virJSONParserHandleMapKey(void *ctx,
                           const unsigned char *stringVal,
-                          yajl_size_t stringLen)
+                          size_t stringLen)
 {
     virJSONParserPtr parser = ctx;
     virJSONParserStatePtr state;
@@ -1810,42 +1807,19 @@ virJSONValueFromString(const char *jsonstring)
     virJSONValuePtr ret = NULL;
     int rc;
     size_t len = strlen(jsonstring);
-# ifndef WITH_YAJL2
-    yajl_parser_config cfg = { 0, 1 }; /* Match yajl 2 default behavior */
-    virJSONValuePtr tmp;
-# endif
 
     VIR_DEBUG("string=%s", jsonstring);
 
-# ifdef WITH_YAJL2
     hand = yajl_alloc(&parserCallbacks, NULL, &parser);
-# else
-    hand = yajl_alloc(&parserCallbacks, &cfg, NULL, &parser);
-# endif
     if (!hand) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Unable to create JSON parser"));
         goto cleanup;
     }
 
-    /* Yajl 2 is nice enough to default to rejecting trailing garbage.
-     * Yajl 1.0.12 has yajl_get_bytes_consumed to make that detection
-     * simpler.  But we're stuck with yajl 1.0.7 on RHEL 6, which
-     * happily quits parsing at the end of a valid JSON construct,
-     * with no visibility into how much more input remains.  Wrapping
-     * things in an array forces yajl to confess the truth.  */
-# ifdef WITH_YAJL2
+    /* Yajl 2 is nice enough to default to rejecting trailing garbage. */
     rc = yajl_parse(hand, (const unsigned char *)jsonstring, len);
-# else
-    rc = yajl_parse(hand, (const unsigned char *)"[", 1);
-    parser.wrap = 1;
-    if (VIR_YAJL_STATUS_OK(rc))
-        rc = yajl_parse(hand, (const unsigned char *)jsonstring, len);
-    parser.wrap = 0;
-    if (VIR_YAJL_STATUS_OK(rc))
-        rc = yajl_parse(hand, (const unsigned char *)"]", 1);
-# endif
-    if (!VIR_YAJL_STATUS_OK(rc) ||
+    if (rc != yajl_status_ok ||
         yajl_complete_parse(hand) != yajl_status_ok) {
         unsigned char *errstr = yajl_get_error(hand, 1,
                                                (const unsigned char*)jsonstring,
@@ -1866,18 +1840,6 @@ virJSONValueFromString(const char *jsonstring)
         virJSONValueFree(parser.head);
     } else {
         ret = parser.head;
-# ifndef WITH_YAJL2
-        /* Undo the array wrapping above */
-        tmp = ret;
-        ret = NULL;
-        if (virJSONValueArraySize(tmp) > 1)
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("cannot parse json %s: too many items present"),
-                           jsonstring);
-        else
-            ret = virJSONValueArraySteal(tmp, 0);
-        virJSONValueFree(tmp);
-# endif
     }
 
  cleanup:
@@ -1912,7 +1874,7 @@ virJSONValueToStringOne(virJSONValuePtr object,
             if (yajl_gen_string(g,
                                 (unsigned char *)object->data.object.pairs[i].key,
                                 strlen(object->data.object.pairs[i].key))
-                                != yajl_gen_status_ok)
+                != yajl_gen_status_ok)
                 return -1;
             if (virJSONValueToStringOne(object->data.object.pairs[i].value, g) < 0)
                 return -1;
@@ -1961,35 +1923,27 @@ virJSONValueToStringOne(virJSONValuePtr object,
 }
 
 
-char *
-virJSONValueToString(virJSONValuePtr object,
+int
+virJSONValueToBuffer(virJSONValuePtr object,
+                     virBufferPtr buf,
                      bool pretty)
 {
     yajl_gen g;
     const unsigned char *str;
-    char *ret = NULL;
-    yajl_size_t len;
-# ifndef WITH_YAJL2
-    yajl_gen_config conf = { pretty ? 1 : 0, pretty ? "  " : " "};
-# endif
+    size_t len;
+    int ret = -1;
 
     VIR_DEBUG("object=%p", object);
 
-# ifdef WITH_YAJL2
     g = yajl_gen_alloc(NULL);
-    if (g) {
-        yajl_gen_config(g, yajl_gen_beautify, pretty ? 1 : 0);
-        yajl_gen_config(g, yajl_gen_indent_string, pretty ? "  " : " ");
-        yajl_gen_config(g, yajl_gen_validate_utf8, 1);
-    }
-# else
-    g = yajl_gen_alloc(&conf, NULL);
-# endif
     if (!g) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Unable to create JSON formatter"));
         goto cleanup;
     }
+    yajl_gen_config(g, yajl_gen_beautify, pretty ? 1 : 0);
+    yajl_gen_config(g, yajl_gen_indent_string, pretty ? "  " : " ");
+    yajl_gen_config(g, yajl_gen_validate_utf8, 1);
 
     if (virJSONValueToStringOne(object, g) < 0) {
         virReportOOMError();
@@ -2001,12 +1955,11 @@ virJSONValueToString(virJSONValuePtr object,
         goto cleanup;
     }
 
-    ignore_value(VIR_STRDUP(ret, (const char *)str));
+    virBufferAdd(buf, (const char *) str, len);
+    ret = 0;
 
  cleanup:
     yajl_gen_free(g);
-
-    VIR_DEBUG("result=%s", NULLSTR(ret));
 
     return ret;
 }
@@ -2022,15 +1975,29 @@ virJSONValueFromString(const char *jsonstring ATTRIBUTE_UNUSED)
 }
 
 
-char *
-virJSONValueToString(virJSONValuePtr object ATTRIBUTE_UNUSED,
+int
+virJSONValueToBuffer(virJSONValuePtr object ATTRIBUTE_UNUSED,
+                     virBufferPtr buf ATTRIBUTE_UNUSED,
                      bool pretty ATTRIBUTE_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                    _("No JSON parser implementation is available"));
-    return NULL;
+    return -1;
 }
 #endif
+
+
+char *
+virJSONValueToString(virJSONValuePtr object,
+                     bool pretty)
+{
+    VIR_AUTOCLEAN(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+
+    if (virJSONValueToBuffer(object, &buf, pretty) < 0)
+        return NULL;
+
+    return virBufferContentAndReset(&buf);
+}
 
 
 /**
@@ -2049,16 +2016,12 @@ char *
 virJSONStringReformat(const char *jsonstr,
                       bool pretty)
 {
-    virJSONValuePtr json;
-    char *ret;
+    VIR_AUTOPTR(virJSONValue) json = NULL;
 
     if (!(json = virJSONValueFromString(jsonstr)))
         return NULL;
 
-    ret = virJSONValueToString(json, pretty);
-
-    virJSONValueFree(json);
-    return ret;
+    return virJSONValueToString(json, pretty);
 }
 
 
@@ -2147,7 +2110,7 @@ virJSONValueObjectDeflattenWorker(const char *key,
 virJSONValuePtr
 virJSONValueObjectDeflatten(virJSONValuePtr json)
 {
-    virJSONValuePtr deflattened;
+    VIR_AUTOPTR(virJSONValue) deflattened = NULL;
     virJSONValuePtr ret = NULL;
 
     if (!(deflattened = virJSONValueNewObject()))
@@ -2156,12 +2119,9 @@ virJSONValueObjectDeflatten(virJSONValuePtr json)
     if (virJSONValueObjectForeachKeyValue(json,
                                           virJSONValueObjectDeflattenWorker,
                                           deflattened) < 0)
-        goto cleanup;
+        return NULL;
 
     VIR_STEAL_PTR(ret, deflattened);
-
- cleanup:
-    virJSONValueFree(deflattened);
 
     return ret;
 }

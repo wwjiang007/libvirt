@@ -17,8 +17,8 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef VBOX_COMMON_H
-# define VBOX_COMMON_H
+#ifndef LIBVIRT_VBOX_COMMON_H
+# define LIBVIRT_VBOX_COMMON_H
 
 # ifdef ___VirtualBox_CXPCOM_h
 #  error this file should not be included after vbox_CAPI_v*.h
@@ -430,19 +430,7 @@ typedef nsISupports IKeyboard;
 # define installUniformedAPI(gVBoxAPI, result) \
     do { \
         result = 0; \
-        if (uVersion >= 3002051 && uVersion < 4000051) { \
-            vbox40InstallUniformedAPI(&gVBoxAPI); \
-        } else if (uVersion >= 4000051 && uVersion < 4001051) { \
-            vbox41InstallUniformedAPI(&gVBoxAPI); \
-        } else if (uVersion >= 4001051 && uVersion < 4002020) { \
-            vbox42InstallUniformedAPI(&gVBoxAPI); \
-        } else if (uVersion >= 4002020 && uVersion < 4002051) { \
-            vbox42_20InstallUniformedAPI(&gVBoxAPI); \
-        } else if (uVersion >= 4002051 && uVersion < 4003004) { \
-            vbox43InstallUniformedAPI(&gVBoxAPI); \
-        } else if (uVersion >= 4003004 && uVersion < 4003051) { \
-            vbox43_4InstallUniformedAPI(&gVBoxAPI); \
-        } else if (uVersion >= 4003051 && uVersion < 5000051) { \
+        if (uVersion >= 5000000 && uVersion < 5000051) { \
             vbox50InstallUniformedAPI(&gVBoxAPI); \
         } else if (uVersion >= 5000051 && uVersion < 5001051) { \
             vbox51InstallUniformedAPI(&gVBoxAPI); \
@@ -453,4 +441,4 @@ typedef nsISupports IKeyboard;
         } \
     } while (0)
 
-#endif /* VBOX_COMMON_H */
+#endif /* LIBVIRT_VBOX_COMMON_H */

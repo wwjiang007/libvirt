@@ -14,15 +14,10 @@
  * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
  * MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE. THE AUTHORS AND
  * CONTRIBUTORS ACCEPT NO RESPONSIBILITY IN ANY CONCEIVABLE MANNER.
- *
- * Author: Bjorn Reese <bjorn.reese@systematic.dk>
- *         Daniel Veillard <veillard@redhat.com>
  */
 
 #include <config.h>
 
-#include <string.h>
-#include <stdlib.h>
 
 #include "virerror.h"
 #include "virhash.h"
@@ -83,7 +78,7 @@ static int virHashAtomicOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(virHashAtomic)
+VIR_ONCE_GLOBAL_INIT(virHashAtomic);
 
 
 static uint32_t virHashStrCode(const void *name, uint32_t seed)
@@ -321,6 +316,7 @@ virHashAddOrUpdateEntry(virHashTablePtr table, const void *name,
 {
     size_t key, len = 0;
     virHashEntryPtr entry;
+    virHashEntryPtr last = NULL;
     void *new_name;
 
     if ((table == NULL) || (name == NULL))
@@ -342,6 +338,7 @@ virHashAddOrUpdateEntry(virHashTablePtr table, const void *name,
                 return -1;
             }
         }
+        last = entry;
         len++;
     }
 
@@ -352,8 +349,11 @@ virHashAddOrUpdateEntry(virHashTablePtr table, const void *name,
 
     entry->name = new_name;
     entry->payload = userdata;
-    entry->next = table->table[key];
-    table->table[key] = entry;
+
+    if (last)
+        last->next = entry;
+    else
+        table->table[key] = entry;
 
     table->nbElems++;
 

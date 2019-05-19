@@ -1003,6 +1003,8 @@ class CParser:
                 # skip hidden macros
                 if name in hidden_macros:
                     return token
+                if name[-2:] == "_H" or name[-8:] == "_H_ALLOW":
+                    return token
 
                 strValue = None
                 if len(lst) == 1 and lst[0][0] == '"' and lst[0][-1] == '"':
@@ -2115,12 +2117,22 @@ class docBuilder:
                      self.modulename_file(id.header)))
         if id.info is not None:
             info = id.info
+            valhex = ""
             if info[0] is not None and info[0] != '':
                 try:
                     val = eval(info[0])
+                    valhex = hex(val)
                 except:
                     val = info[0]
                 output.write(" value='%s'" % (val))
+
+                if valhex != "":
+                    output.write(" value_hex='%s'" % (valhex))
+
+                m = re.match("\(?1<<(\d+)\)?", info[0])
+                if m:
+                    output.write(" value_bitshift='%s'" % (m.group(1)))
+
             if info[2] is not None and info[2] != '':
                 output.write(" type='%s'" % info[2])
             if info[1] is not None and info[1] != '':
@@ -2270,7 +2282,7 @@ class docBuilder:
         output.write("    <file name='%s'>\n" % (module))
         dict = self.headers[file]
         if dict.info is not None:
-            for data in ('Summary', 'Description', 'Author'):
+            for data in ('Summary', 'Description'):
                 try:
                     output.write("     <%s>%s</%s>\n" % (
                                  data.lower(),

@@ -17,8 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -28,7 +26,6 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <getopt.h>
-#include <stdlib.h>
 #include <grp.h>
 
 #include "libvirt_internal.h"
@@ -87,12 +84,14 @@ enum {
     VIR_DAEMON_ERR_CONFIG,
     VIR_DAEMON_ERR_HOOKS,
     VIR_DAEMON_ERR_AUDIT,
+    VIR_DAEMON_ERR_DRIVER,
 
     VIR_DAEMON_ERR_LAST
 };
 
-VIR_ENUM_DECL(virDaemonErr)
-VIR_ENUM_IMPL(virDaemonErr, VIR_DAEMON_ERR_LAST,
+VIR_ENUM_DECL(virDaemonErr);
+VIR_ENUM_IMPL(virDaemonErr,
+              VIR_DAEMON_ERR_LAST,
               "Initialization successful",
               "Unable to obtain pidfile",
               "Unable to create rundir",
@@ -102,7 +101,9 @@ VIR_ENUM_IMPL(virDaemonErr, VIR_DAEMON_ERR_LAST,
               "Unable to initialize network sockets",
               "Unable to load configuration file",
               "Unable to look for hook scripts",
-              "Unable to initialize audit system")
+              "Unable to initialize audit system",
+              "Unable to initialize driver",
+);
 
 static int daemonForkIntoBackground(const char *argv0)
 {
@@ -281,6 +282,7 @@ static int daemonErrorLogFilter(virErrorPtr err, int priority)
     case VIR_ERR_NO_NODE_DEVICE:
     case VIR_ERR_NO_INTERFACE:
     case VIR_ERR_NO_NWFILTER:
+    case VIR_ERR_NO_NWFILTER_BINDING:
     case VIR_ERR_NO_SECRET:
     case VIR_ERR_NO_DOMAIN_SNAPSHOT:
     case VIR_ERR_OPERATION_INVALID:
@@ -294,9 +296,7 @@ static int daemonErrorLogFilter(virErrorPtr err, int priority)
 }
 
 
-#define VIR_DAEMON_LOAD_MODULE(func, module) \
-    virDriverLoadModule(module, #func)
-static void daemonInitialize(void)
+static int daemonInitialize(void)
 {
     /*
      * Note that the order is important: the first ones have a higher
@@ -305,55 +305,56 @@ static void daemonInitialize(void)
      * driver, since their resources must be auto-started before any
      * domains can be auto-started.
      */
-    /* We don't care if any of these fail, because the whole point
-     * is to allow users to only install modules they want to use.
-     * If they try to open a connection for a module that
-     * is not loaded they'll get a suitable error at that point
-     */
 #ifdef WITH_NETWORK
-    VIR_DAEMON_LOAD_MODULE(networkRegister, "network");
+    if (virDriverLoadModule("network", "networkRegister", false) < 0)
+        return -1;
 #endif
 #ifdef WITH_INTERFACE
-    VIR_DAEMON_LOAD_MODULE(interfaceRegister, "interface");
-#endif
-#ifdef WITH_STORAGE
-    VIR_DAEMON_LOAD_MODULE(storageRegister, "storage");
-#endif
-#ifdef WITH_NODE_DEVICES
-    VIR_DAEMON_LOAD_MODULE(nodedevRegister, "nodedev");
+    if (virDriverLoadModule("interface", "interfaceRegister", false) < 0)
+        return -1;
 #endif
 #ifdef WITH_SECRETS
-    VIR_DAEMON_LOAD_MODULE(secretRegister, "secret");
+    if (virDriverLoadModule("secret", "secretRegister", false) < 0)
+        return -1;
+#endif
+#ifdef WITH_STORAGE
+    if (virDriverLoadModule("storage", "storageRegister", false) < 0)
+        return -1;
+#endif
+#ifdef WITH_NODE_DEVICES
+    if (virDriverLoadModule("nodedev", "nodedevRegister", false) < 0)
+        return -1;
 #endif
 #ifdef WITH_NWFILTER
-    VIR_DAEMON_LOAD_MODULE(nwfilterRegister, "nwfilter");
-#endif
-#ifdef WITH_XEN
-    VIR_DAEMON_LOAD_MODULE(xenRegister, "xen");
+    if (virDriverLoadModule("nwfilter", "nwfilterRegister", false) < 0)
+        return -1;
 #endif
 #ifdef WITH_LIBXL
-    VIR_DAEMON_LOAD_MODULE(libxlRegister, "libxl");
+    if (virDriverLoadModule("libxl", "libxlRegister", false) < 0)
+        return -1;
 #endif
 #ifdef WITH_QEMU
-    VIR_DAEMON_LOAD_MODULE(qemuRegister, "qemu");
+    if (virDriverLoadModule("qemu", "qemuRegister", false) < 0)
+        return -1;
 #endif
 #ifdef WITH_LXC
-    VIR_DAEMON_LOAD_MODULE(lxcRegister, "lxc");
-#endif
-#ifdef WITH_UML
-    VIR_DAEMON_LOAD_MODULE(umlRegister, "uml");
+    if (virDriverLoadModule("lxc", "lxcRegister", false) < 0)
+        return -1;
 #endif
 #ifdef WITH_VBOX
-    VIR_DAEMON_LOAD_MODULE(vboxRegister, "vbox");
+    if (virDriverLoadModule("vbox", "vboxRegister", false) < 0)
+        return -1;
 #endif
 #ifdef WITH_BHYVE
-    VIR_DAEMON_LOAD_MODULE(bhyveRegister, "bhyve");
+    if (virDriverLoadModule("bhyve", "bhyveRegister", false) < 0)
+        return -1;
 #endif
 #ifdef WITH_VZ
-    VIR_DAEMON_LOAD_MODULE(vzRegister, "vz");
+    if (virDriverLoadModule("vz", "vzRegister", false) < 0)
+        return -1;
 #endif
+    return 0;
 }
-#undef VIR_DAEMON_LOAD_MODULE
 
 
 static int ATTRIBUTE_NONNULL(3)
@@ -370,9 +371,7 @@ daemonSetupNetworking(virNetServerPtr srv,
     virNetServerServicePtr svcAdm = NULL;
     virNetServerServicePtr svcRO = NULL;
     virNetServerServicePtr svcTCP = NULL;
-#if WITH_GNUTLS
     virNetServerServicePtr svcTLS = NULL;
-#endif
     gid_t unix_sock_gid = 0;
     int unix_sock_ro_mask = 0;
     int unix_sock_rw_mask = 0;
@@ -411,9 +410,7 @@ daemonSetupNetworking(virNetServerPtr srv,
                                                unix_sock_rw_mask,
                                                unix_sock_gid,
                                                config->auth_unix_rw,
-#if WITH_GNUTLS
                                                NULL,
-#endif
                                                false,
                                                config->max_queued_clients,
                                                config->max_client_requests,
@@ -424,9 +421,7 @@ daemonSetupNetworking(virNetServerPtr srv,
                                                      unix_sock_ro_mask,
                                                      unix_sock_gid,
                                                      config->auth_unix_ro,
-#if WITH_GNUTLS
                                                      NULL,
-#endif
                                                      true,
                                                      config->max_queued_clients,
                                                      config->max_client_requests,
@@ -450,9 +445,7 @@ daemonSetupNetworking(virNetServerPtr srv,
                                                   unix_sock_adm_mask,
                                                   unix_sock_gid,
                                                   REMOTE_AUTH_NONE,
-#if WITH_GNUTLS
                                                   NULL,
-#endif
                                                   false,
                                                   config->admin_max_queued_clients,
                                                   config->admin_max_client_requests)))
@@ -470,9 +463,7 @@ daemonSetupNetworking(virNetServerPtr srv,
                                                      config->tcp_port,
                                                      AF_UNSPEC,
                                                      config->auth_tcp,
-#if WITH_GNUTLS
                                                      NULL,
-#endif
                                                      false,
                                                      config->max_queued_clients,
                                                      config->max_client_requests)))
@@ -483,7 +474,6 @@ daemonSetupNetworking(virNetServerPtr srv,
                 goto cleanup;
         }
 
-#if WITH_GNUTLS
         if (config->listen_tls) {
             virNetTLSContextPtr ctxt = NULL;
 
@@ -547,22 +537,12 @@ daemonSetupNetworking(virNetServerPtr srv,
 
             virObjectUnref(ctxt);
         }
-#else
-        (void)privileged;
-        if (config->listen_tls) {
-            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                           _("This libvirtd build does not support TLS"));
-            goto cleanup;
-        }
-#endif
     }
 
 #if WITH_SASL
     if (config->auth_unix_rw == REMOTE_AUTH_SASL ||
         (sock_path_ro && config->auth_unix_ro == REMOTE_AUTH_SASL) ||
-# if WITH_GNUTLS
         (ipsock && config->listen_tls && config->auth_tls == REMOTE_AUTH_SASL) ||
-# endif
         (ipsock && config->listen_tcp && config->auth_tcp == REMOTE_AUTH_SASL)) {
         saslCtxt = virNetSASLContextNewServer(
             (const char *const*)config->sasl_allowed_username_list);
@@ -574,9 +554,7 @@ daemonSetupNetworking(virNetServerPtr srv,
     ret = 0;
 
  cleanup:
-#if WITH_GNUTLS
     virObjectUnref(svcTLS);
-#endif
     virObjectUnref(svcTCP);
     virObjectUnref(svcRO);
     virObjectUnref(svcAdm);
@@ -1286,7 +1264,7 @@ int main(int argc, char **argv) {
     }
 
     if (!(dmn = virNetDaemonNew())) {
-        ret = VIR_DAEMON_ERR_INIT;
+        ret = VIR_DAEMON_ERR_DRIVER;
         goto cleanup;
     }
 
@@ -1312,7 +1290,10 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
 
-    daemonInitialize();
+    if (daemonInitialize() < 0) {
+        ret = VIR_DAEMON_ERR_INIT;
+        goto cleanup;
+    }
 
     remoteProcs[REMOTE_PROC_AUTH_LIST].needAuth = false;
     remoteProcs[REMOTE_PROC_AUTH_SASL_INIT].needAuth = false;

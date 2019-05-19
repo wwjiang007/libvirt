@@ -16,18 +16,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Daniel Veillard <veillard@redhat.com>
- * Karel Zak <kzak@redhat.com>
- * Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef VSH_H
-# define VSH_H
+#ifndef LIBVIRT_VSH_H
+# define LIBVIRT_VSH_H
 
-# include <stdio.h>
-# include <stdlib.h>
-# include <string.h>
 # include <stdarg.h>
 # include <unistd.h>
 # include <sys/stat.h>
@@ -590,4 +583,4 @@ char *_vshStrdup(vshControl *ctl, const char *s, const char *filename,
 # define VSH_REQUIRE_OPTION_VAR(VARNAME1, VARNAME2) \
     VSH_REQUIRE_OPTION_EXPR(#VARNAME1, VARNAME1, #VARNAME2, VARNAME2)
 
-#endif /* VSH_H */
+#endif /* LIBVIRT_VSH_H */

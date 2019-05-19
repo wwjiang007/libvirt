@@ -156,14 +156,15 @@ virSecurityStackTransactionStart(virSecurityManagerPtr mgr)
 
 static int
 virSecurityStackTransactionCommit(virSecurityManagerPtr mgr,
-                                  pid_t pid)
+                                  pid_t pid,
+                                  bool lock)
 {
     virSecurityStackDataPtr priv = virSecurityManagerGetPrivateData(mgr);
     virSecurityStackItemPtr item = priv->itemsHead;
     int rc = 0;
 
     for (; item; item = item->next) {
-        if (virSecurityManagerTransactionCommit(item->securityManager, pid) < 0)
+        if (virSecurityManagerTransactionCommit(item->securityManager, pid, lock) < 0)
             rc = -1;
     }
 
@@ -261,42 +262,6 @@ virSecurityStackReserveLabel(virSecurityManagerPtr mgr,
     if (virSecurityManagerReserveLabel(priv->secondary, vm, pid) < 0)
         rc = -1;
 #endif
-
-    return rc;
-}
-
-
-static int
-virSecurityStackSetDiskLabel(virSecurityManagerPtr mgr,
-                             virDomainDefPtr vm,
-                             virDomainDiskDefPtr disk)
-{
-    virSecurityStackDataPtr priv = virSecurityManagerGetPrivateData(mgr);
-    virSecurityStackItemPtr item = priv->itemsHead;
-    int rc = 0;
-
-    for (; item; item = item->next) {
-        if (virSecurityManagerSetDiskLabel(item->securityManager, vm, disk) < 0)
-            rc = -1;
-    }
-
-    return rc;
-}
-
-
-static int
-virSecurityStackRestoreDiskLabel(virSecurityManagerPtr mgr,
-                                 virDomainDefPtr vm,
-                                 virDomainDiskDefPtr disk)
-{
-    virSecurityStackDataPtr priv = virSecurityManagerGetPrivateData(mgr);
-    virSecurityStackItemPtr item = priv->itemsHead;
-    int rc = 0;
-
-    for (; item; item = item->next) {
-        if (virSecurityManagerRestoreDiskLabel(item->securityManager, vm, disk) < 0)
-            rc = -1;
-    }
 
     return rc;
 }
@@ -599,14 +564,16 @@ virSecurityStackGetBaseLabel(virSecurityManagerPtr mgr, int virtType)
 static int
 virSecurityStackSetImageLabel(virSecurityManagerPtr mgr,
                               virDomainDefPtr vm,
-                              virStorageSourcePtr src)
+                              virStorageSourcePtr src,
+                              virSecurityDomainImageLabelFlags flags)
 {
     virSecurityStackDataPtr priv = virSecurityManagerGetPrivateData(mgr);
     virSecurityStackItemPtr item = priv->itemsHead;
     int rc = 0;
 
     for (; item; item = item->next) {
-        if (virSecurityManagerSetImageLabel(item->securityManager, vm, src) < 0)
+        if (virSecurityManagerSetImageLabel(item->securityManager, vm, src,
+                                            flags) < 0)
             rc = -1;
     }
 
@@ -616,7 +583,8 @@ virSecurityStackSetImageLabel(virSecurityManagerPtr mgr,
 static int
 virSecurityStackRestoreImageLabel(virSecurityManagerPtr mgr,
                                   virDomainDefPtr vm,
-                                  virStorageSourcePtr src)
+                                  virStorageSourcePtr src,
+                                  virSecurityDomainImageLabelFlags flags)
 {
     virSecurityStackDataPtr priv = virSecurityManagerGetPrivateData(mgr);
     virSecurityStackItemPtr item = priv->itemsHead;
@@ -624,7 +592,7 @@ virSecurityStackRestoreImageLabel(virSecurityManagerPtr mgr,
 
     for (; item; item = item->next) {
         if (virSecurityManagerRestoreImageLabel(item->securityManager,
-                                                vm, src) < 0)
+                                                vm, src, flags) < 0)
             rc = -1;
     }
 
@@ -760,6 +728,43 @@ virSecurityStackDomainRestoreChardevLabel(virSecurityManagerPtr mgr,
     return rc;
 }
 
+
+static int
+virSecurityStackSetTPMLabels(virSecurityManagerPtr mgr,
+                             virDomainDefPtr vm)
+{
+    virSecurityStackDataPtr priv = virSecurityManagerGetPrivateData(mgr);
+    virSecurityStackItemPtr item = priv->itemsHead;
+    int rc = 0;
+
+    for (; item; item = item->next) {
+        if (virSecurityManagerSetTPMLabels(item->securityManager,
+                                           vm) < 0)
+            rc = -1;
+    }
+
+    return rc;
+}
+
+
+static int
+virSecurityStackRestoreTPMLabels(virSecurityManagerPtr mgr,
+                                 virDomainDefPtr vm)
+{
+    virSecurityStackDataPtr priv = virSecurityManagerGetPrivateData(mgr);
+    virSecurityStackItemPtr item = priv->itemsHead;
+    int rc = 0;
+
+    for (; item; item = item->next) {
+        if (virSecurityManagerRestoreTPMLabels(item->securityManager,
+                                               vm) < 0)
+            rc = -1;
+    }
+
+    return rc;
+}
+
+
 virSecurityDriver virSecurityDriverStack = {
     .privateDataLen                     = sizeof(virSecurityStackData),
     .name                               = "stack",
@@ -777,9 +782,6 @@ virSecurityDriver virSecurityDriverStack = {
     .transactionAbort                   = virSecurityStackTransactionAbort,
 
     .domainSecurityVerify               = virSecurityStackVerify,
-
-    .domainSetSecurityDiskLabel         = virSecurityStackSetDiskLabel,
-    .domainRestoreSecurityDiskLabel     = virSecurityStackRestoreDiskLabel,
 
     .domainSetSecurityImageLabel        = virSecurityStackSetImageLabel,
     .domainRestoreSecurityImageLabel    = virSecurityStackRestoreImageLabel,
@@ -822,4 +824,7 @@ virSecurityDriver virSecurityDriverStack = {
 
     .domainSetSecurityChardevLabel      = virSecurityStackDomainSetChardevLabel,
     .domainRestoreSecurityChardevLabel  = virSecurityStackDomainRestoreChardevLabel,
+
+    .domainSetSecurityTPMLabels         = virSecurityStackSetTPMLabels,
+    .domainRestoreSecurityTPMLabels     = virSecurityStackRestoreTPMLabels,
 };

@@ -16,13 +16,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *      Jiri Denemark <jdenemar@redhat.com>
  */
 
-#ifndef __VIR_CPU_CONF_H__
-# define __VIR_CPU_CONF_H__
+#ifndef LIBVIRT_CPU_CONF_H
+# define LIBVIRT_CPU_CONF_H
 
 # include "virutil.h"
 # include "virbuffer.h"
@@ -30,6 +27,7 @@
 # include "virbitmap.h"
 # include "virarch.h"
 # include "numa_conf.h"
+# include "virenum.h"
 
 # define VIR_CPU_VENDOR_ID_LENGTH 12
 
@@ -41,7 +39,7 @@ typedef enum {
     VIR_CPU_TYPE_LAST
 } virCPUType;
 
-VIR_ENUM_DECL(virCPU)
+VIR_ENUM_DECL(virCPU);
 
 typedef enum {
     VIR_CPU_MODE_CUSTOM,
@@ -51,7 +49,7 @@ typedef enum {
     VIR_CPU_MODE_LAST
 } virCPUMode;
 
-VIR_ENUM_DECL(virCPUMode)
+VIR_ENUM_DECL(virCPUMode);
 
 typedef enum {
     VIR_CPU_MATCH_MINIMUM,
@@ -61,7 +59,7 @@ typedef enum {
     VIR_CPU_MATCH_LAST
 } virCPUMatch;
 
-VIR_ENUM_DECL(virCPUMatch)
+VIR_ENUM_DECL(virCPUMatch);
 
 typedef enum {
     VIR_CPU_CHECK_DEFAULT,
@@ -72,7 +70,7 @@ typedef enum {
     VIR_CPU_CHECK_LAST
 } virCPUCheck;
 
-VIR_ENUM_DECL(virCPUCheck)
+VIR_ENUM_DECL(virCPUCheck);
 
 typedef enum {
     VIR_CPU_FALLBACK_ALLOW,
@@ -81,7 +79,7 @@ typedef enum {
     VIR_CPU_FALLBACK_LAST
 } virCPUFallback;
 
-VIR_ENUM_DECL(virCPUFallback)
+VIR_ENUM_DECL(virCPUFallback);
 
 typedef enum {
     VIR_CPU_FEATURE_FORCE,
@@ -93,7 +91,7 @@ typedef enum {
     VIR_CPU_FEATURE_LAST
 } virCPUFeaturePolicy;
 
-VIR_ENUM_DECL(virCPUFeaturePolicy)
+VIR_ENUM_DECL(virCPUFeaturePolicy);
 
 typedef struct _virCPUFeatureDef virCPUFeatureDef;
 typedef virCPUFeatureDef *virCPUFeatureDefPtr;
@@ -227,4 +225,4 @@ virCPUDefListParse(const char **xmlCPUs,
 void
 virCPUDefListFree(virCPUDefPtr *cpus);
 
-#endif /* __VIR_CPU_CONF_H__ */
+#endif /* LIBVIRT_CPU_CONF_H */

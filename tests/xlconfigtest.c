@@ -3,6 +3,7 @@
  *
  * Copyright (C) 2007, 2010-2011, 2014 Red Hat, Inc.
  * Copyright (c) 2015 SUSE LINUX Products GmbH, Nuernberg, Germany.
+ * Copyright (C) 2014 David Kiarie Kahurani
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,15 +19,10 @@
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
  *
- * Author: Daniel P. Berrange <berrange@redhat.com>
- * Author: Kiarie Kahurani <davidkiarie4@gmail.com>
- *
  */
 
 #include <config.h>
 
-#include <stdio.h>
-#include <string.h>
 #include <unistd.h>
 
 #include "internal.h"
@@ -253,6 +249,8 @@ mymain(void)
         DO_TEST_FORMAT(name, true); \
     } while (0)
 
+    DO_TEST("fullvirt-ovswitch-tagged");
+    DO_TEST("fullvirt-ovswitch-trunked");
     DO_TEST_REPLACE_VARS("fullvirt-ovmf");
     DO_TEST("paravirt-maxvcpus");
     DO_TEST("new-disk");
@@ -261,6 +259,7 @@ mymain(void)
 #ifdef LIBXL_HAVE_QED
     DO_TEST_FORMAT("disk-qed", false);
 #endif
+    DO_TEST("net-fakemodel");
     DO_TEST("spice");
     DO_TEST("spice-features");
     DO_TEST("vif-rate");
@@ -282,6 +281,9 @@ mymain(void)
     DO_TEST_FORMAT("paravirt-cmdline-extra-root", false);
     DO_TEST_FORMAT("paravirt-cmdline-bogus-extra-root", false);
     DO_TEST("rbd-multihost-noauth");
+    DO_TEST_FORMAT("paravirt-type", false);
+    DO_TEST_FORMAT("fullvirt-type", false);
+    DO_TEST("pvh-type");
 
 #ifdef LIBXL_HAVE_DEVICE_CHANNEL
     DO_TEST("channel-pty");
@@ -298,6 +300,10 @@ mymain(void)
     DO_TEST_FORMAT("fullvirt-direct-kernel-boot-extra", false);
     DO_TEST_FORMAT("fullvirt-direct-kernel-boot-bogus-extra", false);
 #endif
+#ifdef LIBXL_HAVE_BUILDINFO_GRANT_LIMITS
+    DO_TEST("max-gntframes");
+#endif
+
     DO_TEST("vif-typename");
     DO_TEST("vif-multi-ip");
     DO_TEST("usb");

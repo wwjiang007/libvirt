@@ -19,8 +19,12 @@
  *
  */
 
-#ifndef __VIR_DBUS_PRIV_H__
-# define __VIR_DBUS_PRIV_H__
+#ifndef LIBVIRT_VIRDBUSPRIV_H_ALLOW
+# error "virdbuspriv.h may only be included by virdbus.c or test suites"
+#endif /* LIBVIRT_VIRDBUSPRIV_H_ALLOW */
+
+#ifndef LIBVIRT_VIRDBUSPRIV_H
+# define LIBVIRT_VIRDBUSPRIV_H
 
 # include "virdbus.h"
 
@@ -52,8 +56,4 @@ int virDBusMessageEncode(DBusMessage* msg,
                          const char *types,
                          ...);
 
-int virDBusMessageDecode(DBusMessage* msg,
-                         const char *types,
-                         ...);
-
-#endif /* __VIR_DBUS_PRIV_H__ */
+#endif /* LIBVIRT_VIRDBUSPRIV_H */

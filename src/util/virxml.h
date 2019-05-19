@@ -16,12 +16,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Daniel Veillard <veillard@redhat.com>
  */
 
-#ifndef __VIR_XML_H__
-# define __VIR_XML_H__
+#ifndef LIBVIRT_VIRXML_H
+# define LIBVIRT_VIRXML_H
 
 # include "internal.h"
 
@@ -31,6 +29,7 @@
 # include <libxml/relaxng.h>
 
 # include "virbuffer.h"
+# include "virautoclean.h"
 
 int              virXPathBoolean(const char *xpath,
                                  xmlXPathContextPtr ctxt);
@@ -219,6 +218,34 @@ int
 virXMLFormatElement(virBufferPtr buf,
                     const char *name,
                     virBufferPtr attrBuf,
-                    virBufferPtr childBuf);
+                    virBufferPtr childBuf)
+    ATTRIBUTE_RETURN_CHECK;
 
-#endif                          /* __VIR_XML_H__ */
+struct _virXPathContextNodeSave {
+    xmlXPathContextPtr ctxt;
+    xmlNodePtr node;
+};
+typedef struct _virXPathContextNodeSave virXPathContextNodeSave;
+typedef virXPathContextNodeSave *virXPathContextNodeSavePtr;
+
+void
+virXPathContextNodeRestore(virXPathContextNodeSavePtr save);
+
+VIR_DEFINE_AUTOCLEAN_FUNC(virXPathContextNodeSave, virXPathContextNodeRestore);
+
+/**
+ * VIR_XPATH_NODE_AUTORESTORE:
+ * @ctxt: XML XPath context pointer
+ *
+ * This macro ensures that when the scope where it's used ends, @ctxt's current
+ * node pointer is reset to the original value when this macro was used.
+ */
+# define VIR_XPATH_NODE_AUTORESTORE(_ctxt) \
+    VIR_AUTOCLEAN(virXPathContextNodeSave) _ctxt ## CtxtSave = { .ctxt = _ctxt,\
+                                                                 .node = _ctxt->node}; \
+    ignore_value(&_ctxt ## CtxtSave)
+
+VIR_DEFINE_AUTOPTR_FUNC(xmlDoc, xmlFreeDoc);
+VIR_DEFINE_AUTOPTR_FUNC(xmlXPathContext, xmlXPathFreeContext);
+
+#endif /* LIBVIRT_VIRXML_H */

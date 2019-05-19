@@ -21,9 +21,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Michal Privoznik <mprivozn@redhat.com>
  */
 #include <config.h>
 
@@ -277,7 +274,7 @@ findLease(const char *name,
     while ((ret = virDirRead(dir, &entry, leaseDir)) > 0) {
         char *path;
 
-        if (virFileHasSuffix(entry->d_name, ".status")) {
+        if (virStringHasSuffix(entry->d_name, ".status")) {
             if (!(path = virFileBuildPath(leaseDir, entry->d_name, NULL)))
                 goto cleanup;
 
@@ -288,7 +285,7 @@ findLease(const char *name,
                 goto cleanup;
             }
             VIR_FREE(path);
-        } else if (virFileHasSuffix(entry->d_name, ".macs")) {
+        } else if (virStringHasSuffix(entry->d_name, ".macs")) {
             if (!(path = virFileBuildPath(leaseDir, entry->d_name, NULL)))
                 goto cleanup;
 
@@ -309,8 +306,7 @@ findLease(const char *name,
     }
     VIR_DIR_CLOSE(dir);
 
-    if ((nleases = virJSONValueArraySize(leases_array)) < 0)
-        goto cleanup;
+    nleases = virJSONValueArraySize(leases_array);
     DEBUG("Read %zd leases", nleases);
 
 #if !defined(LIBVIRT_NSS_GUEST)

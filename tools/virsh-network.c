@@ -16,11 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- *  Daniel Veillard <veillard@redhat.com>
- *  Karel Zak <kzak@redhat.com>
- *  Daniel P. Berrange <berrange@redhat.com>
- *
  */
 
 #include <config.h>
@@ -33,15 +28,31 @@
 #include "virstring.h"
 #include "virtime.h"
 #include "conf/network_conf.h"
+#include "vsh-table.h"
+#include "virenum.h"
 
-#define VIRSH_COMMON_OPT_NETWORK(cflags) \
+#define VIRSH_COMMON_OPT_NETWORK(_helpstr, cflags) \
     {.name = "network", \
      .type = VSH_OT_DATA, \
      .flags = VSH_OFLAG_REQ, \
-     .help = N_("network name or uuid"), \
+     .help = _helpstr, \
      .completer = virshNetworkNameCompleter, \
      .completer_flags = cflags, \
     }
+
+#define VIRSH_COMMON_OPT_NETWORK_FULL(cflags) \
+    VIRSH_COMMON_OPT_NETWORK(N_("network name or uuid"), cflags)
+
+#define VIRSH_COMMON_OPT_NETWORK_OT_STRING(_helpstr, cflags) \
+    {.name = "network", \
+     .type = VSH_OT_STRING, \
+     .help = _helpstr, \
+     .completer = virshNetworkNameCompleter, \
+     .completer_flags = cflags, \
+    }
+
+#define VIRSH_COMMON_OPT_NETWORK_OT_STRING_FULL(cflags) \
+    VIRSH_COMMON_OPT_NETWORK_OT_STRING(N_("network name or uuid"), cflags)
 
 virNetworkPtr
 virshCommandOptNetworkBy(vshControl *ctl, const vshCmd *cmd,
@@ -95,7 +106,7 @@ static const vshCmdInfo info_network_autostart[] = {
 };
 
 static const vshCmdOptDef opts_network_autostart[] = {
-    VIRSH_COMMON_OPT_NETWORK(VIR_CONNECT_LIST_NETWORKS_PERSISTENT),
+    VIRSH_COMMON_OPT_NETWORK_FULL(VIR_CONNECT_LIST_NETWORKS_PERSISTENT),
     {.name = "disable",
      .type = VSH_OT_BOOL,
      .help = N_("disable autostarting")
@@ -242,7 +253,7 @@ static const vshCmdInfo info_network_destroy[] = {
 };
 
 static const vshCmdOptDef opts_network_destroy[] = {
-    VIRSH_COMMON_OPT_NETWORK(VIR_CONNECT_LIST_NETWORKS_ACTIVE),
+    VIRSH_COMMON_OPT_NETWORK_FULL(VIR_CONNECT_LIST_NETWORKS_ACTIVE),
     {.name = NULL}
 };
 
@@ -281,7 +292,7 @@ static const vshCmdInfo info_network_dumpxml[] = {
 };
 
 static const vshCmdOptDef opts_network_dumpxml[] = {
-    VIRSH_COMMON_OPT_NETWORK(0),
+    VIRSH_COMMON_OPT_NETWORK_FULL(0),
     {.name = "inactive",
      .type = VSH_OT_BOOL,
      .help = N_("show inactive defined XML")
@@ -332,7 +343,7 @@ static const vshCmdInfo info_network_info[] = {
 };
 
 static const vshCmdOptDef opts_network_info[] = {
-    VIRSH_COMMON_OPT_NETWORK(0),
+    VIRSH_COMMON_OPT_NETWORK_FULL(0),
     {.name = NULL}
 };
 
@@ -663,6 +674,7 @@ cmdNetworkList(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
     bool optUUID = vshCommandOptBool(cmd, "uuid");
     char uuid[VIR_UUID_STRING_BUFLEN];
     unsigned int flags = VIR_CONNECT_LIST_NETWORKS_ACTIVE;
+    vshTablePtr table = NULL;
 
     if (vshCommandOptBool(cmd, "inactive"))
         flags = VIR_CONNECT_LIST_NETWORKS_INACTIVE;
@@ -691,10 +703,10 @@ cmdNetworkList(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
         return false;
 
     if (optTable) {
-        vshPrintExtra(ctl, " %-20s %-10s %-13s %s\n", _("Name"), _("State"),
-                      _("Autostart"), _("Persistent"));
-        vshPrintExtra(ctl,
-                      "----------------------------------------------------------\n");
+        table = vshTableNew(_("Name"), _("State"), _("Autostart"),
+                            _("Persistent"), NULL);
+        if (!table)
+            goto cleanup;
     }
 
     for (i = 0; i < list->nnets; i++) {
@@ -708,11 +720,15 @@ cmdNetworkList(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
             else
                 autostartStr = is_autostart ? _("yes") : _("no");
 
-            vshPrint(ctl, " %-20s %-10s %-13s %s\n",
-                     virNetworkGetName(network),
-                     virNetworkIsActive(network) ? _("active") : _("inactive"),
-                     autostartStr,
-                     virNetworkIsPersistent(network) ? _("yes") : _("no"));
+            if (vshTableRowAppend(table,
+                                  virNetworkGetName(network),
+                                  virNetworkIsActive(network) ?
+                                  _("active") : _("inactive"),
+                                  autostartStr,
+                                  virNetworkIsPersistent(network) ?
+                                  _("yes") : _("no"),
+                                  NULL) < 0)
+                goto cleanup;
         } else if (optUUID) {
             if (virNetworkGetUUIDString(network, uuid) < 0) {
                 vshError(ctl, "%s", _("Failed to get network's UUID"));
@@ -724,8 +740,12 @@ cmdNetworkList(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
         }
     }
 
+    if (optTable)
+        vshTablePrintToStdout(table, ctl);
+
     ret = true;
  cleanup:
+    vshTableFree(table);
     virshNetworkListFree(list);
     return ret;
 }
@@ -781,7 +801,7 @@ static const vshCmdInfo info_network_start[] = {
 };
 
 static const vshCmdOptDef opts_network_start[] = {
-    VIRSH_COMMON_OPT_NETWORK(VIR_CONNECT_LIST_NETWORKS_INACTIVE),
+    VIRSH_COMMON_OPT_NETWORK_FULL(VIR_CONNECT_LIST_NETWORKS_INACTIVE),
     {.name = NULL}
 };
 
@@ -819,7 +839,7 @@ static const vshCmdInfo info_network_undefine[] = {
 };
 
 static const vshCmdOptDef opts_network_undefine[] = {
-    VIRSH_COMMON_OPT_NETWORK(VIR_CONNECT_LIST_NETWORKS_PERSISTENT),
+    VIRSH_COMMON_OPT_NETWORK_FULL(VIR_CONNECT_LIST_NETWORKS_PERSISTENT),
     {.name = NULL}
 };
 
@@ -858,7 +878,7 @@ static const vshCmdInfo info_network_update[] = {
 };
 
 static const vshCmdOptDef opts_network_update[] = {
-    VIRSH_COMMON_OPT_NETWORK(0),
+    VIRSH_COMMON_OPT_NETWORK_FULL(0),
     {.name = "command",
      .type = VSH_OT_DATA,
      .flags = VSH_OFLAG_REQ,
@@ -885,12 +905,14 @@ static const vshCmdOptDef opts_network_update[] = {
     {.name = NULL}
 };
 
-VIR_ENUM_DECL(virNetworkUpdateCommand)
-VIR_ENUM_IMPL(virNetworkUpdateCommand, VIR_NETWORK_UPDATE_COMMAND_LAST,
+VIR_ENUM_DECL(virNetworkUpdateCommand);
+VIR_ENUM_IMPL(virNetworkUpdateCommand,
+              VIR_NETWORK_UPDATE_COMMAND_LAST,
               "none", "modify", "delete", "add-last", "add-first");
 
-VIR_ENUM_DECL(virNetworkSection)
-VIR_ENUM_IMPL(virNetworkSection, VIR_NETWORK_SECTION_LAST,
+VIR_ENUM_DECL(virNetworkSection);
+VIR_ENUM_IMPL(virNetworkSection,
+              VIR_NETWORK_SECTION_LAST,
               "none", "bridge", "domain", "ip", "ip-dhcp-host",
               "ip-dhcp-range", "forward", "forward-interface",
               "forward-pf", "portgroup", "dns-host", "dns-txt",
@@ -1018,11 +1040,7 @@ static const vshCmdInfo info_network_uuid[] = {
 };
 
 static const vshCmdOptDef opts_network_uuid[] = {
-    {.name = "network",
-     .type = VSH_OT_DATA,
-     .flags = VSH_OFLAG_REQ,
-     .help = N_("network name")
-    },
+    VIRSH_COMMON_OPT_NETWORK(N_("network name"), 0),
     {.name = NULL}
 };
 
@@ -1059,7 +1077,7 @@ static const vshCmdInfo info_network_edit[] = {
 };
 
 static const vshCmdOptDef opts_network_edit[] = {
-    VIRSH_COMMON_OPT_NETWORK(0),
+    VIRSH_COMMON_OPT_NETWORK_FULL(0),
     {.name = NULL}
 };
 
@@ -1121,13 +1139,13 @@ cmdNetworkEdit(vshControl *ctl, const vshCmd *cmd)
 /*
  * "net-event" command
  */
-VIR_ENUM_DECL(virshNetworkEvent)
+VIR_ENUM_DECL(virshNetworkEvent);
 VIR_ENUM_IMPL(virshNetworkEvent,
               VIR_NETWORK_EVENT_LAST,
               N_("Defined"),
               N_("Undefined"),
               N_("Started"),
-              N_("Stopped"))
+              N_("Stopped"));
 
 static const char *
 virshNetworkEventToString(int event)
@@ -1141,13 +1159,14 @@ struct virshNetEventData {
     bool loop;
     bool timestamp;
     int count;
+    virshNetworkEventCallback *cb;
 };
 typedef struct virshNetEventData virshNetEventData;
 
-VIR_ENUM_DECL(virshNetworkEventId)
+VIR_ENUM_DECL(virshNetworkEventId);
 VIR_ENUM_IMPL(virshNetworkEventId,
               VIR_NETWORK_EVENT_ID_LAST,
-              "lifecycle")
+              "lifecycle");
 
 static void
 vshEventLifecyclePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
@@ -1180,6 +1199,12 @@ vshEventLifecyclePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
         vshEventDone(data->ctl);
 }
 
+virshNetworkEventCallback virshNetworkEventCallbacks[] = {
+    { "lifecycle",
+      VIR_NETWORK_EVENT_CALLBACK(vshEventLifecyclePrint), },
+};
+verify(VIR_NETWORK_EVENT_ID_LAST == ARRAY_CARDINALITY(virshNetworkEventCallbacks));
+
 static const vshCmdInfo info_network_event[] = {
     {.name = "help",
      .data = N_("Network Events")
@@ -1191,12 +1216,10 @@ static const vshCmdInfo info_network_event[] = {
 };
 
 static const vshCmdOptDef opts_network_event[] = {
-    {.name = "network",
-     .type = VSH_OT_STRING,
-     .help = N_("filter by network name or uuid")
-    },
+    VIRSH_COMMON_OPT_NETWORK_OT_STRING(N_("filter by network name or uuid"), 0),
     {.name = "event",
      .type = VSH_OT_STRING,
+     .completer = virshNetworkEventNameCompleter,
      .help = N_("which event type to wait for")
     },
     {.name = "loop",
@@ -1234,7 +1257,7 @@ cmdNetworkEvent(vshControl *ctl, const vshCmd *cmd)
         size_t i;
 
         for (i = 0; i < VIR_NETWORK_EVENT_ID_LAST; i++)
-            vshPrint(ctl, "%s\n", virshNetworkEventIdTypeToString(i));
+            vshPrint(ctl, "%s\n", virshNetworkEventCallbacks[i].name);
         return true;
     }
 
@@ -1244,7 +1267,10 @@ cmdNetworkEvent(vshControl *ctl, const vshCmd *cmd)
         vshError(ctl, "%s", _("either --list or --event <type> is required"));
         return false;
     }
-    if ((event = virshNetworkEventIdTypeFromString(eventName)) < 0) {
+    for (event = 0; event < VIR_NETWORK_EVENT_ID_LAST; event++)
+        if (STREQ(eventName, virshNetworkEventCallbacks[event].name))
+            break;
+    if (event == VIR_NETWORK_EVENT_ID_LAST) {
         vshError(ctl, _("unknown event type %s"), eventName);
         return false;
     }
@@ -1253,6 +1279,7 @@ cmdNetworkEvent(vshControl *ctl, const vshCmd *cmd)
     data.loop = vshCommandOptBool(cmd, "loop");
     data.timestamp = vshCommandOptBool(cmd, "timestamp");
     data.count = 0;
+    data.cb = &virshNetworkEventCallbacks[event];
     if (vshCommandOptTimeoutToMs(ctl, cmd, &timeout) < 0)
         return false;
 
@@ -1262,7 +1289,7 @@ cmdNetworkEvent(vshControl *ctl, const vshCmd *cmd)
         goto cleanup;
 
     if ((eventId = virConnectNetworkEventRegisterAny(priv->conn, net, event,
-                                                     VIR_NETWORK_EVENT_CALLBACK(vshEventLifecyclePrint),
+                                                     data.cb->cb,
                                                      &data, NULL)) < 0)
         goto cleanup;
     switch (vshEventWait(ctl)) {
@@ -1306,7 +1333,7 @@ static const vshCmdInfo info_network_dhcp_leases[] = {
 };
 
 static const vshCmdOptDef opts_network_dhcp_leases[] = {
-    VIRSH_COMMON_OPT_NETWORK(0),
+    VIRSH_COMMON_OPT_NETWORK_FULL(0),
     {.name = "mac",
      .type = VSH_OT_STRING,
      .flags = VSH_OFLAG_NONE,
@@ -1344,6 +1371,7 @@ cmdNetworkDHCPLeases(vshControl *ctl, const vshCmd *cmd)
     size_t i;
     unsigned int flags = 0;
     virNetworkPtr network = NULL;
+    vshTablePtr table = NULL;
 
     if (vshCommandOptStringReq(ctl, cmd, "mac", &mac) < 0)
         return false;
@@ -1359,15 +1387,15 @@ cmdNetworkDHCPLeases(vshControl *ctl, const vshCmd *cmd)
     /* Sort the list according to MAC Address/IAID */
     qsort(leases, nleases, sizeof(*leases), virshNetworkDHCPLeaseSorter);
 
-    vshPrintExtra(ctl, " %-20s %-18s %-9s %-25s %-15s %s\n%s%s\n",
-                  _("Expiry Time"), _("MAC address"), _("Protocol"),
-                  _("IP address"), _("Hostname"), _("Client ID or DUID"),
-                  "----------------------------------------------------------",
-                  "---------------------------------------------------------");
+    table = vshTableNew(_("Expiry Time"), _("MAC address"), _("Protocol"),
+                        _("IP address"), _("Hostname"), _("Client ID or DUID"),
+                        NULL);
+    if (!table)
+        goto cleanup;
 
     for (i = 0; i < nleases; i++) {
         const char *typestr = NULL;
-        char *cidr_format = NULL;
+        VIR_AUTOFREE(char *) cidr_format = NULL;
         virNetworkDHCPLeasePtr lease = leases[i];
         time_t expirytime_tmp = lease->expirytime;
         struct tm ts;
@@ -1383,17 +1411,23 @@ cmdNetworkDHCPLeases(vshControl *ctl, const vshCmd *cmd)
         ignore_value(virAsprintf(&cidr_format, "%s/%d",
                                  lease->ipaddr, lease->prefix));
 
-        vshPrint(ctl, " %-20s %-18s %-9s %-25s %-15s %s\n",
-                 expirytime, EMPTYSTR(lease->mac),
-                 EMPTYSTR(typestr), cidr_format,
-                 EMPTYSTR(lease->hostname), EMPTYSTR(lease->clientid));
-
-        VIR_FREE(cidr_format);
+        if (vshTableRowAppend(table,
+                              expirytime,
+                              NULLSTR_MINUS(lease->mac),
+                              NULLSTR_MINUS(typestr),
+                              NULLSTR_MINUS(cidr_format),
+                              NULLSTR_MINUS(lease->hostname),
+                              NULLSTR_MINUS(lease->clientid),
+                              NULL) < 0)
+            goto cleanup;
     }
+
+    vshTablePrintToStdout(table, ctl);
 
     ret = true;
 
  cleanup:
+    vshTableFree(table);
     if (leases) {
         for (i = 0; i < nleases; i++)
             virNetworkDHCPLeaseFree(leases[i]);

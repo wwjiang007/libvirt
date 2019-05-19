@@ -16,15 +16,13 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_MACADDR_H__
-# define __VIR_MACADDR_H__
+#ifndef LIBVIRT_VIRMACADDR_H
+# define LIBVIRT_VIRMACADDR_H
 
 # include "internal.h"
+# include "virautoclean.h"
 
 # define VIR_MAC_BUFLEN 6
 # define VIR_MAC_HEXLEN (VIR_MAC_BUFLEN * 2)
@@ -64,5 +62,8 @@ int virMacAddrParseHex(const char* str,
 bool virMacAddrIsUnicast(const virMacAddr *addr);
 bool virMacAddrIsMulticast(const virMacAddr *addr);
 bool virMacAddrIsBroadcastRaw(const unsigned char s[VIR_MAC_BUFLEN]);
+void virMacAddrFree(virMacAddrPtr addr);
 
-#endif /* __VIR_MACADDR_H__ */
+VIR_DEFINE_AUTOPTR_FUNC(virMacAddr, virMacAddrFree);
+
+#endif /* LIBVIRT_VIRMACADDR_H */

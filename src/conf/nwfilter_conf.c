@@ -2,7 +2,7 @@
  * nwfilter_conf.c: network filter XML processing
  *                  (derived from storage_conf.c)
  *
- * Copyright (C) 2006-2014 Red Hat, Inc.
+ * Copyright (C) 2006-2018 Red Hat, Inc.
  * Copyright (C) 2006-2008 Daniel P. Berrange
  *
  * Copyright (C) 2010-2011 IBM Corporation
@@ -21,8 +21,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Stefan Berger <stefanb@us.ibm.com>
  */
 
 #include <config.h>
@@ -51,35 +49,46 @@
 #define VIR_FROM_THIS VIR_FROM_NWFILTER
 
 
-VIR_ENUM_IMPL(virNWFilterRuleAction, VIR_NWFILTER_RULE_ACTION_LAST,
+VIR_ENUM_IMPL(virNWFilterRuleAction,
+              VIR_NWFILTER_RULE_ACTION_LAST,
               "drop",
               "accept",
               "reject",
               "return",
-              "continue");
+              "continue",
+);
 
-VIR_ENUM_IMPL(virNWFilterJumpTarget, VIR_NWFILTER_RULE_ACTION_LAST,
+VIR_ENUM_IMPL(virNWFilterJumpTarget,
+              VIR_NWFILTER_RULE_ACTION_LAST,
               "DROP",
               "ACCEPT",
               "REJECT",
               "RETURN",
-              "CONTINUE");
+              "CONTINUE",
+);
 
-VIR_ENUM_IMPL(virNWFilterRuleDirection, VIR_NWFILTER_RULE_DIRECTION_LAST,
+VIR_ENUM_IMPL(virNWFilterRuleDirection,
+              VIR_NWFILTER_RULE_DIRECTION_LAST,
               "in",
               "out",
-              "inout");
+              "inout",
+);
 
-VIR_ENUM_IMPL(virNWFilterChainPolicy, VIR_NWFILTER_CHAIN_POLICY_LAST,
+VIR_ENUM_IMPL(virNWFilterChainPolicy,
+              VIR_NWFILTER_CHAIN_POLICY_LAST,
               "ACCEPT",
-              "DROP");
+              "DROP",
+);
 
-VIR_ENUM_IMPL(virNWFilterEbtablesTable, VIR_NWFILTER_EBTABLES_TABLE_LAST,
+VIR_ENUM_IMPL(virNWFilterEbtablesTable,
+              VIR_NWFILTER_EBTABLES_TABLE_LAST,
               "filter",
               "nat",
-              "broute");
+              "broute",
+);
 
-VIR_ENUM_IMPL(virNWFilterChainSuffix, VIR_NWFILTER_CHAINSUFFIX_LAST,
+VIR_ENUM_IMPL(virNWFilterChainSuffix,
+              VIR_NWFILTER_CHAINSUFFIX_LAST,
               "root",
               "mac",
               "vlan",
@@ -87,9 +96,11 @@ VIR_ENUM_IMPL(virNWFilterChainSuffix, VIR_NWFILTER_CHAINSUFFIX_LAST,
               "arp",
               "rarp",
               "ipv4",
-              "ipv6");
+              "ipv6",
+);
 
-VIR_ENUM_IMPL(virNWFilterRuleProtocol, VIR_NWFILTER_RULE_PROTOCOL_LAST,
+VIR_ENUM_IMPL(virNWFilterRuleProtocol,
+              VIR_NWFILTER_RULE_PROTOCOL_LAST,
               "none",
               "mac",
               "vlan",
@@ -114,7 +125,8 @@ VIR_ENUM_IMPL(virNWFilterRuleProtocol, VIR_NWFILTER_RULE_PROTOCOL_LAST,
               "esp-ipv6",
               "ah-ipv6",
               "sctp-ipv6",
-              "all-ipv6");
+              "all-ipv6",
+);
 
 
 /*
@@ -312,7 +324,7 @@ virNWFilterIncludeDefFree(virNWFilterIncludeDefPtr inc)
 {
     if (!inc)
         return;
-    virNWFilterHashTableFree(inc->params);
+    virHashFree(inc->params);
     VIR_FREE(inc->filterref);
     VIR_FREE(inc);
 }
@@ -966,8 +978,7 @@ ipsetValidator(enum attrDatatype datatype ATTRIBUTE_UNUSED,
 {
     const char *errmsg = NULL;
 
-    if (virStrcpy(item->u.ipset.setname, val->c,
-                  sizeof(item->u.ipset.setname)) == NULL) {
+    if (virStrcpyStatic(item->u.ipset.setname, val->c) < 0) {
         errmsg = _("ipset name is too long");
         goto arg_err_exit;
     }
@@ -2655,10 +2666,8 @@ virNWFilterDefParseXML(xmlXPathContextPtr ctxt)
             ret->chainPriority = chain_priority;
         } else {
             /* assign default priority if none can be found via lookup */
-            if (!name_prefix ||
-                 intMapGetByString(chain_priorities, name_prefix, 0,
-                                   &ret->chainPriority) < 0) {
-                /* assign default chain priority */
+            if (intMapGetByString(chain_priorities, name_prefix,
+                                  0, &ret->chainPriority) < 0) {
                 ret->chainPriority = (NWFILTER_MAX_FILTER_PRIORITY +
                                       NWFILTER_MIN_FILTER_PRIORITY) / 2;
             }
@@ -2815,121 +2824,6 @@ virNWFilterSaveConfig(const char *configDir,
  cleanup:
     VIR_FREE(configFile);
     VIR_FREE(xml);
-    return ret;
-}
-
-
-int nCallbackDriver;
-#define MAX_CALLBACK_DRIVER 10
-static virNWFilterCallbackDriverPtr callbackDrvArray[MAX_CALLBACK_DRIVER];
-
-void
-virNWFilterRegisterCallbackDriver(virNWFilterCallbackDriverPtr cbd)
-{
-    if (nCallbackDriver < MAX_CALLBACK_DRIVER)
-        callbackDrvArray[nCallbackDriver++] = cbd;
-}
-
-
-void
-virNWFilterUnRegisterCallbackDriver(virNWFilterCallbackDriverPtr cbd)
-{
-    size_t i = 0;
-
-    while (i < nCallbackDriver && callbackDrvArray[i] != cbd)
-        i++;
-
-    if (i < nCallbackDriver) {
-        memmove(&callbackDrvArray[i], &callbackDrvArray[i+1],
-                (nCallbackDriver - i - 1) * sizeof(callbackDrvArray[i]));
-        callbackDrvArray[i] = 0;
-        nCallbackDriver--;
-    }
-}
-
-
-void
-virNWFilterCallbackDriversLock(void)
-{
-    size_t i;
-
-    for (i = 0; i < nCallbackDriver; i++)
-        callbackDrvArray[i]->vmDriverLock();
-}
-
-
-void
-virNWFilterCallbackDriversUnlock(void)
-{
-    size_t i;
-
-    for (i = 0; i < nCallbackDriver; i++)
-        callbackDrvArray[i]->vmDriverUnlock();
-}
-
-
-static virDomainObjListIterator virNWFilterDomainFWUpdateCB;
-static void *virNWFilterDomainFWUpdateOpaque;
-
-/**
- * virNWFilterInstFiltersOnAllVMs:
- * Apply all filters on all running VMs. Don't terminate in case of an
- * error. This should be called upon reloading of the driver.
- */
-int
-virNWFilterInstFiltersOnAllVMs(void)
-{
-    size_t i;
-    struct domUpdateCBStruct cb = {
-        .opaque = virNWFilterDomainFWUpdateOpaque,
-        .step = STEP_APPLY_CURRENT,
-        .skipInterfaces = NULL, /* not needed */
-    };
-
-    for (i = 0; i < nCallbackDriver; i++)
-        callbackDrvArray[i]->vmFilterRebuild(virNWFilterDomainFWUpdateCB,
-                                             &cb);
-
-    return 0;
-}
-
-
-int
-virNWFilterTriggerVMFilterRebuild(void)
-{
-    size_t i;
-    int ret = 0;
-    struct domUpdateCBStruct cb = {
-        .opaque = virNWFilterDomainFWUpdateOpaque,
-        .step = STEP_APPLY_NEW,
-        .skipInterfaces = virHashCreate(0, NULL),
-    };
-
-    if (!cb.skipInterfaces)
-        return -1;
-
-    for (i = 0; i < nCallbackDriver; i++) {
-        if (callbackDrvArray[i]->vmFilterRebuild(virNWFilterDomainFWUpdateCB,
-                                                 &cb) < 0)
-            ret = -1;
-    }
-
-    if (ret < 0) {
-        cb.step = STEP_TEAR_NEW; /* rollback */
-
-        for (i = 0; i < nCallbackDriver; i++)
-            callbackDrvArray[i]->vmFilterRebuild(virNWFilterDomainFWUpdateCB,
-                                                 &cb);
-    } else {
-        cb.step = STEP_TEAR_OLD; /* switch over */
-
-        for (i = 0; i < nCallbackDriver; i++)
-            callbackDrvArray[i]->vmFilterRebuild(virNWFilterDomainFWUpdateCB,
-                                                 &cb);
-    }
-
-    virHashFree(cb.skipInterfaces);
-
     return ret;
 }
 
@@ -3204,16 +3098,18 @@ virNWFilterDefFormat(const virNWFilterDef *def)
     return NULL;
 }
 
+static virNWFilterTriggerRebuildCallback rebuildCallback;
+static void *rebuildOpaque;
 
 int
-virNWFilterConfLayerInit(virDomainObjListIterator domUpdateCB,
+virNWFilterConfLayerInit(virNWFilterTriggerRebuildCallback cb,
                          void *opaque)
 {
     if (initialized)
         return -1;
 
-    virNWFilterDomainFWUpdateCB = domUpdateCB;
-    virNWFilterDomainFWUpdateOpaque = opaque;
+    rebuildCallback = cb;
+    rebuildOpaque = opaque;
 
     initialized = true;
 
@@ -3233,8 +3129,17 @@ virNWFilterConfLayerShutdown(void)
     virRWLockDestroy(&updateLock);
 
     initialized = false;
-    virNWFilterDomainFWUpdateOpaque = NULL;
-    virNWFilterDomainFWUpdateCB = NULL;
+    rebuildCallback = NULL;
+    rebuildOpaque = NULL;
+}
+
+
+int
+virNWFilterTriggerRebuild(void)
+{
+    if (rebuildCallback)
+        return rebuildCallback(rebuildOpaque);
+    return 0;
 }
 
 

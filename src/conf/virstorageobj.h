@@ -17,12 +17,14 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIRSTORAGEOBJ_H__
-# define __VIRSTORAGEOBJ_H__
+#ifndef LIBVIRT_VIRSTORAGEOBJ_H
+# define LIBVIRT_VIRSTORAGEOBJ_H
 
 # include "internal.h"
 
 # include "storage_conf.h"
+
+# include "capabilities.h"
 
 typedef struct _virStoragePoolObj virStoragePoolObj;
 typedef virStoragePoolObj *virStoragePoolObjPtr;
@@ -45,6 +47,9 @@ struct _virStorageDriverState {
 
     /* Immutable pointer, self-locking APIs */
     virObjectEventStatePtr storageEventState;
+
+    /* Immutable pointer, read only after initialized */
+    virCapsPtr caps;
 };
 
 typedef bool
@@ -189,7 +194,8 @@ virStoragePoolObjVolumeListExport(virConnectPtr conn,
 
 virStoragePoolObjPtr
 virStoragePoolObjAssignDef(virStoragePoolObjListPtr pools,
-                           virStoragePoolDefPtr def);
+                           virStoragePoolDefPtr def,
+                           bool check_active);
 
 int
 virStoragePoolObjSaveDef(virStorageDriverStatePtr driver,
@@ -245,20 +251,10 @@ virStoragePoolObjRemove(virStoragePoolObjListPtr pools,
                         virStoragePoolObjPtr obj);
 
 int
-virStoragePoolObjIsDuplicate(virStoragePoolObjListPtr pools,
-                             virStoragePoolDefPtr def,
-                             bool check_active);
-
-int
-virStoragePoolObjSourceFindDuplicate(virConnectPtr conn,
-                                     virStoragePoolObjListPtr pools,
-                                     virStoragePoolDefPtr def);
-
-int
 virStoragePoolObjListExport(virConnectPtr conn,
                             virStoragePoolObjListPtr poolobjs,
                             virStoragePoolPtr **pools,
                             virStoragePoolObjListFilter filter,
                             unsigned int flags);
 
-#endif /* __VIRSTORAGEOBJ_H__ */
+#endif /* LIBVIRT_VIRSTORAGEOBJ_H */

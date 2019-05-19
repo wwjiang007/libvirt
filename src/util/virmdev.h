@@ -16,20 +16,24 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_MDEV_H__
-# define __VIR_MDEV_H__
+#ifndef LIBVIRT_VIRMDEV_H
+# define LIBVIRT_VIRMDEV_H
 
 # include "internal.h"
 # include "virobject.h"
 # include "virutil.h"
+# include "virautoclean.h"
+# include "virenum.h"
 
 typedef enum {
     VIR_MDEV_MODEL_TYPE_VFIO_PCI = 0,
+    VIR_MDEV_MODEL_TYPE_VFIO_CCW = 1,
+    VIR_MDEV_MODEL_TYPE_VFIO_AP  = 2,
 
     VIR_MDEV_MODEL_TYPE_LAST
 } virMediatedDeviceModelType;
 
-VIR_ENUM_DECL(virMediatedDeviceModel)
+VIR_ENUM_DECL(virMediatedDeviceModel);
 
 
 typedef struct _virMediatedDevice virMediatedDevice;
@@ -134,4 +138,7 @@ int
 virMediatedDeviceTypeReadAttrs(const char *sysfspath,
                                virMediatedDeviceTypePtr *type);
 
-#endif /* __VIR_MDEV_H__ */
+VIR_DEFINE_AUTOPTR_FUNC(virMediatedDevice, virMediatedDeviceFree);
+VIR_DEFINE_AUTOPTR_FUNC(virMediatedDeviceType, virMediatedDeviceTypeFree);
+
+#endif /* LIBVIRT_VIRMDEV_H */

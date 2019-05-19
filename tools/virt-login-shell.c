@@ -16,18 +16,13 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Daniel Walsh <dwalsh@redhat.com>
  */
 #include <config.h>
 
-#include <errno.h>
 #include <fnmatch.h>
 #include <getopt.h>
 #include <signal.h>
 #include <stdarg.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
 
 #include "internal.h"

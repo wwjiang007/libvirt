@@ -28,6 +28,7 @@
 #include "bhyve_capabilities.h"
 #include "bhyve_command.h"
 #include "bhyve_domain.h"
+#include "bhyve_conf.h"
 #include "bhyve_driver.h"
 #include "datatypes.h"
 #include "viralloc.h"
@@ -56,16 +57,10 @@ bhyveBuildNetArgStr(virConnectPtr conn,
     int ret = -1;
     virDomainNetType actualType = virDomainNetGetActualType(net);
 
-    if (net->model == NULL) {
-        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("NIC model must be specified"));
-        return -1;
-    }
-
-    if (STREQ(net->model, "virtio")) {
+    if (net->model == VIR_DOMAIN_NET_MODEL_VIRTIO) {
         if (VIR_STRDUP(nic_model, "virtio-net") < 0)
             return -1;
-    } else if (STREQ(net->model, "e1000")) {
+    } else if (net->model == VIR_DOMAIN_NET_MODEL_E1000) {
         if ((bhyveDriverGetCaps(conn) & BHYVE_CAP_NET_E1000) != 0) {
             if (VIR_STRDUP(nic_model, "e1000") < 0)
                 return -1;
@@ -76,9 +71,8 @@ bhyveBuildNetArgStr(virConnectPtr conn,
             return -1;
         }
     } else {
-        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("NIC model '%s' is not supported"),
-                       net->model);
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                       _("NIC model is not supported"));
         return -1;
     }
 
@@ -147,7 +141,6 @@ bhyveBuildNetArgStr(virConnectPtr conn,
 static int
 bhyveBuildConsoleArgStr(const virDomainDef *def, virCommandPtr cmd)
 {
-
     virDomainChrDefPtr chr = NULL;
 
     if (!def->nserials)
@@ -460,25 +453,55 @@ virBhyveProcessBuildBhyveCmd(virConnectPtr conn,
      *            vm0
      */
     size_t i;
-    bool add_lpc = false;
     int nusbcontrollers = 0;
+    unsigned int nvcpus = virDomainDefGetVcpus(def);
 
     virCommandPtr cmd = virCommandNew(BHYVE);
 
     /* CPUs */
     virCommandAddArg(cmd, "-c");
-    virCommandAddArgFormat(cmd, "%d", virDomainDefGetVcpus(def));
+    if (def->cpu && def->cpu->sockets) {
+        if (nvcpus != def->cpu->sockets * def->cpu->cores * def->cpu->threads) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                           _("Invalid CPU topology: total number of vCPUs "
+                             "must equal the product of sockets, cores, "
+                             "and threads"));
+            goto error;
+        }
+
+        if ((bhyveDriverGetCaps(conn) & BHYVE_CAP_CPUTOPOLOGY) != 0) {
+            virCommandAddArgFormat(cmd, "cpus=%d,sockets=%d,cores=%d,threads=%d",
+                                   nvcpus,
+                                   def->cpu->sockets,
+                                   def->cpu->cores,
+                                   def->cpu->threads);
+        } else {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                           _("Installed bhyve binary does not support "
+                             "defining CPU topology"));
+            goto error;
+        }
+    } else {
+        virCommandAddArgFormat(cmd, "%d", nvcpus);
+    }
 
     /* Memory */
     virCommandAddArg(cmd, "-m");
     virCommandAddArgFormat(cmd, "%llu",
                            VIR_DIV_UP(virDomainDefGetMemoryInitial(def), 1024));
 
+    if (def->mem.locked)
+        virCommandAddArg(cmd, "-S"); /* Wire guest memory */
+
     /* Options */
     if (def->features[VIR_DOMAIN_FEATURE_ACPI] == VIR_TRISTATE_SWITCH_ON)
         virCommandAddArg(cmd, "-A"); /* Create an ACPI table */
     if (def->features[VIR_DOMAIN_FEATURE_APIC] == VIR_TRISTATE_SWITCH_ON)
         virCommandAddArg(cmd, "-I"); /* Present ioapic to the guest */
+    if (def->features[VIR_DOMAIN_FEATURE_MSRS] == VIR_TRISTATE_SWITCH_ON) {
+        if (def->msrs_features[VIR_DOMAIN_MSRS_UNKNOWN] == VIR_DOMAIN_MSRS_UNKNOWN_IGNORE)
+            virCommandAddArg(cmd, "-w");
+    }
 
     switch (def->clock.offset) {
     case VIR_DOMAIN_CLOCK_OFFSET_LOCALTIME:
@@ -522,7 +545,6 @@ virBhyveProcessBuildBhyveCmd(virConnectPtr conn,
         if ((bhyveDriverGetCaps(conn) & BHYVE_CAP_LPC_BOOTROM)) {
             virCommandAddArg(cmd, "-l");
             virCommandAddArgFormat(cmd, "bootrom,%s", def->os.loader->path);
-            add_lpc = true;
         } else {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                            _("Installed bhyve binary does not support "
@@ -586,7 +608,6 @@ virBhyveProcessBuildBhyveCmd(virConnectPtr conn,
             if (bhyveBuildGraphicsArgStr(def, def->graphics[0], def->videos[0],
                                          conn, cmd, dryRun) < 0)
                 goto error;
-            add_lpc = true;
         } else {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                            _("Multiple graphics devices are not supported"));
@@ -594,11 +615,23 @@ virBhyveProcessBuildBhyveCmd(virConnectPtr conn,
         }
     }
 
-    if (add_lpc || def->nserials)
+    if (bhyveDomainDefNeedsISAController(def))
         bhyveBuildLPCArgStr(def, cmd);
 
     if (bhyveBuildConsoleArgStr(def, cmd) < 0)
         goto error;
+
+    if (def->namespaceData) {
+        bhyveDomainCmdlineDefPtr bhyvecmd;
+
+        VIR_WARN("Booting the guest using command line pass-through feature, "
+                 "which could potentially cause inconsistent state and "
+                 "upgrade issues");
+
+        bhyvecmd = def->namespaceData;
+        for (i = 0; i < bhyvecmd->num_args; i++)
+            virCommandAddArg(cmd, bhyvecmd->args[i]);
+    }
 
     virCommandAddArg(cmd, def->name);
 
@@ -683,7 +716,6 @@ virBhyveProcessBuildCustomLoaderCmd(virDomainDefPtr def)
 static bool
 virBhyveUsableDisk(virDomainDiskDefPtr disk)
 {
-
     if (virDomainDiskTranslateSourcePool(disk) < 0)
         return false;
 
@@ -707,7 +739,6 @@ virBhyveUsableDisk(virDomainDiskDefPtr disk)
 static void
 virBhyveFormatGrubDevice(virBufferPtr devicemap, virDomainDiskDefPtr def)
 {
-
     if (def->device == VIR_DOMAIN_DISK_DEVICE_CDROM)
         virBufferAsprintf(devicemap, "(cd) %s\n",
                           virDomainDiskGetSource(def));
@@ -900,7 +931,7 @@ virBhyveGetBootDisk(virDomainDefPtr def)
             }
         }
 
-        /* If user didn't explicily specify boot priority,
+        /* If user didn't explicitly specify boot priority,
          * just return the first usable disk */
         if ((match == NULL) && (first_usable_disk_index >= 0))
             return def->disks[first_usable_disk_index];

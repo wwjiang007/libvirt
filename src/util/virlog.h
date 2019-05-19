@@ -19,8 +19,8 @@
  *
  */
 
-#ifndef __VIRTLOG_H_
-# define __VIRTLOG_H_
+#ifndef LIBVIRT_VIRLOG_H
+# define LIBVIRT_VIRLOG_H
 
 # include "internal.h"
 # include "virbuffer.h"
@@ -79,7 +79,7 @@ struct _virLogSource {
         .priority = VIR_LOG_ERROR, \
         .serial = 0, \
         .flags = 0, \
-    };
+    }
 
 /*
  * If configured with --enable-debug=yes then library calls
@@ -174,8 +174,7 @@ typedef void (*virLogCloseFunc) (void *data);
 
 typedef enum {
     VIR_LOG_STACK_TRACE = (1 << 0),
-    VIR_LOG_WILDCARD = (1 << 1)
-} virLogFlags;
+} virLogFilterFlags;
 
 int virLogGetNbFilters(void);
 int virLogGetNbOutputs(void);
@@ -240,4 +239,4 @@ int virLogParseOutputs(const char *src,
 int virLogParseFilters(const char *src,
                        virLogFilterPtr **filters) ATTRIBUTE_NONNULL(1);
 
-#endif
+#endif /* LIBVIRT_VIRLOG_H */

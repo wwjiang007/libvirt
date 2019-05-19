@@ -16,8 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Martin Kletzander <mkletzan@redhat.com>
  */
 
 #include <config.h>
@@ -64,8 +62,10 @@ virAdmGlobalInit(void)
 
     virLogSetFromEnv();
 
+#ifdef HAVE_LIBINTL_H
     if (!bindtextdomain(PACKAGE, LOCALEDIR))
         goto error;
+#endif /* HAVE_LIBINTL_H */
 
     if (!VIR_CLASS_NEW(remoteAdminPriv, virClassForObjectLockable()))
         goto error;
@@ -152,7 +152,7 @@ getSocketPath(virURIPtr uri)
         } else {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("Invalid URI path '%s', try '/system'"),
-                           uri->path ? uri->path : "");
+                           NULLSTR_EMPTY(uri->path));
             goto error;
         }
     }

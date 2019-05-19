@@ -17,8 +17,6 @@
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
  *
- * Author: Daniel P. Berrange <berrange@redhat.com>
- *
  * Current support
  *   - Read existing file
  *   - Write existing file
@@ -29,8 +27,6 @@
 
 #include <unistd.h>
 #include <fcntl.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #include "virutil.h"
 #include "virthread.h"
@@ -46,7 +42,7 @@
 static int
 runIO(const char *path, int fd, int oflags)
 {
-    void *base = NULL; /* Location to be freed */
+    VIR_AUTOFREE(void *) base = NULL; /* Location to be freed */
     char *buf = NULL; /* Aligned location within base */
     size_t buflen = 1024*1024;
     intptr_t alignMask = 64*1024 - 1;
@@ -174,8 +170,6 @@ runIO(const char *path, int fd, int oflags)
         virReportSystemError(errno, _("Unable to close %s"), path);
         ret = -1;
     }
-
-    VIR_FREE(base);
     return ret;
 }
 
@@ -187,7 +181,7 @@ usage(int status)
     if (status) {
         fprintf(stderr, _("%s: try --help for more details"), program_name);
     } else {
-        printf(_("Usage: %s FILENAME FD\n"), program_name);
+        printf(_("Usage: %s FILENAME FD"), program_name);
     }
     exit(status);
 }
@@ -204,7 +198,7 @@ main(int argc, char **argv)
     if (virGettextInitialize() < 0 ||
         virThreadInitialize() < 0 ||
         virErrorInitialize() < 0) {
-        fprintf(stderr, _("%s: initialization failed\n"), program_name);
+        fprintf(stderr, _("%s: initialization failed"), program_name);
         exit(EXIT_FAILURE);
     }
 
@@ -242,7 +236,7 @@ main(int argc, char **argv)
     return 0;
 
  error:
-    fprintf(stderr, _("%s: failure with %s\n: %s"),
+    fprintf(stderr, _("%s: failure with %s: %s"),
             program_name, path, virGetLastErrorMessage());
     exit(EXIT_FAILURE);
 }

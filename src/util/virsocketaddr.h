@@ -14,23 +14,19 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Daniel Veillard <veillard@redhat.com>
- *     Laine Stump <laine@laine.org>
- *     Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_SOCKETADDR_H__
-# define __VIR_SOCKETADDR_H__
-
-# include "internal.h"
+#ifndef LIBVIRT_VIRSOCKETADDR_H
+# define LIBVIRT_VIRSOCKETADDR_H
 
 # include <netinet/in.h>
 # include <sys/socket.h>
 # ifdef HAVE_SYS_UN_H
 #  include <sys/un.h>
 # endif
+
+# include "internal.h"
+# include "virautoclean.h"
 
 /* On architectures which lack these limits, define them (ie. Cygwin).
  * Note that the libvirt code should be robust enough to handle the
@@ -162,4 +158,8 @@ int virSocketAddrPTRDomain(const virSocketAddr *addr,
                            char **ptr)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
 
-#endif /* __VIR_SOCKETADDR_H__ */
+void virSocketAddrFree(virSocketAddrPtr addr);
+
+VIR_DEFINE_AUTOPTR_FUNC(virSocketAddr, virSocketAddrFree);
+
+#endif /* LIBVIRT_VIRSOCKETADDR_H */

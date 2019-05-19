@@ -14,16 +14,13 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Mark McLoughlin <markmc@redhat.com>
- *     Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_NETDEVIP_H__
-# define __VIR_NETDEVIP_H__
+#ifndef LIBVIRT_VIRNETDEVIP_H
+# define LIBVIRT_VIRNETDEVIP_H
 
 # include "virsocketaddr.h"
+# include "virautoclean.h"
 
 typedef struct _virNetDevIPAddr virNetDevIPAddr;
 typedef virNetDevIPAddr *virNetDevIPAddrPtr;
@@ -84,6 +81,7 @@ int virNetDevIPAddrGet(const char *ifname, virSocketAddrPtr addr)
 int virNetDevIPWaitDadFinish(virSocketAddrPtr *addrs, size_t count)
     ATTRIBUTE_NONNULL(1);
 bool virNetDevIPCheckIPv6Forwarding(void);
+void virNetDevIPAddrFree(virNetDevIPAddrPtr ip);
 
 /* virNetDevIPRoute object */
 void virNetDevIPRouteFree(virNetDevIPRoutePtr def);
@@ -97,4 +95,7 @@ void virNetDevIPInfoClear(virNetDevIPInfoPtr ip);
 int virNetDevIPInfoAddToDev(const char *ifname,
                             virNetDevIPInfo const *ipInfo);
 
-#endif /* __VIR_NETDEVIP_H__ */
+VIR_DEFINE_AUTOPTR_FUNC(virNetDevIPAddr, virNetDevIPAddrFree);
+VIR_DEFINE_AUTOPTR_FUNC(virNetDevIPRoute, virNetDevIPRouteFree);
+
+#endif /* LIBVIRT_VIRNETDEVIP_H */

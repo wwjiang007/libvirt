@@ -17,11 +17,12 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_STORAGE_ADAPTER_CONF_H__
-# define __VIR_STORAGE_ADAPTER_CONF_H__
+#ifndef LIBVIRT_STORAGE_ADAPTER_CONF_H
+# define LIBVIRT_STORAGE_ADAPTER_CONF_H
 
 # include "virpci.h"
 # include "virxml.h"
+# include "virenum.h"
 
 
 typedef enum {
@@ -31,7 +32,7 @@ typedef enum {
 
     VIR_STORAGE_ADAPTER_TYPE_LAST,
 } virStorageAdapterType;
-VIR_ENUM_DECL(virStorageAdapter)
+VIR_ENUM_DECL(virStorageAdapter);
 
 typedef struct _virStorageAdapterSCSIHost virStorageAdapterSCSIHost;
 typedef virStorageAdapterSCSIHost *virStorageAdapterSCSIHostPtr;
@@ -81,4 +82,4 @@ void
 virStorageAdapterFormat(virBufferPtr buf,
                         virStorageAdapterPtr adapter);
 
-#endif /* __VIR_STORAGE_ADAPTER_CONF_H__ */
+#endif /* LIBVIRT_STORAGE_ADAPTER_CONF_H */

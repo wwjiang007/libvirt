@@ -14,10 +14,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Stefan Berger <stefanb@us.ibm.com>
- *     Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -29,14 +25,17 @@
 
 #define VIR_FROM_THIS VIR_FROM_NET
 
-VIR_ENUM_IMPL(virNetDevVPort, VIR_NETDEV_VPORT_PROFILE_LAST,
+VIR_ENUM_IMPL(virNetDevVPort,
+              VIR_NETDEV_VPORT_PROFILE_LAST,
               "none",
               "802.1Qbg",
               "802.1Qbh",
               "openvswitch",
-              "midonet")
+              "midonet",
+);
 
-VIR_ENUM_IMPL(virNetDevVPortProfileOp, VIR_NETDEV_VPORT_PROFILE_OP_LAST,
+VIR_ENUM_IMPL(virNetDevVPortProfileOp,
+              VIR_NETDEV_VPORT_PROFILE_OP_LAST,
               "create",
               "save",
               "restore",
@@ -44,13 +43,11 @@ VIR_ENUM_IMPL(virNetDevVPortProfileOp, VIR_NETDEV_VPORT_PROFILE_OP_LAST,
               "migrate out",
               "migrate in start",
               "migrate in finish",
-              "no-op")
+              "no-op",
+);
 
 #if WITH_VIRTUALPORT
 
-# include <stdint.h>
-# include <stdio.h>
-# include <errno.h>
 # include <fcntl.h>
 # include <c-ctype.h>
 # include <sys/socket.h>
@@ -129,6 +126,22 @@ virNetDevVPortProfileEqual(virNetDevVPortProfilePtr a, virNetDevVPortProfilePtr 
 
     return true;
 }
+
+
+int virNetDevVPortProfileCopy(virNetDevVPortProfilePtr *dst, const virNetDevVPortProfile *src)
+{
+    if (!src) {
+        *dst = NULL;
+        return 0;
+    }
+
+    if (VIR_ALLOC(*dst) < 0)
+        return -1;
+
+    memcpy(*dst, src, sizeof(*src));
+    return 0;
+}
+
 
 /* virNetDevVPortProfileCheckComplete() checks that all attributes
  * required for the type of virtport are specified. When
@@ -389,7 +402,7 @@ virNetDevVPortProfileMerge(virNetDevVPortProfilePtr orig,
                            orig->profileID, mods->profileID);
             return -1;
         }
-        if (virStrcpyStatic(orig->profileID, mods->profileID) == NULL) {
+        if (virStrcpyStatic(orig->profileID, mods->profileID) < 0) {
             /* this should never happen - it indicates mods->profileID
              * isn't properly null terminated. */
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -451,7 +464,7 @@ int virNetDevVPortProfileMerge3(virNetDevVPortProfilePtr *result,
 
 static struct nla_policy ifla_port_policy[IFLA_PORT_MAX + 1] =
 {
-  [IFLA_PORT_RESPONSE]      = { .type = NLA_U16 },
+    [IFLA_PORT_RESPONSE] = { .type = NLA_U16 },
 };
 
 static uint32_t
@@ -813,8 +826,8 @@ virNetDevVPortProfileOpSetLink(const char *ifname, int ifindex,
 
         if (err->error) {
             virReportSystemError(-err->error,
-                _("error during virtual port configuration of ifindex %d"),
-                ifindex);
+                                 _("error during virtual port configuration of ifindex %d"),
+                                 ifindex);
             goto cleanup;
         }
         break;
@@ -885,8 +898,8 @@ virNetDevVPortProfileGetNthParent(const char *ifname, int ifindex, unsigned int 
             break;
 
         if (tb[IFLA_IFNAME]) {
-            if (!virStrcpy(parent_ifname, (char*)RTA_DATA(tb[IFLA_IFNAME]),
-                           IFNAMSIZ)) {
+            if (virStrcpy(parent_ifname, (char*)RTA_DATA(tb[IFLA_IFNAME]),
+                          IFNAMSIZ) < 0) {
                 virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                                _("buffer for root interface name is too small"));
                 rc = -1;
@@ -979,9 +992,9 @@ virNetDevVPortProfileOpCommon(const char *ifname, int ifindex,
             /* keep trying... */
         } else {
             virReportSystemError(EINVAL,
-                    _("error %d during port-profile setlink on "
-                      "interface %s (%d)"),
-                    status, ifname, ifindex);
+                                 _("error %d during port-profile setlink on "
+                                   "interface %s (%d)"),
+                                 status, ifname, ifindex);
             rc = -1;
             break;
         }
@@ -1244,7 +1257,7 @@ virNetDevVPortProfileAssociate(const char *macvtap_ifname,
 
     VIR_DEBUG("profile:'%p' vmOp: %s device: %s@%s mac: %s uuid: %s",
               virtPort, virNetDevVPortProfileOpTypeToString(vmOp),
-              (macvtap_ifname ? macvtap_ifname : ""), linkdev,
+              NULLSTR_EMPTY(macvtap_ifname), linkdev,
               (macvtap_macaddr
                ? virMacAddrFormat(macvtap_macaddr, macStr)
                : "(unspecified)"),
@@ -1310,7 +1323,7 @@ virNetDevVPortProfileDisassociate(const char *macvtap_ifname,
 
     VIR_DEBUG("profile:'%p' vmOp: %s device: %s@%s mac: %s",
               virtPort, virNetDevVPortProfileOpTypeToString(vmOp),
-              (macvtap_ifname ? macvtap_ifname : ""), linkdev,
+              NULLSTR_EMPTY(macvtap_ifname), linkdev,
               (macvtap_macaddr
                ? virMacAddrFormat(macvtap_macaddr, macStr)
                : "(unspecified)"));
@@ -1347,13 +1360,13 @@ virNetDevVPortProfileDisassociate(const char *macvtap_ifname,
 
 #else /* ! WITH_VIRTUALPORT */
 int virNetDevVPortProfileAssociate(const char *macvtap_ifname ATTRIBUTE_UNUSED,
-                               const virNetDevVPortProfile *virtPort ATTRIBUTE_UNUSED,
-                               const virMacAddr *macvtap_macaddr ATTRIBUTE_UNUSED,
-                               const char *linkdev ATTRIBUTE_UNUSED,
-                               int vf ATTRIBUTE_UNUSED,
-                               const unsigned char *vmuuid ATTRIBUTE_UNUSED,
-                               virNetDevVPortProfileOp vmOp ATTRIBUTE_UNUSED,
-                               bool setlink_only ATTRIBUTE_UNUSED)
+                                   const virNetDevVPortProfile *virtPort ATTRIBUTE_UNUSED,
+                                   const virMacAddr *macvtap_macaddr ATTRIBUTE_UNUSED,
+                                   const char *linkdev ATTRIBUTE_UNUSED,
+                                   int vf ATTRIBUTE_UNUSED,
+                                   const unsigned char *vmuuid ATTRIBUTE_UNUSED,
+                                   virNetDevVPortProfileOp vmOp ATTRIBUTE_UNUSED,
+                                   bool setlink_only ATTRIBUTE_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Virtual port profile association not supported on this platform"));

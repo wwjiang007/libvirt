@@ -232,6 +232,8 @@
     <flag name='iscsi.password-secret'/>
     <flag name='isa-serial'/>
     <flag name='dump-completed'/>
+    <flag name='hda-output'/>
+    <flag name='blockdev'/>
   </qemuCaps>
   <devices>
     <device alias='rng0'/>
@@ -252,11 +254,12 @@
     <device alias='usb'/>
     <device alias='ide0-0-0'/>
   </devices>
-  <numad nodeset='0' cpuset='0-7'/>
+  <numad nodeset='6' cpuset='0-7'/>
   <libDir path='/var/lib/libvirt/qemu/domain-1-upstream'/>
   <channelTargetDir path='/var/lib/libvirt/qemu/channel/target/domain-1-upstream'/>
   <chardevStdioLogd/>
   <allowReboot value='yes'/>
+  <nodename index='123'/>
   <blockjobs active='no'/>
   <domain type='kvm' id='1'>
     <name>upstream</name>
@@ -308,8 +311,21 @@
         <backingStore type='file' index='1'>
           <format type='qcow2'/>
           <source file='/var/lib/libvirt/images/base.qcow2'>
+            <reservations managed='yes'>
+              <source type='unix' path='/somepath/ux.sck' mode='client'/>
+            </reservations>
             <privateData>
+              <nodenames>
+                <nodename type='storage' name='test-storage'/>
+                <nodename type='format' name='test-format'/>
+              </nodenames>
+              <reservations mgralias='test-alias'/>
               <relPath>base.qcow2</relPath>
+              <objects>
+                <secret type='auth' alias='test-auth-alias'/>
+                <secret type='encryption' alias='test-encryption-alias'/>
+                <TLSx509 alias='transport-alias'/>
+              </objects>
             </privateData>
           </source>
           <backingStore/>
@@ -317,6 +333,12 @@
         <target dev='vdb' bus='virtio'/>
         <alias name='virtio-disk1'/>
         <address type='pci' domain='0x0000' bus='0x00' slot='0x0b' function='0x0'/>
+        <privateData>
+          <qom name='virtio-disk1/virtio-backend'/>
+          <nodenames>
+            <nodename type='copyOnRead' name='cor-node'/>
+          </nodenames>
+        </privateData>
       </disk>
       <disk type='file' device='cdrom'>
         <driver name='qemu' type='raw'/>

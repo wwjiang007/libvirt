@@ -24,7 +24,6 @@
 #ifdef WITH_AUDIT
 # include <libaudit.h>
 #endif
-#include <stdio.h>
 #include <unistd.h>
 
 #include "virerror.h"
@@ -97,7 +96,7 @@ void virAuditSend(virLogSourcePtr source,
                   virAuditRecordType type ATTRIBUTE_UNUSED, bool success,
                   const char *fmt, ...)
 {
-    char *str = NULL;
+    VIR_AUTOFREE(char *) str = NULL;
     va_list args;
 
     /* Duplicate later checks, to short circuit & avoid printf overhead
@@ -144,7 +143,6 @@ void virAuditSend(virLogSourcePtr source,
         }
     }
 #endif
-    VIR_FREE(str);
 }
 
 void virAuditClose(void)

@@ -16,10 +16,11 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __QEMU_MIGRATION_COOKIE_H__
-# define __QEMU_MIGRATION_COOKIE_H__
+#ifndef LIBVIRT_QEMU_MIGRATION_COOKIE_H
+# define LIBVIRT_QEMU_MIGRATION_COOKIE_H
 
 # include "qemu_migration_params.h"
+# include "virenum.h"
 
 typedef enum {
     QEMU_MIGRATION_COOKIE_FLAG_GRAPHICS,
@@ -160,7 +161,9 @@ qemuMigrationBakeCookie(qemuMigrationCookiePtr mig,
 
 qemuMigrationCookiePtr
 qemuMigrationEatCookie(virQEMUDriverPtr driver,
-                       virDomainObjPtr dom,
+                       const virDomainDef *def,
+                       const char *origname,
+                       qemuDomainObjPrivatePtr priv,
                        const char *cookiein,
                        int cookieinlen,
                        unsigned int flags);
@@ -175,4 +178,4 @@ qemuMigrationCookieAddPersistent(qemuMigrationCookiePtr mig,
 virDomainDefPtr
 qemuMigrationCookieGetPersistent(qemuMigrationCookiePtr mig);
 
-#endif /* __QEMU_MIGRATION_COOKIE_H__ */
+#endif /* LIBVIRT_QEMU_MIGRATION_COOKIE_H */

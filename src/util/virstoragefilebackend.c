@@ -17,13 +17,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
 
-#include <string.h>
 #include <sys/stat.h>
 
 #include "datatypes.h"
@@ -32,6 +29,7 @@
 #include "internal.h"
 #include "virstoragefilebackend.h"
 #include "virlog.h"
+#include "virmodule.h"
 #include "virfile.h"
 #include "configmake.h"
 
@@ -44,6 +42,48 @@ VIR_LOG_INIT("storage.storage_source_backend");
 static virStorageFileBackendPtr virStorageFileBackends[VIR_STORAGE_BACKENDS_MAX];
 static size_t virStorageFileBackendsCount;
 
+#if WITH_STORAGE_DIR || WITH_STORAGE_FS || WITH_STORAGE_GLUSTER
+
+# define STORAGE_FILE_MODULE_DIR LIBDIR "/libvirt/storage-file"
+
+static int
+virStorageFileLoadBackendModule(const char *name,
+                                const char *regfunc,
+                                bool forceload)
+{
+    char *modfile = NULL;
+    int ret;
+
+    if (!(modfile = virFileFindResourceFull(name,
+                                            "libvirt_storage_file_",
+                                            ".so",
+                                            abs_top_builddir "/src/.libs",
+                                            STORAGE_FILE_MODULE_DIR,
+                                            "LIBVIRT_STORAGE_FILE_DIR")))
+        return -1;
+
+    ret = virModuleLoad(modfile, regfunc, forceload);
+
+    VIR_FREE(modfile);
+
+    return ret;
+}
+#endif /* WITH_STORAGE_DIR || WITH_STORAGE_FS || WITH_STORAGE_GLUSTER */
+
+static int virStorageFileBackendOnceInit(void)
+{
+#if WITH_STORAGE_DIR || WITH_STORAGE_FS
+    if (virStorageFileLoadBackendModule("fs", "virStorageFileFsRegister", false) < 0)
+        return -1;
+#endif /* WITH_STORAGE_DIR || WITH_STORAGE_FS */
+#if WITH_STORAGE_GLUSTER
+    if (virStorageFileLoadBackendModule("gluster", "virStorageFileGlusterRegister", false) < 0)
+        return -1;
+#endif /* WITH_STORAGE_GLUSTER */
+    return 0;
+}
+
+VIR_ONCE_GLOBAL_INIT(virStorageFileBackend);
 
 int
 virStorageFileBackendRegister(virStorageFileBackendPtr backend)
@@ -65,12 +105,18 @@ virStorageFileBackendRegister(virStorageFileBackendPtr backend)
     return 0;
 }
 
-virStorageFileBackendPtr
-virStorageFileBackendForTypeInternal(int type,
-                                     int protocol,
-                                     bool report)
+int
+virStorageFileBackendForType(int type,
+                             int protocol,
+                             bool required,
+                             virStorageFileBackendPtr *backend)
 {
     size_t i;
+
+    *backend = NULL;
+
+    if (virStorageFileBackendInitialize() < 0)
+        return -1;
 
     for (i = 0; i < virStorageFileBackendsCount; i++) {
         if (virStorageFileBackends[i]->type == type) {
@@ -78,12 +124,13 @@ virStorageFileBackendForTypeInternal(int type,
                 virStorageFileBackends[i]->protocol != protocol)
                 continue;
 
-            return virStorageFileBackends[i];
+            *backend = virStorageFileBackends[i];
+            return 0;
         }
     }
 
-    if (!report)
-        return NULL;
+    if (!required)
+        return 0;
 
     if (type == VIR_STORAGE_TYPE_NETWORK) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -96,13 +143,5 @@ virStorageFileBackendForTypeInternal(int type,
                        virStorageTypeToString(type));
     }
 
-    return NULL;
-}
-
-
-virStorageFileBackendPtr
-virStorageFileBackendForType(int type,
-                             int protocol)
-{
-    return virStorageFileBackendForTypeInternal(type, protocol, true);
+    return -1;
 }

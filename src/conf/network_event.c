@@ -17,8 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Cedric Bosdonnat
  */
 
 #include <config.h>
@@ -66,7 +64,7 @@ virNetworkEventsOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(virNetworkEvents)
+VIR_ONCE_GLOBAL_INIT(virNetworkEvents);
 
 static void
 virNetworkEventDispose(void *obj)

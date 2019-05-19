@@ -19,11 +19,12 @@
  *
  */
 
-#ifndef __QEMU_PROCESS_H__
-# define __QEMU_PROCESS_H__
+#ifndef LIBVIRT_QEMU_PROCESS_H
+# define LIBVIRT_QEMU_PROCESS_H
 
 # include "qemu_conf.h"
 # include "qemu_domain.h"
+# include "virstoragefile.h"
 
 int qemuProcessPrepareMonitorChr(virDomainChrSourceDefPtr monConfig,
                                  const char *domainDir);
@@ -46,7 +47,6 @@ int qemuProcessDestroyMemoryBackingPath(virQEMUDriverPtr driver,
                                         virDomainObjPtr vm,
                                         virDomainMemoryDefPtr mem);
 
-void qemuProcessAutostartAll(virQEMUDriverPtr driver);
 void qemuProcessReconnectAll(virQEMUDriverPtr driver);
 
 typedef struct _qemuProcessIncomingDef qemuProcessIncomingDef;
@@ -79,6 +79,9 @@ typedef enum {
     VIR_QEMU_PROCESS_START_AUTODESTROY  = 1 << 2,
     VIR_QEMU_PROCESS_START_PRETEND      = 1 << 3,
     VIR_QEMU_PROCESS_START_NEW          = 1 << 4, /* internal, new VM is starting */
+    VIR_QEMU_PROCESS_START_GEN_VMID     = 1 << 5, /* Generate a new VMID */
+    VIR_QEMU_PROCESS_START_STANDALONE   = 1 << 6, /* Require CLI args to be usable standalone,
+                                                     ie no FD passing and the like */
 } qemuProcessStartFlags;
 
 int qemuProcessStart(virConnectPtr conn,
@@ -89,7 +92,7 @@ int qemuProcessStart(virConnectPtr conn,
                      const char *migrateFrom,
                      int stdin_fd,
                      const char *stdin_path,
-                     virDomainSnapshotObjPtr snapshot,
+                     virDomainMomentObjPtr snapshot,
                      virNetDevVPortProfileOp vmop,
                      unsigned int flags);
 
@@ -111,6 +114,8 @@ int qemuProcessPrepareDomain(virQEMUDriverPtr driver,
                              virDomainObjPtr vm,
                              unsigned int flags);
 
+int qemuProcessOpenVhostVsock(virDomainVsockDefPtr vsock);
+
 int qemuProcessPrepareHost(virQEMUDriverPtr driver,
                            virDomainObjPtr vm,
                            unsigned int flags);
@@ -120,7 +125,7 @@ int qemuProcessLaunch(virConnectPtr conn,
                       virDomainObjPtr vm,
                       qemuDomainAsyncJob asyncJob,
                       qemuProcessIncomingDefPtr incoming,
-                      virDomainSnapshotObjPtr snapshot,
+                      virDomainMomentObjPtr snapshot,
                       virNetDevVPortProfileOp vmop,
                       unsigned int flags);
 
@@ -181,8 +186,9 @@ bool qemuProcessAutoDestroyActive(virQEMUDriverPtr driver,
 int qemuProcessSetSchedParams(int id, pid_t pid, size_t nsp,
                               virDomainThreadSchedParamPtr sp);
 
-virDomainDiskDefPtr qemuProcessFindDomainDiskByAlias(virDomainObjPtr vm,
-                                                     const char *alias);
+virDomainDiskDefPtr qemuProcessFindDomainDiskByAliasOrQOM(virDomainObjPtr vm,
+                                                          const char *alias,
+                                                          const char *qomid);
 
 int qemuConnectAgent(virQEMUDriverPtr driver, virDomainObjPtr vm);
 
@@ -204,4 +210,37 @@ int qemuProcessRefreshDisks(virQEMUDriverPtr driver,
                             virDomainObjPtr vm,
                             qemuDomainAsyncJob asyncJob);
 
-#endif /* __QEMU_PROCESS_H__ */
+int qemuProcessStartManagedPRDaemon(virDomainObjPtr vm);
+
+void qemuProcessKillManagedPRDaemon(virDomainObjPtr vm);
+
+typedef struct _qemuProcessQMP qemuProcessQMP;
+typedef qemuProcessQMP *qemuProcessQMPPtr;
+struct _qemuProcessQMP {
+    char *binary;
+    char *libDir;
+    uid_t runUid;
+    gid_t runGid;
+    char *stderr;
+    char *monarg;
+    char *monpath;
+    char *pidfile;
+    char *uniqDir;
+    virCommandPtr cmd;
+    qemuMonitorPtr mon;
+    pid_t pid;
+    virDomainObjPtr vm;
+    bool forceTCG;
+};
+
+qemuProcessQMPPtr qemuProcessQMPNew(const char *binary,
+                                    const char *libDir,
+                                    uid_t runUid,
+                                    gid_t runGid,
+                                    bool forceTCG);
+
+void qemuProcessQMPFree(qemuProcessQMPPtr proc);
+
+int qemuProcessQMPStart(qemuProcessQMPPtr proc);
+
+#endif /* LIBVIRT_QEMU_PROCESS_H */

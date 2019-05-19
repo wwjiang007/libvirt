@@ -1,8 +1,11 @@
 LC_ALL=C \
 PATH=/bin \
-HOME=/home/test \
+HOME=/tmp/lib/domain--1-lots-of-disks \
 USER=test \
 LOGNAME=test \
+XDG_DATA_HOME=/tmp/lib/domain--1-lots-of-disks/.local/share \
+XDG_CACHE_HOME=/tmp/lib/domain--1-lots-of-disks/.cache \
+XDG_CONFIG_HOME=/tmp/lib/domain--1-lots-of-disks/.config \
 QEMU_AUDIO_DRV=none \
 /usr/bin/qemu-system-x86_64 \
 -name lots-of-disks \
@@ -11,6 +14,7 @@ QEMU_AUDIO_DRV=none \
 -cpu qemu64,-kvmclock \
 -bios /usr/share/seabios/bios.bin \
 -m 3907 \
+-realtime mlock=off \
 -smp 1,sockets=1,cores=1,threads=1 \
 -uuid 04872dc1-e1de-434b-ab21-e3e80e416349 \
 -display none \
@@ -21,7 +25,6 @@ path=/tmp/lib/domain--1-lots-of-disks/monitor.sock,server,nowait \
 -mon chardev=charmonitor,id=monitor,mode=control \
 -rtc base=utc \
 -no-shutdown \
--boot c \
 -device pci-bridge,chassis_nr=1,id=pci.1,bus=pci.0,addr=0x3 \
 -device pci-bridge,chassis_nr=2,id=pci.2,bus=pci.0,addr=0x4 \
 -device pci-bridge,chassis_nr=3,id=pci.3,bus=pci.0,addr=0x5 \
@@ -29,7 +32,7 @@ path=/tmp/lib/domain--1-lots-of-disks/monitor.sock,server,nowait \
 -drive file=/var/lib/libvirt/images/test.img,format=raw,if=none,\
 id=drive-virtio-disk0 \
 -device virtio-blk-pci,bus=pci.0,addr=0x6,drive=drive-virtio-disk0,\
-id=virtio-disk0 \
+id=virtio-disk0,bootindex=1 \
 -drive file=/var/lib/libvirt/images/disk-a-a.img,format=raw,if=none,\
 id=drive-virtio-disk26 \
 -device virtio-blk-pci,bus=pci.0,addr=0x7,drive=drive-virtio-disk26,\

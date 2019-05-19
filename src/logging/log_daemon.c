@@ -16,8 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library;  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -27,7 +25,6 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <getopt.h>
-#include <stdlib.h>
 
 
 #include "log_daemon.h"
@@ -47,6 +44,7 @@
 #include "viruuid.h"
 #include "virstring.h"
 #include "virgettext.h"
+#include "virenum.h"
 
 #include "log_daemon_dispatch.h"
 #include "log_protocol.h"
@@ -82,8 +80,9 @@ enum {
     VIR_LOG_DAEMON_ERR_LAST
 };
 
-VIR_ENUM_DECL(virDaemonErr)
-VIR_ENUM_IMPL(virDaemonErr, VIR_LOG_DAEMON_ERR_LAST,
+VIR_ENUM_DECL(virDaemonErr);
+VIR_ENUM_IMPL(virDaemonErr,
+              VIR_LOG_DAEMON_ERR_LAST,
               "Initialization successful",
               "Unable to obtain pidfile",
               "Unable to create rundir",
@@ -93,7 +92,8 @@ VIR_ENUM_IMPL(virDaemonErr, VIR_LOG_DAEMON_ERR_LAST,
               "Unable to initialize network sockets",
               "Unable to load configuration file",
               "Unable to look for hook scripts",
-              "Unable to re-execute daemon");
+              "Unable to re-execute daemon",
+);
 
 static void *
 virLogDaemonClientNew(virNetServerClientPtr client,
@@ -127,6 +127,12 @@ static void
 virLogDaemonInhibitor(bool inhibit, void *opaque)
 {
     virLogDaemonPtr dmn = opaque;
+
+    /* virtlogd uses inhibition only to stop session daemon being killed after
+     * the specified timeout, for the system daemon this is taken care of by
+     * libvirtd and the dependencies between the services. */
+    if (virNetDaemonIsPrivileged(dmn->dmn))
+        return;
 
     if (inhibit)
         virNetDaemonAddShutdownInhibition(dmn->dmn);
@@ -548,9 +554,7 @@ virLogDaemonSetupNetworkingSystemD(virNetServerPtr logSrv, virNetServerPtr admin
         /* Systemd passes FDs, starting immediately after stderr,
          * so the first FD we'll get is '3'. */
         if (!(svc = virNetServerServiceNewFD(3 + i, 0,
-#if WITH_GNUTLS
                                              NULL,
-#endif
                                              false, 0, 1)))
             return -1;
 
@@ -571,9 +575,7 @@ virLogDaemonSetupNetworkingNative(virNetServerPtr srv, const char *sock_path)
     VIR_DEBUG("Setting up networking natively");
 
     if (!(svc = virNetServerServiceNewUNIX(sock_path, 0700, 0, 0,
-#if WITH_GNUTLS
                                            NULL,
-#endif
                                            false, 0, 1)))
         return -1;
 

@@ -19,14 +19,12 @@
  *
  */
 
-#ifndef __VIR_MOCK_H__
-# define __VIR_MOCK_H__
+#ifndef LIBVIRT_VIRMOCK_H
+# define LIBVIRT_VIRMOCK_H
 
 # if HAVE_DLFCN_H
 #  include <dlfcn.h>
 # endif
-# include <stdlib.h>
-# include <stdio.h>
 
 # include "internal.h"
 
@@ -85,7 +83,7 @@
  * then lookup the same symbol name but with 'wrap_' prefixed
  * on it, and call that.
  *
- * The actual test suite should provide the implemention of
+ * The actual test suite should provide the implementation of
  * the wrap_XXXX symbol, using the VIR_MOCK_WRAP_NNN_MMM
  * macros.
  */
@@ -292,14 +290,4 @@
         } \
     } while (0)
 
-# define VIR_MOCK_REAL_INIT_ALT(name1, name2) \
-    do { \
-        if (!(real_ ## name1 = dlsym(RTLD_NEXT, #name1)) && \
-            !(real_ ## name2 = dlsym(RTLD_NEXT, #name2))) { \
-            fprintf(stderr, "Cannot find real '%s' or '%s' symbol\n", \
-                    #name1, #name2); \
-            abort(); \
-        } \
-    } while (0)
-
-#endif /* __VIR_MOCK_H__ */
+#endif /* LIBVIRT_VIRMOCK_H */

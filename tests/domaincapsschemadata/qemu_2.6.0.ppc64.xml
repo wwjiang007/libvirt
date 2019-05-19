@@ -4,7 +4,9 @@
   <machine>pseries-2.6</machine>
   <arch>ppc64</arch>
   <vcpu max='255'/>
+  <iothreads supported='yes'/>
   <os supported='yes'>
+    <enum name='firmware'/>
     <loader supported='yes'>
       <value>/usr/share/AAVMF/AAVMF_CODE.fd</value>
       <value>/usr/share/AAVMF/AAVMF32_CODE.fd</value>
@@ -15,6 +17,9 @@
       </enum>
       <enum name='readonly'>
         <value>yes</value>
+        <value>no</value>
+      </enum>
+      <enum name='secure'>
         <value>no</value>
       </enum>
     </loader>
@@ -42,6 +47,11 @@
         <value>virtio</value>
         <value>usb</value>
         <value>sata</value>
+      </enum>
+      <enum name='model'>
+        <value>virtio</value>
+        <value>virtio-transitional</value>
+        <value>virtio-non-transitional</value>
       </enum>
     </disk>
     <graphics supported='yes'>
@@ -81,5 +91,8 @@
   </devices>
   <features>
     <gic supported='no'/>
+    <vmcoreinfo supported='no'/>
+    <genid supported='no'/>
+    <sev supported='no'/>
   </features>
 </domainCapabilities>

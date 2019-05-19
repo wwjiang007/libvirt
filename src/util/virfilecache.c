@@ -41,7 +41,7 @@
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
-VIR_LOG_INIT("util.filecache")
+VIR_LOG_INIT("util.filecache");
 
 
 struct _virFileCache {
@@ -93,25 +93,24 @@ virFileCacheOnceInit(void)
 }
 
 
-VIR_ONCE_GLOBAL_INIT(virFileCache)
+VIR_ONCE_GLOBAL_INIT(virFileCache);
 
 
 static char *
 virFileCacheGetFileName(virFileCachePtr cache,
                         const char *name)
 {
-    char *file = NULL;
-    char *namehash = NULL;
+    VIR_AUTOFREE(char *) namehash = NULL;
     virBuffer buf = VIR_BUFFER_INITIALIZER;
 
     if (virCryptoHashString(VIR_CRYPTO_HASH_SHA256, name, &namehash) < 0)
-        goto cleanup;
+        return NULL;
 
     if (virFileMakePath(cache->dir) < 0) {
         virReportSystemError(errno,
                              _("Unable to create directory '%s'"),
                              cache->dir);
-        goto cleanup;
+        return NULL;
     }
 
     virBufferAsprintf(&buf, "%s/%s", cache->dir, namehash);
@@ -120,13 +119,9 @@ virFileCacheGetFileName(virFileCachePtr cache,
         virBufferAsprintf(&buf, ".%s", cache->suffix);
 
     if (virBufferCheckError(&buf) < 0)
-        goto cleanup;
+        return NULL;
 
-    file = virBufferContentAndReset(&buf);
-
- cleanup:
-    VIR_FREE(namehash);
-    return file;
+    return virBufferContentAndReset(&buf);
 }
 
 
@@ -135,7 +130,7 @@ virFileCacheLoad(virFileCachePtr cache,
                  const char *name,
                  void **data)
 {
-    char *file = NULL;
+    VIR_AUTOFREE(char *) file = NULL;
     int ret = -1;
     void *loadData = NULL;
 
@@ -157,9 +152,8 @@ virFileCacheLoad(virFileCachePtr cache,
     }
 
     if (!(loadData = cache->handlers.loadFile(file, name, cache->priv))) {
-        virErrorPtr err = virGetLastError();
         VIR_WARN("Failed to load cached data from '%s' for '%s': %s",
-                 file, name, err ? NULLSTR(err->message) : "unknown error");
+                 file, name, virGetLastErrorMessage());
         virResetLastError();
         ret = 0;
         goto cleanup;
@@ -167,7 +161,7 @@ virFileCacheLoad(virFileCachePtr cache,
 
     if (!cache->handlers.isValid(loadData, cache->priv)) {
         VIR_DEBUG("Outdated cached capabilities '%s' for '%s'", file, name);
-        ignore_value(unlink(file));
+        unlink(file);
         ret = 0;
         goto cleanup;
     }
@@ -179,7 +173,6 @@ virFileCacheLoad(virFileCachePtr cache,
 
  cleanup:
     virObjectUnref(loadData);
-    VIR_FREE(file);
     return ret;
 }
 
@@ -189,20 +182,15 @@ virFileCacheSave(virFileCachePtr cache,
                  const char *name,
                  void *data)
 {
-    char *file = NULL;
-    int ret = -1;
+    VIR_AUTOFREE(char *) file = NULL;
 
     if (!(file = virFileCacheGetFileName(cache, name)))
-        return ret;
+        return -1;
 
     if (cache->handlers.saveFile(data, file, cache->priv) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(file);
-    return ret;
+    return 0;
 }
 
 
@@ -347,7 +335,7 @@ virFileCacheLookupByFunc(virFileCachePtr cache,
                          const void *iterData)
 {
     void *data = NULL;
-    char *name = NULL;
+    VIR_AUTOFREE(char *) name = NULL;
 
     virObjectLock(cache);
 
@@ -356,8 +344,6 @@ virFileCacheLookupByFunc(virFileCachePtr cache,
 
     virObjectRef(data);
     virObjectUnlock(cache);
-
-    VIR_FREE(name);
 
     return data;
 }

@@ -16,12 +16,14 @@
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
  */
-#ifndef VIRNWFILTEROBJ_H
-# define VIRNWFILTEROBJ_H
+
+#ifndef LIBVIRT_VIRNWFILTEROBJ_H
+# define LIBVIRT_VIRNWFILTEROBJ_H
 
 # include "internal.h"
 
 # include "nwfilter_conf.h"
+# include "virnwfilterbindingobjlist.h"
 
 typedef struct _virNWFilterObj virNWFilterObj;
 typedef virNWFilterObj *virNWFilterObjPtr;
@@ -37,8 +39,10 @@ struct _virNWFilterDriverState {
 
     virNWFilterObjListPtr nwfilters;
 
+    virNWFilterBindingObjListPtr bindings;
+
     char *configDir;
-    bool watchingFirewallD;
+    char *bindingDir;
 };
 
 virNWFilterDefPtr
@@ -111,4 +115,4 @@ virNWFilterObjLock(virNWFilterObjPtr obj);
 void
 virNWFilterObjUnlock(virNWFilterObjPtr obj);
 
-#endif /* VIRNWFILTEROBJ_H */
+#endif /* LIBVIRT_VIRNWFILTEROBJ_H */

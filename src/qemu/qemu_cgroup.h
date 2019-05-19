@@ -17,12 +17,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __QEMU_CGROUP_H__
-# define __QEMU_CGROUP_H__
+#ifndef LIBVIRT_QEMU_CGROUP_H
+# define LIBVIRT_QEMU_CGROUP_H
 
 # include "virusb.h"
 # include "vircgroup.h"
@@ -33,10 +31,10 @@ int qemuSetupImageCgroup(virDomainObjPtr vm,
                          virStorageSourcePtr src);
 int qemuTeardownImageCgroup(virDomainObjPtr vm,
                             virStorageSourcePtr src);
-int qemuSetupDiskCgroup(virDomainObjPtr vm,
-                        virDomainDiskDefPtr disk);
-int qemuTeardownDiskCgroup(virDomainObjPtr vm,
-                           virDomainDiskDefPtr disk);
+int qemuSetupImageChainCgroup(virDomainObjPtr vm,
+                              virStorageSourcePtr src);
+int qemuTeardownImageChainCgroup(virDomainObjPtr vm,
+                                 virStorageSourcePtr src);
 int qemuSetupInputCgroup(virDomainObjPtr vm,
                          virDomainInputDefPtr dev);
 int qemuTeardownInputCgroup(virDomainObjPtr vm,
@@ -63,12 +61,13 @@ int qemuConnectCgroup(virDomainObjPtr vm);
 int qemuSetupCgroup(virDomainObjPtr vm,
                     size_t nnicindexes,
                     int *nicindexes);
-int qemuSetupCpusetMems(virDomainObjPtr vm);
 int qemuSetupCgroupVcpuBW(virCgroupPtr cgroup,
                           unsigned long long period,
                           long long quota);
 int qemuSetupCgroupCpusetCpus(virCgroupPtr cgroup, virBitmapPtr cpumask);
 int qemuSetupGlobalCpuCgroup(virDomainObjPtr vm);
+int qemuSetupCgroupForExtDevices(virDomainObjPtr vm,
+                                 virQEMUDriverPtr driver);
 int qemuRemoveCgroup(virDomainObjPtr vm);
 
 typedef struct _qemuCgroupEmulatorAllNodesData qemuCgroupEmulatorAllNodesData;
@@ -83,4 +82,4 @@ int qemuCgroupEmulatorAllNodesAllow(virCgroupPtr cgroup,
 void qemuCgroupEmulatorAllNodesRestore(qemuCgroupEmulatorAllNodesDataPtr data);
 
 extern const char *const defaultDeviceACL[];
-#endif /* __QEMU_CGROUP_H__ */
+#endif /* LIBVIRT_QEMU_CGROUP_H */

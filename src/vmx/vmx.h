@@ -19,12 +19,14 @@
  *
  */
 
-#ifndef __VIR_VMX_H__
-# define __VIR_VMX_H__
+#ifndef LIBVIRT_VMX_H
+# define LIBVIRT_VMX_H
 
 # include "internal.h"
 # include "virconf.h"
 # include "domain_conf.h"
+
+# define VMX_CONFIG_FORMAT_ARGV "vmware-vmx"
 
 typedef struct _virVMXContext virVMXContext;
 
@@ -140,4 +142,4 @@ int virVMXFormatParallel(virVMXContext *ctx, virDomainChrDefPtr def,
 
 int virVMXFormatSVGA(virDomainVideoDefPtr def, virBufferPtr buffer);
 
-#endif /* __VIR_VMX_H__ */
+#endif /* LIBVIRT_VMX_H */

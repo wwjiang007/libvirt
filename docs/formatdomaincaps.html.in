@@ -37,6 +37,17 @@
     management application to choose an appropriate mode for a pass-through
     host device as well as which adapter to utilize.</p>
 
+    <p>Some XML elements may be entirely omitted from the domaincapabilities
+    XML, depending on what the libvirt driver has filled in. Applications
+    should only act on what is explicitly reported in the domaincapabilities
+    XML. For example, if &lt;disk supported='yes'/&gt; is present, you can safely
+    assume the driver supports &lt;disk&gt; devices. If &lt;disk supported='no'/&gt; is
+    present, you can safely assume the driver does NOT support &lt;disk&gt;
+    devices. If the &lt;disk&gt; block is omitted entirely, the driver is not
+    indicating one way or the other whether it supports &lt;disk&gt; devices, and
+    applications should not interpret the missing block to mean any thing in
+    particular.</p>
+
     <h2><a id="elements">Element and attribute overview</a></h2>
 
     <p> A new query interface was added to the virConnect API's to retrieve the
@@ -81,7 +92,7 @@
 
     <h3><a id="elementsCPUAllocation">CPU Allocation</a></h3>
 
-    <p>Before any devices capability occurs, there might be a info on domain
+    <p>Before any devices capability occurs, there might be info on domain
     wide capabilities, e.g. virtual CPUs:</p>
 
 <pre>
@@ -108,6 +119,10 @@
 &lt;domainCapabilities&gt;
   ...
   &lt;os supported='yes'&gt;
+    &lt;enum name='firmware'&gt;
+      &lt;value&gt;bios&lt;/value&gt;
+      &lt;value&gt;efi&lt;/value&gt;
+    &lt;/enum&gt;
     &lt;loader supported='yes'&gt;
       &lt;value&gt;/usr/share/OVMF/OVMF_CODE.fd&lt;/value&gt;
       &lt;enum name='type'&gt;
@@ -118,11 +133,25 @@
         &lt;value&gt;yes&lt;/value&gt;
         &lt;value&gt;no&lt;/value&gt;
       &lt;/enum&gt;
+      &lt;enum name='secure'&gt;
+        &lt;value&gt;yes&lt;/value&gt;
+        &lt;value&gt;no&lt;/value&gt;
+      &lt;/enum&gt;
     &lt;/loader&gt;
   &lt;/os&gt;
   ...
 &lt;domainCapabilities&gt;
 </pre>
+
+    <p>The <code>firmware</code> enum corresponds to
+      <code>firmware</code> attribute of the <code>os</code> element.
+      Plain presence of this enum means that libvirt is capable of so
+      called firmware auto selection. The listed values then represent
+      accepted values for the domain attribute. Only values for which
+      there exists a firmware descriptor that matches machine type and
+      architecture are listed, i.e. those which won't cause a failure
+      on domain startup.
+    </p>
 
     <p>For the <code>loader</code> element, the following can occur:</p>
 
@@ -141,6 +170,11 @@
       <dt><code>readonly</code></dt>
       <dd>Options for the <code>readonly</code> attribute of the
       &lt;loader/&gt; element.</dd>
+
+      <dt><code>secure</code></dt>
+      <dd>Options for the <code>secure</code> attribute of the
+      &lt;loader/&gt; element. Note, that <code>yes</code> is listed
+      only if there is a firmware that supports it.</dd>
     </dl>
 
     <h3><a id="elementsCPU">CPU configuration</a></h3>
@@ -208,6 +242,22 @@
       </dd>
     </dl>
 
+    <h3><a id="elementsIothreads">I/O Threads</a></h3>
+
+    <p>
+      The <code>iothread</code> elements indicates whether or not
+      <a href="formatdomain.html#elementsIOThreadsAllocation">I/O threads</a>
+      are supported.
+    </p>
+
+<pre>
+&lt;domainCapabilities&gt;
+  ...
+  &lt;iothread supported='yes'/&gt;
+  ...
+&lt;domainCapabilities&gt;
+</pre>
+
     <h3><a id="elementsDevices">Devices</a></h3>
 
     <p>
@@ -262,7 +312,6 @@
         &lt;value&gt;virtio&lt;/value&gt;
         &lt;value&gt;xen&lt;/value&gt;
         &lt;value&gt;usb&lt;/value&gt;
-        &lt;value&gt;uml&lt;/value&gt;
         &lt;value&gt;sata&lt;/value&gt;
         &lt;value&gt;sd&lt;/value&gt;
       &lt;/enum&gt;
@@ -417,6 +466,12 @@
         &lt;value&gt;3&lt;/value&gt;
       &lt;/enum&gt;
     &lt;/gic&gt;
+    &lt;vmcoreinfo supported='yes'/&gt;
+    &lt;genid supported='yes'/&gt;
+    &lt;sev&gt;
+      &lt;cbitpos&gt;47&lt;/cbitpos&gt;
+      &lt;reduced-phys-bits&gt;1&lt;/reduced-phys-bits&gt;
+    &lt;/sev&gt;
   &lt;/features&gt;
 &lt;/domainCapabilities&gt;
 </pre>
@@ -439,6 +494,40 @@
       <dt><code>version</code></dt>
       <dd>Options for the <code>version</code> attribute of the
       <code>gic</code> element.</dd>
+    </dl>
+
+    <h4><a id="elementsvmcoreinfo">vmcoreinfo</a></h4>
+
+    <p>Reports whether the vmcoreinfo feature can be enabled.</p>
+
+    <h4><a id="elementsgenid">genid</a></h4>
+
+    <p>Reports whether the genid feature can be used by the domain.</p>
+
+    <h4><a id="elementsSEV">SEV capabilities</a></h4>
+
+    <p>AMD Secure Encrypted Virtualization (SEV) capabilities are exposed under
+    the <code>sev</code> element.
+    SEV is an extension to the AMD-V architecture which supports running
+    virtual machines (VMs) under the control of a hypervisor. When supported,
+    guest owner can create a VM whose memory contents will be transparently
+    encrypted with a key unique to that VM.</p>
+
+    <p>
+    For more details on SEV feature see:
+      <a href="https://support.amd.com/TechDocs/55766_SEV-KM_API_Specification.pdf">
+        SEV API spec</a> and <a href="http://amd-dev.wpengine.netdna-cdn.com/wordpress/media/2013/12/AMD_Memory_Encryption_Whitepaper_v7-Public.pdf">
+        SEV White Paper</a>
+    </p>
+
+    <dl>
+      <dt><code>cbitpos</code></dt>
+      <dd>When memory encryption is enabled, one of the physical address bits
+      (aka the C-bit) is utilized to mark if a memory page is protected. The
+      C-bit position is Hypervisor dependent.</dd>
+      <dt><code>reducedPhysBits</code></dt>
+      <dd>When memory encryption is enabled, we lose certain bits in physical
+      address space. The number of bits we lose is hypervisor dependent.</dd>
     </dl>
 
   </body>

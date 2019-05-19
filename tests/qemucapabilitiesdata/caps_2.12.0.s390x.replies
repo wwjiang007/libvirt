@@ -1,17 +1,6 @@
 {
-  "QMP": {
-    "version": {
-      "qemu": {
-        "micro": 90,
-        "minor": 11,
-        "major": 2
-      },
-      "package": "v2.12.0-rc0"
-    },
-    "capabilities": [
-      "oob"
-    ]
-  }
+  "execute": "qmp_capabilities",
+  "id": "libvirt-1"
 }
 
 {
@@ -21,15 +10,25 @@
 }
 
 {
+  "execute": "query-version",
+  "id": "libvirt-2"
+}
+
+{
   "return": {
     "qemu": {
-      "micro": 90,
-      "minor": 11,
+      "micro": 0,
+      "minor": 12,
       "major": 2
     },
-    "package": "v2.12.0-rc0"
+    "package": ""
   },
   "id": "libvirt-2"
+}
+
+{
+  "execute": "query-target",
+  "id": "libvirt-3"
 }
 
 {
@@ -37,6 +36,11 @@
     "arch": "s390x"
   },
   "id": "libvirt-3"
+}
+
+{
+  "execute": "query-commands",
+  "id": "libvirt-4"
 }
 
 {
@@ -529,150 +533,21 @@
 }
 
 {
+  "execute": "query-kvm",
+  "id": "libvirt-5"
+}
+
+{
   "return": {
-    "fd": 17,
-    "fdset-id": 0
+    "enabled": true,
+    "present": true
   },
   "id": "libvirt-5"
 }
 
 {
-  "id": "libvirt-6",
-  "error": {
-    "class": "DeviceNotFound",
-    "desc": "Device 'bogus' not found"
-  }
-}
-
-{
-  "return": {
-    "enabled": false,
-    "present": true
-  },
-  "id": "libvirt-7"
-}
-
-{
-  "return": [
-    {
-      "name": "COMMAND_DROPPED"
-    },
-    {
-      "name": "RTC_CHANGE"
-    },
-    {
-      "name": "ACPI_DEVICE_OST"
-    },
-    {
-      "name": "MEM_UNPLUG_ERROR"
-    },
-    {
-      "name": "DUMP_COMPLETED"
-    },
-    {
-      "name": "DEVICE_DELETED"
-    },
-    {
-      "name": "BALLOON_CHANGE"
-    },
-    {
-      "name": "MIGRATION_PASS"
-    },
-    {
-      "name": "MIGRATION"
-    },
-    {
-      "name": "VNC_DISCONNECTED"
-    },
-    {
-      "name": "VNC_INITIALIZED"
-    },
-    {
-      "name": "VNC_CONNECTED"
-    },
-    {
-      "name": "SPICE_MIGRATE_COMPLETED"
-    },
-    {
-      "name": "SPICE_DISCONNECTED"
-    },
-    {
-      "name": "SPICE_INITIALIZED"
-    },
-    {
-      "name": "SPICE_CONNECTED"
-    },
-    {
-      "name": "NIC_RX_FILTER_CHANGED"
-    },
-    {
-      "name": "VSERPORT_CHANGE"
-    },
-    {
-      "name": "QUORUM_REPORT_BAD"
-    },
-    {
-      "name": "QUORUM_FAILURE"
-    },
-    {
-      "name": "DEVICE_TRAY_MOVED"
-    },
-    {
-      "name": "BLOCK_WRITE_THRESHOLD"
-    },
-    {
-      "name": "BLOCK_JOB_PENDING"
-    },
-    {
-      "name": "BLOCK_JOB_READY"
-    },
-    {
-      "name": "BLOCK_JOB_ERROR"
-    },
-    {
-      "name": "BLOCK_JOB_CANCELLED"
-    },
-    {
-      "name": "BLOCK_JOB_COMPLETED"
-    },
-    {
-      "name": "BLOCK_IO_ERROR"
-    },
-    {
-      "name": "BLOCK_IMAGE_CORRUPTED"
-    },
-    {
-      "name": "GUEST_PANICKED"
-    },
-    {
-      "name": "WATCHDOG"
-    },
-    {
-      "name": "WAKEUP"
-    },
-    {
-      "name": "SUSPEND_DISK"
-    },
-    {
-      "name": "SUSPEND"
-    },
-    {
-      "name": "RESUME"
-    },
-    {
-      "name": "STOP"
-    },
-    {
-      "name": "RESET"
-    },
-    {
-      "name": "POWERDOWN"
-    },
-    {
-      "name": "SHUTDOWN"
-    }
-  ],
-  "id": "libvirt-8"
+  "execute": "qom-list-types",
+  "id": "libvirt-6"
 }
 
 {
@@ -1242,10 +1117,6 @@
       "parent": "fw_cfg"
     },
     {
-      "name": "chardev-file",
-      "parent": "chardev-fd"
-    },
-    {
       "name": "s390-ccw-virtio-2.10-machine",
       "parent": "s390-ccw-machine"
     },
@@ -1258,8 +1129,8 @@
       "parent": "s390x-cpu"
     },
     {
-      "name": "chardev-braille",
-      "parent": "chardev"
+      "name": "chardev-file",
+      "parent": "chardev-fd"
     },
     {
       "name": "chardev-wctablet",
@@ -1626,7 +1497,15 @@
       "parent": "virtio-device"
     }
   ],
-  "id": "libvirt-9"
+  "id": "libvirt-6"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-blk-pci"
+  },
+  "id": "libvirt-7"
 }
 
 {
@@ -1858,7 +1737,15 @@
       "type": "str"
     }
   ],
-  "id": "libvirt-10"
+  "id": "libvirt-7"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-net-pci"
+  },
+  "id": "libvirt-8"
 }
 
 {
@@ -2153,7 +2040,15 @@
       "type": "uint16"
     }
   ],
-  "id": "libvirt-11"
+  "id": "libvirt-8"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-scsi-pci"
+  },
+  "id": "libvirt-9"
 }
 
 {
@@ -2318,7 +2213,15 @@
       "type": "str"
     }
   ],
-  "id": "libvirt-12"
+  "id": "libvirt-9"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-blk-ccw"
+  },
+  "id": "libvirt-10"
 }
 
 {
@@ -2460,7 +2363,15 @@
       "type": "uint32"
     }
   ],
-  "id": "libvirt-13"
+  "id": "libvirt-10"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-net-ccw"
+  },
+  "id": "libvirt-11"
 }
 
 {
@@ -2669,7 +2580,15 @@
       "type": "uint16"
     }
   ],
-  "id": "libvirt-14"
+  "id": "libvirt-11"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-scsi-ccw"
+  },
+  "id": "libvirt-12"
 }
 
 {
@@ -2748,11 +2667,19 @@
       "type": "uint32"
     }
   ],
-  "id": "libvirt-15"
+  "id": "libvirt-12"
 }
 
 {
-  "id": "libvirt-16",
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-net-s390"
+  },
+  "id": "libvirt-13"
+}
+
+{
+  "id": "libvirt-13",
   "error": {
     "class": "DeviceNotFound",
     "desc": "Device 'virtio-net-s390' not found"
@@ -2760,19 +2687,11 @@
 }
 
 {
-  "id": "libvirt-17",
-  "error": {
-    "class": "DeviceNotFound",
-    "desc": "Device 'pci-assign' not found"
-  }
-}
-
-{
-  "id": "libvirt-18",
-  "error": {
-    "class": "DeviceNotFound",
-    "desc": "Device 'kvm-pci-assign' not found"
-  }
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "vfio-pci"
+  },
+  "id": "libvirt-14"
 }
 
 {
@@ -2898,95 +2817,22 @@
       "type": "str"
     }
   ],
-  "id": "libvirt-19"
+  "id": "libvirt-14"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "scsi-hd"
+  },
+  "id": "libvirt-15"
 }
 
 {
   "return": [
     {
-      "name": "serial",
-      "type": "str"
-    },
-    {
-      "name": "port_index",
-      "type": "uint16"
-    },
-    {
-      "name": "dpofua",
-      "description": "on/off",
-      "type": "bool"
-    },
-    {
-      "name": "bootindex",
-      "type": "int32"
-    },
-    {
-      "name": "logical_block_size",
-      "description": "A power of two between 512 and 32768",
-      "type": "uint16"
-    },
-    {
-      "name": "discard_granularity",
-      "type": "uint32"
-    },
-    {
-      "name": "lun",
-      "type": "uint32"
-    },
-    {
-      "name": "max_unmap_size",
-      "type": "uint64"
-    },
-    {
-      "name": "drive",
-      "description": "Node name or ID of a block device to use as a backend",
-      "type": "str"
-    },
-    {
-      "name": "port_wwn",
-      "type": "uint64"
-    },
-    {
-      "name": "write-cache",
-      "description": "on/off/auto",
-      "type": "OnOffAuto"
-    },
-    {
-      "name": "share-rw",
-      "type": "bool"
-    },
-    {
-      "name": "opt_io_size",
-      "type": "uint32"
-    },
-    {
       "name": "min_io_size",
       "type": "uint16"
-    },
-    {
-      "name": "product",
-      "type": "str"
-    },
-    {
-      "name": "scsi-id",
-      "type": "uint32"
-    },
-    {
-      "name": "channel",
-      "type": "uint32"
-    },
-    {
-      "name": "vendor",
-      "type": "str"
-    },
-    {
-      "name": "wwn",
-      "type": "uint64"
-    },
-    {
-      "name": "werror",
-      "description": "Error handling policy, report/ignore/enospc/stop/auto",
-      "type": "BlockdevOnError"
     },
     {
       "name": "removable",
@@ -2994,12 +2840,84 @@
       "type": "bool"
     },
     {
+      "name": "channel",
+      "type": "uint32"
+    },
+    {
+      "name": "serial",
+      "type": "str"
+    },
+    {
+      "name": "lun",
+      "type": "uint32"
+    },
+    {
+      "name": "dpofua",
+      "description": "on/off",
+      "type": "bool"
+    },
+    {
+      "name": "ver",
+      "type": "str"
+    },
+    {
+      "name": "scsi-id",
+      "type": "uint32"
+    },
+    {
+      "name": "logical_block_size",
+      "description": "A power of two between 512 and 32768",
+      "type": "uint16"
+    },
+    {
+      "name": "drive",
+      "description": "Node name or ID of a block device to use as a backend",
+      "type": "str"
+    },
+    {
+      "name": "scsi_version",
+      "type": "int32"
+    },
+    {
+      "name": "werror",
+      "description": "Error handling policy, report/ignore/enospc/stop/auto",
+      "type": "BlockdevOnError"
+    },
+    {
+      "name": "discard_granularity",
+      "type": "uint32"
+    },
+    {
+      "name": "port_wwn",
+      "type": "uint64"
+    },
+    {
+      "name": "max_unmap_size",
+      "type": "uint64"
+    },
+    {
       "name": "rerror",
       "description": "Error handling policy, report/ignore/enospc/stop/auto",
       "type": "BlockdevOnError"
     },
     {
-      "name": "ver",
+      "name": "max_io_size",
+      "type": "uint64"
+    },
+    {
+      "name": "wwn",
+      "type": "uint64"
+    },
+    {
+      "name": "share-rw",
+      "type": "bool"
+    },
+    {
+      "name": "product",
+      "type": "str"
+    },
+    {
+      "name": "vendor",
       "type": "str"
     },
     {
@@ -3008,15 +2926,36 @@
       "type": "uint16"
     },
     {
-      "name": "max_io_size",
-      "type": "uint64"
+      "name": "port_index",
+      "type": "uint16"
+    },
+    {
+      "name": "bootindex",
+      "type": "int32"
+    },
+    {
+      "name": "write-cache",
+      "description": "on/off/auto",
+      "type": "OnOffAuto"
+    },
+    {
+      "name": "opt_io_size",
+      "type": "uint32"
     }
   ],
-  "id": "libvirt-20"
+  "id": "libvirt-15"
 }
 
 {
-  "id": "libvirt-21",
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "ide-hd"
+  },
+  "id": "libvirt-16"
+}
+
+{
+  "id": "libvirt-16",
   "error": {
     "class": "DeviceNotFound",
     "desc": "Device 'ide-drive' not found"
@@ -3024,7 +2963,15 @@
 }
 
 {
-  "id": "libvirt-22",
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "PIIX4_PM"
+  },
+  "id": "libvirt-17"
+}
+
+{
+  "id": "libvirt-17",
   "error": {
     "class": "DeviceNotFound",
     "desc": "Device 'PIIX4_PM' not found"
@@ -3032,46 +2979,15 @@
 }
 
 {
-  "id": "libvirt-23",
-  "error": {
-    "class": "DeviceNotFound",
-    "desc": "Device 'usb-host' not found"
-  }
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "i440FX-pcihost"
+  },
+  "id": "libvirt-18"
 }
 
 {
-  "return": [
-    {
-      "name": "bootindex",
-      "type": "int32"
-    },
-    {
-      "name": "drive",
-      "description": "Node name or ID of a block device to use as a backend",
-      "type": "str"
-    },
-    {
-      "name": "lun",
-      "type": "uint32"
-    },
-    {
-      "name": "share-rw",
-      "type": "bool"
-    },
-    {
-      "name": "channel",
-      "type": "uint32"
-    },
-    {
-      "name": "scsi-id",
-      "type": "uint32"
-    }
-  ],
-  "id": "libvirt-24"
-}
-
-{
-  "id": "libvirt-25",
+  "id": "libvirt-18",
   "error": {
     "class": "DeviceNotFound",
     "desc": "Device 'i440FX-pcihost' not found"
@@ -3079,7 +2995,15 @@
 }
 
 {
-  "id": "libvirt-26",
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "q35-pcihost"
+  },
+  "id": "libvirt-19"
+}
+
+{
+  "id": "libvirt-19",
   "error": {
     "class": "DeviceNotFound",
     "desc": "Device 'q35-pcihost' not found"
@@ -3087,11 +3011,27 @@
 }
 
 {
-  "id": "libvirt-27",
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "kvm-pit"
+  },
+  "id": "libvirt-20"
+}
+
+{
+  "id": "libvirt-20",
   "error": {
     "class": "DeviceNotFound",
     "desc": "Device 'kvm-pit' not found"
   }
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-gpu-pci"
+  },
+  "id": "libvirt-21"
 }
 
 {
@@ -3242,7 +3182,15 @@
       "type": "str"
     }
   ],
-  "id": "libvirt-28"
+  "id": "libvirt-21"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-gpu-device"
+  },
+  "id": "libvirt-22"
 }
 
 {
@@ -3289,15 +3237,31 @@
       "type": "size"
     }
   ],
-  "id": "libvirt-29"
+  "id": "libvirt-22"
 }
 
 {
-  "id": "libvirt-30",
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "ICH9-LPC"
+  },
+  "id": "libvirt-23"
+}
+
+{
+  "id": "libvirt-23",
   "error": {
     "class": "DeviceNotFound",
     "desc": "Device 'ICH9-LPC' not found"
   }
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-balloon-pci"
+  },
+  "id": "libvirt-24"
 }
 
 {
@@ -3440,7 +3404,15 @@
       "type": "str"
     }
   ],
-  "id": "libvirt-31"
+  "id": "libvirt-24"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-balloon-ccw"
+  },
+  "id": "libvirt-25"
 }
 
 {
@@ -3502,7 +3474,15 @@
       "type": "uint32"
     }
   ],
-  "id": "libvirt-32"
+  "id": "libvirt-25"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-balloon-device"
+  },
+  "id": "libvirt-26"
 }
 
 {
@@ -3546,7 +3526,15 @@
       "type": "bool"
     }
   ],
-  "id": "libvirt-33"
+  "id": "libvirt-26"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtio-gpu-ccw"
+  },
+  "id": "libvirt-27"
 }
 
 {
@@ -3611,7 +3599,155 @@
       "type": "uint32"
     }
   ],
-  "id": "libvirt-34"
+  "id": "libvirt-27"
+}
+
+{
+  "execute": "device-list-properties",
+  "arguments": {
+    "typename": "virtual-css-bridge"
+  },
+  "id": "libvirt-28"
+}
+
+{
+  "return": [
+    {
+      "name": "cssid-unrestricted",
+      "description": "A css device can use any cssid, regardless whether virtual or not (read only, always true)",
+      "type": "bool"
+    },
+    {
+      "name": "css_dev_path",
+      "type": "bool"
+    }
+  ],
+  "id": "libvirt-28"
+}
+
+{
+  "execute": "qom-list-properties",
+  "arguments": {
+    "typename": "memory-backend-file"
+  },
+  "id": "libvirt-29"
+}
+
+{
+  "return": [
+    {
+      "name": "policy",
+      "type": "HostMemPolicy"
+    },
+    {
+      "name": "dump",
+      "type": "bool"
+    },
+    {
+      "name": "share",
+      "type": "bool"
+    },
+    {
+      "name": "prealloc",
+      "type": "bool"
+    },
+    {
+      "name": "size",
+      "type": "int"
+    },
+    {
+      "name": "host-nodes",
+      "type": "int"
+    },
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "merge",
+      "type": "bool"
+    },
+    {
+      "name": "align",
+      "type": "int"
+    },
+    {
+      "name": "mem-path",
+      "type": "string"
+    },
+    {
+      "name": "discard-data",
+      "type": "bool"
+    },
+    {
+      "name": "type",
+      "type": "string"
+    }
+  ],
+  "id": "libvirt-29"
+}
+
+{
+  "execute": "qom-list-properties",
+  "arguments": {
+    "typename": "memory-backend-memfd"
+  },
+  "id": "libvirt-30"
+}
+
+{
+  "return": [
+    {
+      "name": "policy",
+      "type": "HostMemPolicy"
+    },
+    {
+      "name": "share",
+      "type": "bool"
+    },
+    {
+      "name": "host-nodes",
+      "type": "int"
+    },
+    {
+      "name": "prealloc",
+      "type": "bool"
+    },
+    {
+      "name": "dump",
+      "type": "bool"
+    },
+    {
+      "name": "size",
+      "type": "int"
+    },
+    {
+      "name": "merge",
+      "type": "bool"
+    },
+    {
+      "name": "seal",
+      "type": "bool"
+    },
+    {
+      "name": "hugetlbsize",
+      "type": "int"
+    },
+    {
+      "name": "hugetlb",
+      "type": "bool"
+    },
+    {
+      "name": "type",
+      "type": "string"
+    }
+  ],
+  "id": "libvirt-30"
+}
+
+{
+  "execute": "query-machines",
+  "id": "libvirt-31"
 }
 
 {
@@ -3669,7 +3805,12 @@
       "alias": "s390-ccw-virtio"
     }
   ],
-  "id": "libvirt-35"
+  "id": "libvirt-31"
+}
+
+{
+  "execute": "query-cpu-definitions",
+  "id": "libvirt-32"
 }
 
 {
@@ -3678,18 +3819,6 @@
       "name": "z890.2",
       "typename": "z890.2-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "hfpm"
       ],
       "static": false,
       "migration-safe": true
@@ -3698,18 +3827,6 @@
       "name": "z990.4",
       "typename": "z990.4-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "hfpm"
       ],
       "static": false,
       "migration-safe": true
@@ -3718,32 +3835,6 @@
       "name": "z10BC.2",
       "typename": "z10BC.2-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "sthyi",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "csske",
-        "edat",
-        "asnlxr",
-        "msa2",
-        "msa1",
-        "tods"
       ],
       "static": false,
       "migration-safe": true
@@ -3752,122 +3843,6 @@
       "name": "z196.2",
       "typename": "z196.2-s390x-cpu",
       "unavailable-features": [
-        "pcc-xts-eaes-256",
-        "pcc-xts-eaes-128",
-        "pcc-xts-aes-256",
-        "pcc-xts-aes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-eaes-192",
-        "pcc-cmac-eaes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-aes-192",
-        "pcc-cmac-aes-128",
-        "pcc-cmac-etdea-192",
-        "pcc-cmac-etdea-128",
-        "pcc-cmac-edea",
-        "pcc-cmac-tdea-192",
-        "pcc-cmac-tdea-128",
-        "pcc-cmac-dea",
-        "kmo-eaes-256",
-        "kmo-eaes-192",
-        "kmo-eaes-128",
-        "kmo-aes-256",
-        "kmo-aes-192",
-        "kmo-aes-128",
-        "kmo-etdea-192",
-        "kmo-etdea-128",
-        "kmo-edea",
-        "kmo-tdea-192",
-        "kmo-tdea-128",
-        "kmo-dea",
-        "kmf-eaes-256",
-        "kmf-eaes-192",
-        "kmf-eaes-128",
-        "kmf-aes-256",
-        "kmf-aes-192",
-        "kmf-aes-128",
-        "kmf-etdea-192",
-        "kmf-etdea-128",
-        "kmf-edea",
-        "kmf-tdea-192",
-        "kmf-tdea-128",
-        "kmf-dea",
-        "kmctr-eaes-256",
-        "kmctr-eaes-192",
-        "kmctr-eaes-128",
-        "kmctr-aes-256",
-        "kmctr-aes-192",
-        "kmctr-aes-128",
-        "kmctr-etdea-192",
-        "kmctr-etdea-128",
-        "kmctr-edea",
-        "kmctr-tdea-192",
-        "kmctr-tdea-128",
-        "kmctr-dea",
-        "pckmo-aes-256",
-        "pckmo-aes-192",
-        "pckmo-aes-128",
-        "pckmo-etdea-192",
-        "pckmo-etdea-128",
-        "pckmo-edea",
-        "klmd-sha-1",
-        "kimd-ghash",
-        "kimd-sha-1",
-        "km-xts-eaes-256",
-        "km-xts-eaes-128",
-        "km-xts-aes-256",
-        "km-xts-aes-128",
-        "km-eaes-256",
-        "km-eaes-192",
-        "km-eaes-128",
-        "km-etdea-192",
-        "km-etdea-128",
-        "km-edea",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-eaes-256",
-        "kmc-eaes-192",
-        "kmc-eaes-128",
-        "kmc-etdea-192",
-        "kmc-etdea-128",
-        "kmc-edea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-eaes-256",
-        "kmac-eaes-192",
-        "kmac-eaes-128",
-        "kmac-aes-256",
-        "kmac-aes-192",
-        "kmac-aes-128",
-        "kmac-etdea-192",
-        "kmac-etdea-128",
-        "kmac-edea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "aefsi",
-        "sthyi",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "ipter",
-        "csske",
-        "edat",
-        "asnlxr",
-        "msa2",
-        "msa1",
-        "tods"
       ],
       "static": false,
       "migration-safe": true
@@ -3876,152 +3851,6 @@
       "name": "z14",
       "typename": "z14-s390x-cpu",
       "unavailable-features": [
-        "kma-gcm-eaes-256",
-        "kma-gcm-eaes-192",
-        "kma-gcm-eaes-128",
-        "kma-gcm-aes-256",
-        "kma-gcm-aes-192",
-        "kma-gcm-aes-128",
-        "ppno-sha-512-drng",
-        "pcc-xts-eaes-256",
-        "pcc-xts-eaes-128",
-        "pcc-xts-aes-256",
-        "pcc-xts-aes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-eaes-192",
-        "pcc-cmac-eaes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-aes-192",
-        "pcc-cmac-aes-128",
-        "pcc-cmac-etdea-192",
-        "pcc-cmac-etdea-128",
-        "pcc-cmac-edea",
-        "pcc-cmac-tdea-192",
-        "pcc-cmac-tdea-128",
-        "pcc-cmac-dea",
-        "kmo-eaes-256",
-        "kmo-eaes-192",
-        "kmo-eaes-128",
-        "kmo-aes-256",
-        "kmo-aes-192",
-        "kmo-aes-128",
-        "kmo-etdea-192",
-        "kmo-etdea-128",
-        "kmo-edea",
-        "kmo-tdea-192",
-        "kmo-tdea-128",
-        "kmo-dea",
-        "kmf-eaes-256",
-        "kmf-eaes-192",
-        "kmf-eaes-128",
-        "kmf-aes-256",
-        "kmf-aes-192",
-        "kmf-aes-128",
-        "kmf-etdea-192",
-        "kmf-etdea-128",
-        "kmf-edea",
-        "kmf-tdea-192",
-        "kmf-tdea-128",
-        "kmf-dea",
-        "kmctr-eaes-256",
-        "kmctr-eaes-192",
-        "kmctr-eaes-128",
-        "kmctr-aes-256",
-        "kmctr-aes-192",
-        "kmctr-aes-128",
-        "kmctr-etdea-192",
-        "kmctr-etdea-128",
-        "kmctr-edea",
-        "kmctr-tdea-192",
-        "kmctr-tdea-128",
-        "kmctr-dea",
-        "pckmo-aes-256",
-        "pckmo-aes-192",
-        "pckmo-aes-128",
-        "pckmo-etdea-192",
-        "pckmo-etdea-128",
-        "pckmo-edea",
-        "klmd-sha-1",
-        "kimd-ghash",
-        "kimd-sha-1",
-        "km-xts-eaes-256",
-        "km-xts-eaes-128",
-        "km-xts-aes-256",
-        "km-xts-aes-128",
-        "km-eaes-256",
-        "km-eaes-192",
-        "km-eaes-128",
-        "km-etdea-192",
-        "km-etdea-128",
-        "km-edea",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-eaes-256",
-        "kmc-eaes-192",
-        "kmc-eaes-128",
-        "kmc-etdea-192",
-        "kmc-etdea-128",
-        "kmc-edea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-eaes-256",
-        "kmac-eaes-192",
-        "kmac-eaes-128",
-        "kmac-aes-256",
-        "kmac-aes-192",
-        "kmac-aes-128",
-        "kmac-etdea-192",
-        "kmac-etdea-128",
-        "kmac-edea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "esop",
-        "msa8-base",
-        "vxeh",
-        "vxpd",
-        "gs",
-        "sea_esop2",
-        "iep",
-        "vx",
-        "dfppc",
-        "edat2",
-        "aefsi",
-        "sthyi",
-        "te",
-        "ri",
-        "tsi",
-        "sema",
-        "minste2",
-        "eec",
-        "cte",
-        "dfpzc",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "opc",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "ipter",
-        "csske",
-        "edat",
-        "asnlxr",
-        "msa7",
-        "msa6",
-        "msa2",
-        "msa1",
-        "gen13ptff",
-        "tods",
-        "type"
       ],
       "static": false,
       "migration-safe": true
@@ -4030,22 +3859,6 @@
       "name": "z9BC-base",
       "typename": "z9BC-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "hfpue",
-        "hfpm",
-        "asnlxr",
-        "tods"
       ],
       "static": true,
       "migration-safe": true
@@ -4054,32 +3867,6 @@
       "name": "zEC12-base",
       "typename": "zEC12-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "dfpzc",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "csske",
-        "asnlxr",
-        "tods"
       ],
       "static": true,
       "migration-safe": true
@@ -4088,31 +3875,6 @@
       "name": "z196-base",
       "typename": "z196-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "csske",
-        "asnlxr",
-        "tods"
       ],
       "static": true,
       "migration-safe": true
@@ -4121,35 +3883,6 @@
       "name": "z13-base",
       "typename": "z13-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "dfppc",
-        "dfpzc",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "csske",
-        "asnlxr",
-        "gen13ptff",
-        "tods",
-        "type"
       ],
       "static": true,
       "migration-safe": true
@@ -4158,18 +3891,6 @@
       "name": "z990.3",
       "typename": "z990.3-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "hfpm"
       ],
       "static": false,
       "migration-safe": true
@@ -4177,6 +3898,8 @@
     {
       "name": "host",
       "typename": "host-s390x-cpu",
+      "unavailable-features": [
+      ],
       "static": false,
       "migration-safe": false
     },
@@ -4184,25 +3907,6 @@
       "name": "z9EC",
       "typename": "z9EC-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "sthyi",
-        "hfpue",
-        "hfpm",
-        "asnlxr",
-        "msa1",
-        "tods"
       ],
       "static": false,
       "migration-safe": true
@@ -4211,129 +3915,6 @@
       "name": "zBC12",
       "typename": "zBC12-s390x-cpu",
       "unavailable-features": [
-        "pcc-xts-eaes-256",
-        "pcc-xts-eaes-128",
-        "pcc-xts-aes-256",
-        "pcc-xts-aes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-eaes-192",
-        "pcc-cmac-eaes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-aes-192",
-        "pcc-cmac-aes-128",
-        "pcc-cmac-etdea-192",
-        "pcc-cmac-etdea-128",
-        "pcc-cmac-edea",
-        "pcc-cmac-tdea-192",
-        "pcc-cmac-tdea-128",
-        "pcc-cmac-dea",
-        "kmo-eaes-256",
-        "kmo-eaes-192",
-        "kmo-eaes-128",
-        "kmo-aes-256",
-        "kmo-aes-192",
-        "kmo-aes-128",
-        "kmo-etdea-192",
-        "kmo-etdea-128",
-        "kmo-edea",
-        "kmo-tdea-192",
-        "kmo-tdea-128",
-        "kmo-dea",
-        "kmf-eaes-256",
-        "kmf-eaes-192",
-        "kmf-eaes-128",
-        "kmf-aes-256",
-        "kmf-aes-192",
-        "kmf-aes-128",
-        "kmf-etdea-192",
-        "kmf-etdea-128",
-        "kmf-edea",
-        "kmf-tdea-192",
-        "kmf-tdea-128",
-        "kmf-dea",
-        "kmctr-eaes-256",
-        "kmctr-eaes-192",
-        "kmctr-eaes-128",
-        "kmctr-aes-256",
-        "kmctr-aes-192",
-        "kmctr-aes-128",
-        "kmctr-etdea-192",
-        "kmctr-etdea-128",
-        "kmctr-edea",
-        "kmctr-tdea-192",
-        "kmctr-tdea-128",
-        "kmctr-dea",
-        "pckmo-aes-256",
-        "pckmo-aes-192",
-        "pckmo-aes-128",
-        "pckmo-etdea-192",
-        "pckmo-etdea-128",
-        "pckmo-edea",
-        "klmd-sha-1",
-        "kimd-ghash",
-        "kimd-sha-1",
-        "km-xts-eaes-256",
-        "km-xts-eaes-128",
-        "km-xts-aes-256",
-        "km-xts-aes-128",
-        "km-eaes-256",
-        "km-eaes-192",
-        "km-eaes-128",
-        "km-etdea-192",
-        "km-etdea-128",
-        "km-edea",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-eaes-256",
-        "kmc-eaes-192",
-        "kmc-eaes-128",
-        "kmc-etdea-192",
-        "kmc-etdea-128",
-        "kmc-edea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-eaes-256",
-        "kmac-eaes-192",
-        "kmac-eaes-128",
-        "kmac-aes-256",
-        "kmac-aes-192",
-        "kmac-aes-128",
-        "kmac-etdea-192",
-        "kmac-etdea-128",
-        "kmac-edea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "esop",
-        "sea_esop2",
-        "edat2",
-        "aefsi",
-        "sthyi",
-        "te",
-        "ri",
-        "cte",
-        "dfpzc",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "ipter",
-        "csske",
-        "edat",
-        "asnlxr",
-        "msa2",
-        "msa1",
-        "tods"
       ],
       "static": false,
       "migration-safe": true
@@ -4342,25 +3923,6 @@
       "name": "z9EC.3",
       "typename": "z9EC.3-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "sthyi",
-        "hfpue",
-        "hfpm",
-        "asnlxr",
-        "msa1",
-        "tods"
       ],
       "static": false,
       "migration-safe": true
@@ -4369,31 +3931,6 @@
       "name": "z196.2-base",
       "typename": "z196.2-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "csske",
-        "asnlxr",
-        "tods"
       ],
       "static": true,
       "migration-safe": true
@@ -4402,6 +3939,7 @@
       "name": "qemu",
       "typename": "qemu-s390x-cpu",
       "unavailable-features": [
+        "ais"
       ],
       "static": false,
       "migration-safe": true
@@ -4410,32 +3948,6 @@
       "name": "zEC12.2-base",
       "typename": "zEC12.2-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "dfpzc",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "csske",
-        "asnlxr",
-        "tods"
       ],
       "static": true,
       "migration-safe": true
@@ -4452,25 +3964,6 @@
       "name": "z9EC.2",
       "typename": "z9EC.2-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "sthyi",
-        "hfpue",
-        "hfpm",
-        "asnlxr",
-        "msa1",
-        "tods"
       ],
       "static": false,
       "migration-safe": true
@@ -4495,18 +3988,6 @@
       "name": "z890-base",
       "typename": "z890-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "hfpm"
       ],
       "static": true,
       "migration-safe": true
@@ -4515,18 +3996,6 @@
       "name": "z890",
       "typename": "z890-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "hfpm"
       ],
       "static": false,
       "migration-safe": true
@@ -4535,18 +4004,6 @@
       "name": "z990.4-base",
       "typename": "z990.4-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "hfpm"
       ],
       "static": true,
       "migration-safe": true
@@ -4555,27 +4012,6 @@
       "name": "z10BC.2-base",
       "typename": "z10BC.2-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "csske",
-        "asnlxr",
-        "tods"
       ],
       "static": true,
       "migration-safe": true
@@ -4592,22 +4028,6 @@
       "name": "z9BC.2-base",
       "typename": "z9BC.2-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "hfpue",
-        "hfpm",
-        "asnlxr",
-        "tods"
       ],
       "static": true,
       "migration-safe": true
@@ -4624,122 +4044,6 @@
       "name": "z114",
       "typename": "z114-s390x-cpu",
       "unavailable-features": [
-        "pcc-xts-eaes-256",
-        "pcc-xts-eaes-128",
-        "pcc-xts-aes-256",
-        "pcc-xts-aes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-eaes-192",
-        "pcc-cmac-eaes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-aes-192",
-        "pcc-cmac-aes-128",
-        "pcc-cmac-etdea-192",
-        "pcc-cmac-etdea-128",
-        "pcc-cmac-edea",
-        "pcc-cmac-tdea-192",
-        "pcc-cmac-tdea-128",
-        "pcc-cmac-dea",
-        "kmo-eaes-256",
-        "kmo-eaes-192",
-        "kmo-eaes-128",
-        "kmo-aes-256",
-        "kmo-aes-192",
-        "kmo-aes-128",
-        "kmo-etdea-192",
-        "kmo-etdea-128",
-        "kmo-edea",
-        "kmo-tdea-192",
-        "kmo-tdea-128",
-        "kmo-dea",
-        "kmf-eaes-256",
-        "kmf-eaes-192",
-        "kmf-eaes-128",
-        "kmf-aes-256",
-        "kmf-aes-192",
-        "kmf-aes-128",
-        "kmf-etdea-192",
-        "kmf-etdea-128",
-        "kmf-edea",
-        "kmf-tdea-192",
-        "kmf-tdea-128",
-        "kmf-dea",
-        "kmctr-eaes-256",
-        "kmctr-eaes-192",
-        "kmctr-eaes-128",
-        "kmctr-aes-256",
-        "kmctr-aes-192",
-        "kmctr-aes-128",
-        "kmctr-etdea-192",
-        "kmctr-etdea-128",
-        "kmctr-edea",
-        "kmctr-tdea-192",
-        "kmctr-tdea-128",
-        "kmctr-dea",
-        "pckmo-aes-256",
-        "pckmo-aes-192",
-        "pckmo-aes-128",
-        "pckmo-etdea-192",
-        "pckmo-etdea-128",
-        "pckmo-edea",
-        "klmd-sha-1",
-        "kimd-ghash",
-        "kimd-sha-1",
-        "km-xts-eaes-256",
-        "km-xts-eaes-128",
-        "km-xts-aes-256",
-        "km-xts-aes-128",
-        "km-eaes-256",
-        "km-eaes-192",
-        "km-eaes-128",
-        "km-etdea-192",
-        "km-etdea-128",
-        "km-edea",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-eaes-256",
-        "kmc-eaes-192",
-        "kmc-eaes-128",
-        "kmc-etdea-192",
-        "kmc-etdea-128",
-        "kmc-edea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-eaes-256",
-        "kmac-eaes-192",
-        "kmac-eaes-128",
-        "kmac-aes-256",
-        "kmac-aes-192",
-        "kmac-aes-128",
-        "kmac-etdea-192",
-        "kmac-etdea-128",
-        "kmac-edea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "aefsi",
-        "sthyi",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "ipter",
-        "csske",
-        "edat",
-        "asnlxr",
-        "msa2",
-        "msa1",
-        "tods"
       ],
       "static": false,
       "migration-safe": true
@@ -4748,134 +4052,6 @@
       "name": "z13",
       "typename": "z13-s390x-cpu",
       "unavailable-features": [
-        "ppno-sha-512-drng",
-        "pcc-xts-eaes-256",
-        "pcc-xts-eaes-128",
-        "pcc-xts-aes-256",
-        "pcc-xts-aes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-eaes-192",
-        "pcc-cmac-eaes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-aes-192",
-        "pcc-cmac-aes-128",
-        "pcc-cmac-etdea-192",
-        "pcc-cmac-etdea-128",
-        "pcc-cmac-edea",
-        "pcc-cmac-tdea-192",
-        "pcc-cmac-tdea-128",
-        "pcc-cmac-dea",
-        "kmo-eaes-256",
-        "kmo-eaes-192",
-        "kmo-eaes-128",
-        "kmo-aes-256",
-        "kmo-aes-192",
-        "kmo-aes-128",
-        "kmo-etdea-192",
-        "kmo-etdea-128",
-        "kmo-edea",
-        "kmo-tdea-192",
-        "kmo-tdea-128",
-        "kmo-dea",
-        "kmf-eaes-256",
-        "kmf-eaes-192",
-        "kmf-eaes-128",
-        "kmf-aes-256",
-        "kmf-aes-192",
-        "kmf-aes-128",
-        "kmf-etdea-192",
-        "kmf-etdea-128",
-        "kmf-edea",
-        "kmf-tdea-192",
-        "kmf-tdea-128",
-        "kmf-dea",
-        "kmctr-eaes-256",
-        "kmctr-eaes-192",
-        "kmctr-eaes-128",
-        "kmctr-aes-256",
-        "kmctr-aes-192",
-        "kmctr-aes-128",
-        "kmctr-etdea-192",
-        "kmctr-etdea-128",
-        "kmctr-edea",
-        "kmctr-tdea-192",
-        "kmctr-tdea-128",
-        "kmctr-dea",
-        "pckmo-aes-256",
-        "pckmo-aes-192",
-        "pckmo-aes-128",
-        "pckmo-etdea-192",
-        "pckmo-etdea-128",
-        "pckmo-edea",
-        "klmd-sha-1",
-        "kimd-ghash",
-        "kimd-sha-1",
-        "km-xts-eaes-256",
-        "km-xts-eaes-128",
-        "km-xts-aes-256",
-        "km-xts-aes-128",
-        "km-eaes-256",
-        "km-eaes-192",
-        "km-eaes-128",
-        "km-etdea-192",
-        "km-etdea-128",
-        "km-edea",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-eaes-256",
-        "kmc-eaes-192",
-        "kmc-eaes-128",
-        "kmc-etdea-192",
-        "kmc-etdea-128",
-        "kmc-edea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-eaes-256",
-        "kmac-eaes-192",
-        "kmac-eaes-128",
-        "kmac-aes-256",
-        "kmac-aes-192",
-        "kmac-aes-128",
-        "kmac-etdea-192",
-        "kmac-etdea-128",
-        "kmac-edea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "esop",
-        "sea_esop2",
-        "vx",
-        "dfppc",
-        "edat2",
-        "aefsi",
-        "sthyi",
-        "te",
-        "ri",
-        "cte",
-        "dfpzc",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "ipter",
-        "csske",
-        "edat",
-        "asnlxr",
-        "msa2",
-        "msa1",
-        "gen13ptff",
-        "tods",
-        "type"
       ],
       "static": false,
       "migration-safe": true
@@ -4884,35 +4060,6 @@
       "name": "z13s-base",
       "typename": "z13s-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "dfppc",
-        "dfpzc",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "csske",
-        "asnlxr",
-        "gen13ptff",
-        "tods",
-        "type"
       ],
       "static": true,
       "migration-safe": true
@@ -4921,18 +4068,6 @@
       "name": "z990",
       "typename": "z990-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "hfpm"
       ],
       "static": false,
       "migration-safe": true
@@ -4941,18 +4076,6 @@
       "name": "z990.2",
       "typename": "z990.2-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "hfpm"
       ],
       "static": false,
       "migration-safe": true
@@ -4961,40 +4084,6 @@
       "name": "z14-base",
       "typename": "z14-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "dfppc",
-        "tsi",
-        "sema",
-        "minste2",
-        "eec",
-        "dfpzc",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "opc",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "csske",
-        "asnlxr",
-        "gen13ptff",
-        "tods",
-        "type"
       ],
       "static": true,
       "migration-safe": true
@@ -5003,18 +4092,6 @@
       "name": "z890.2-base",
       "typename": "z890.2-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "hfpm"
       ],
       "static": true,
       "migration-safe": true
@@ -5023,122 +4100,6 @@
       "name": "z196",
       "typename": "z196-s390x-cpu",
       "unavailable-features": [
-        "pcc-xts-eaes-256",
-        "pcc-xts-eaes-128",
-        "pcc-xts-aes-256",
-        "pcc-xts-aes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-eaes-192",
-        "pcc-cmac-eaes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-aes-192",
-        "pcc-cmac-aes-128",
-        "pcc-cmac-etdea-192",
-        "pcc-cmac-etdea-128",
-        "pcc-cmac-edea",
-        "pcc-cmac-tdea-192",
-        "pcc-cmac-tdea-128",
-        "pcc-cmac-dea",
-        "kmo-eaes-256",
-        "kmo-eaes-192",
-        "kmo-eaes-128",
-        "kmo-aes-256",
-        "kmo-aes-192",
-        "kmo-aes-128",
-        "kmo-etdea-192",
-        "kmo-etdea-128",
-        "kmo-edea",
-        "kmo-tdea-192",
-        "kmo-tdea-128",
-        "kmo-dea",
-        "kmf-eaes-256",
-        "kmf-eaes-192",
-        "kmf-eaes-128",
-        "kmf-aes-256",
-        "kmf-aes-192",
-        "kmf-aes-128",
-        "kmf-etdea-192",
-        "kmf-etdea-128",
-        "kmf-edea",
-        "kmf-tdea-192",
-        "kmf-tdea-128",
-        "kmf-dea",
-        "kmctr-eaes-256",
-        "kmctr-eaes-192",
-        "kmctr-eaes-128",
-        "kmctr-aes-256",
-        "kmctr-aes-192",
-        "kmctr-aes-128",
-        "kmctr-etdea-192",
-        "kmctr-etdea-128",
-        "kmctr-edea",
-        "kmctr-tdea-192",
-        "kmctr-tdea-128",
-        "kmctr-dea",
-        "pckmo-aes-256",
-        "pckmo-aes-192",
-        "pckmo-aes-128",
-        "pckmo-etdea-192",
-        "pckmo-etdea-128",
-        "pckmo-edea",
-        "klmd-sha-1",
-        "kimd-ghash",
-        "kimd-sha-1",
-        "km-xts-eaes-256",
-        "km-xts-eaes-128",
-        "km-xts-aes-256",
-        "km-xts-aes-128",
-        "km-eaes-256",
-        "km-eaes-192",
-        "km-eaes-128",
-        "km-etdea-192",
-        "km-etdea-128",
-        "km-edea",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-eaes-256",
-        "kmc-eaes-192",
-        "kmc-eaes-128",
-        "kmc-etdea-192",
-        "kmc-etdea-128",
-        "kmc-edea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-eaes-256",
-        "kmac-eaes-192",
-        "kmac-eaes-128",
-        "kmac-aes-256",
-        "kmac-aes-192",
-        "kmac-aes-128",
-        "kmac-etdea-192",
-        "kmac-etdea-128",
-        "kmac-edea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "aefsi",
-        "sthyi",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "ipter",
-        "csske",
-        "edat",
-        "asnlxr",
-        "msa2",
-        "msa1",
-        "tods"
       ],
       "static": false,
       "migration-safe": true
@@ -5147,32 +4108,6 @@
       "name": "z10EC",
       "typename": "z10EC-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "sthyi",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "csske",
-        "edat",
-        "asnlxr",
-        "msa2",
-        "msa1",
-        "tods"
       ],
       "static": false,
       "migration-safe": true
@@ -5181,134 +4116,6 @@
       "name": "z13s",
       "typename": "z13s-s390x-cpu",
       "unavailable-features": [
-        "ppno-sha-512-drng",
-        "pcc-xts-eaes-256",
-        "pcc-xts-eaes-128",
-        "pcc-xts-aes-256",
-        "pcc-xts-aes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-eaes-192",
-        "pcc-cmac-eaes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-aes-192",
-        "pcc-cmac-aes-128",
-        "pcc-cmac-etdea-192",
-        "pcc-cmac-etdea-128",
-        "pcc-cmac-edea",
-        "pcc-cmac-tdea-192",
-        "pcc-cmac-tdea-128",
-        "pcc-cmac-dea",
-        "kmo-eaes-256",
-        "kmo-eaes-192",
-        "kmo-eaes-128",
-        "kmo-aes-256",
-        "kmo-aes-192",
-        "kmo-aes-128",
-        "kmo-etdea-192",
-        "kmo-etdea-128",
-        "kmo-edea",
-        "kmo-tdea-192",
-        "kmo-tdea-128",
-        "kmo-dea",
-        "kmf-eaes-256",
-        "kmf-eaes-192",
-        "kmf-eaes-128",
-        "kmf-aes-256",
-        "kmf-aes-192",
-        "kmf-aes-128",
-        "kmf-etdea-192",
-        "kmf-etdea-128",
-        "kmf-edea",
-        "kmf-tdea-192",
-        "kmf-tdea-128",
-        "kmf-dea",
-        "kmctr-eaes-256",
-        "kmctr-eaes-192",
-        "kmctr-eaes-128",
-        "kmctr-aes-256",
-        "kmctr-aes-192",
-        "kmctr-aes-128",
-        "kmctr-etdea-192",
-        "kmctr-etdea-128",
-        "kmctr-edea",
-        "kmctr-tdea-192",
-        "kmctr-tdea-128",
-        "kmctr-dea",
-        "pckmo-aes-256",
-        "pckmo-aes-192",
-        "pckmo-aes-128",
-        "pckmo-etdea-192",
-        "pckmo-etdea-128",
-        "pckmo-edea",
-        "klmd-sha-1",
-        "kimd-ghash",
-        "kimd-sha-1",
-        "km-xts-eaes-256",
-        "km-xts-eaes-128",
-        "km-xts-aes-256",
-        "km-xts-aes-128",
-        "km-eaes-256",
-        "km-eaes-192",
-        "km-eaes-128",
-        "km-etdea-192",
-        "km-etdea-128",
-        "km-edea",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-eaes-256",
-        "kmc-eaes-192",
-        "kmc-eaes-128",
-        "kmc-etdea-192",
-        "kmc-etdea-128",
-        "kmc-edea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-eaes-256",
-        "kmac-eaes-192",
-        "kmac-eaes-128",
-        "kmac-aes-256",
-        "kmac-aes-192",
-        "kmac-aes-128",
-        "kmac-etdea-192",
-        "kmac-etdea-128",
-        "kmac-edea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "esop",
-        "sea_esop2",
-        "vx",
-        "dfppc",
-        "edat2",
-        "aefsi",
-        "sthyi",
-        "te",
-        "ri",
-        "cte",
-        "dfpzc",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "ipter",
-        "csske",
-        "edat",
-        "asnlxr",
-        "msa2",
-        "msa1",
-        "gen13ptff",
-        "tods",
-        "type"
       ],
       "static": false,
       "migration-safe": true
@@ -5325,32 +4132,6 @@
       "name": "z10EC.3",
       "typename": "z10EC.3-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "sthyi",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "csske",
-        "edat",
-        "asnlxr",
-        "msa2",
-        "msa1",
-        "tods"
       ],
       "static": false,
       "migration-safe": true
@@ -5359,27 +4140,6 @@
       "name": "z10EC.2-base",
       "typename": "z10EC.2-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "csske",
-        "asnlxr",
-        "tods"
       ],
       "static": true,
       "migration-safe": true
@@ -5388,31 +4148,6 @@
       "name": "z114-base",
       "typename": "z114-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "csske",
-        "asnlxr",
-        "tods"
       ],
       "static": true,
       "migration-safe": true
@@ -5421,18 +4156,6 @@
       "name": "z990.2-base",
       "typename": "z990.2-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "hfpm"
       ],
       "static": true,
       "migration-safe": true
@@ -5441,22 +4164,6 @@
       "name": "z9EC.2-base",
       "typename": "z9EC.2-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "hfpue",
-        "hfpm",
-        "asnlxr",
-        "tods"
       ],
       "static": true,
       "migration-safe": true
@@ -5465,18 +4172,6 @@
       "name": "z890.3",
       "typename": "z890.3-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "hfpm"
       ],
       "static": false,
       "migration-safe": true
@@ -5493,25 +4188,6 @@
       "name": "z9BC.2",
       "typename": "z9BC.2-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "sthyi",
-        "hfpue",
-        "hfpm",
-        "asnlxr",
-        "msa1",
-        "tods"
       ],
       "static": false,
       "migration-safe": true
@@ -5520,32 +4196,6 @@
       "name": "z10BC",
       "typename": "z10BC-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "sthyi",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "csske",
-        "edat",
-        "asnlxr",
-        "msa2",
-        "msa1",
-        "tods"
       ],
       "static": false,
       "migration-safe": true
@@ -5554,18 +4204,6 @@
       "name": "z990.5",
       "typename": "z990.5-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "hfpm"
       ],
       "static": false,
       "migration-safe": true
@@ -5574,129 +4212,6 @@
       "name": "zEC12.2",
       "typename": "zEC12.2-s390x-cpu",
       "unavailable-features": [
-        "pcc-xts-eaes-256",
-        "pcc-xts-eaes-128",
-        "pcc-xts-aes-256",
-        "pcc-xts-aes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-eaes-192",
-        "pcc-cmac-eaes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-aes-192",
-        "pcc-cmac-aes-128",
-        "pcc-cmac-etdea-192",
-        "pcc-cmac-etdea-128",
-        "pcc-cmac-edea",
-        "pcc-cmac-tdea-192",
-        "pcc-cmac-tdea-128",
-        "pcc-cmac-dea",
-        "kmo-eaes-256",
-        "kmo-eaes-192",
-        "kmo-eaes-128",
-        "kmo-aes-256",
-        "kmo-aes-192",
-        "kmo-aes-128",
-        "kmo-etdea-192",
-        "kmo-etdea-128",
-        "kmo-edea",
-        "kmo-tdea-192",
-        "kmo-tdea-128",
-        "kmo-dea",
-        "kmf-eaes-256",
-        "kmf-eaes-192",
-        "kmf-eaes-128",
-        "kmf-aes-256",
-        "kmf-aes-192",
-        "kmf-aes-128",
-        "kmf-etdea-192",
-        "kmf-etdea-128",
-        "kmf-edea",
-        "kmf-tdea-192",
-        "kmf-tdea-128",
-        "kmf-dea",
-        "kmctr-eaes-256",
-        "kmctr-eaes-192",
-        "kmctr-eaes-128",
-        "kmctr-aes-256",
-        "kmctr-aes-192",
-        "kmctr-aes-128",
-        "kmctr-etdea-192",
-        "kmctr-etdea-128",
-        "kmctr-edea",
-        "kmctr-tdea-192",
-        "kmctr-tdea-128",
-        "kmctr-dea",
-        "pckmo-aes-256",
-        "pckmo-aes-192",
-        "pckmo-aes-128",
-        "pckmo-etdea-192",
-        "pckmo-etdea-128",
-        "pckmo-edea",
-        "klmd-sha-1",
-        "kimd-ghash",
-        "kimd-sha-1",
-        "km-xts-eaes-256",
-        "km-xts-eaes-128",
-        "km-xts-aes-256",
-        "km-xts-aes-128",
-        "km-eaes-256",
-        "km-eaes-192",
-        "km-eaes-128",
-        "km-etdea-192",
-        "km-etdea-128",
-        "km-edea",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-eaes-256",
-        "kmc-eaes-192",
-        "kmc-eaes-128",
-        "kmc-etdea-192",
-        "kmc-etdea-128",
-        "kmc-edea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-eaes-256",
-        "kmac-eaes-192",
-        "kmac-eaes-128",
-        "kmac-aes-256",
-        "kmac-aes-192",
-        "kmac-aes-128",
-        "kmac-etdea-192",
-        "kmac-etdea-128",
-        "kmac-edea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "esop",
-        "sea_esop2",
-        "edat2",
-        "aefsi",
-        "sthyi",
-        "te",
-        "ri",
-        "cte",
-        "dfpzc",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "ipter",
-        "csske",
-        "edat",
-        "asnlxr",
-        "msa2",
-        "msa1",
-        "tods"
       ],
       "static": false,
       "migration-safe": true
@@ -5705,27 +4220,6 @@
       "name": "z10EC-base",
       "typename": "z10EC-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "csske",
-        "asnlxr",
-        "tods"
       ],
       "static": true,
       "migration-safe": true
@@ -5734,22 +4228,6 @@
       "name": "z9EC-base",
       "typename": "z9EC-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "hfpue",
-        "hfpm",
-        "asnlxr",
-        "tods"
       ],
       "static": true,
       "migration-safe": true
@@ -5758,22 +4236,6 @@
       "name": "z9EC.3-base",
       "typename": "z9EC.3-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "hfpue",
-        "hfpm",
-        "asnlxr",
-        "tods"
       ],
       "static": true,
       "migration-safe": true
@@ -5782,129 +4244,6 @@
       "name": "zEC12",
       "typename": "zEC12-s390x-cpu",
       "unavailable-features": [
-        "pcc-xts-eaes-256",
-        "pcc-xts-eaes-128",
-        "pcc-xts-aes-256",
-        "pcc-xts-aes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-eaes-192",
-        "pcc-cmac-eaes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-aes-192",
-        "pcc-cmac-aes-128",
-        "pcc-cmac-etdea-192",
-        "pcc-cmac-etdea-128",
-        "pcc-cmac-edea",
-        "pcc-cmac-tdea-192",
-        "pcc-cmac-tdea-128",
-        "pcc-cmac-dea",
-        "kmo-eaes-256",
-        "kmo-eaes-192",
-        "kmo-eaes-128",
-        "kmo-aes-256",
-        "kmo-aes-192",
-        "kmo-aes-128",
-        "kmo-etdea-192",
-        "kmo-etdea-128",
-        "kmo-edea",
-        "kmo-tdea-192",
-        "kmo-tdea-128",
-        "kmo-dea",
-        "kmf-eaes-256",
-        "kmf-eaes-192",
-        "kmf-eaes-128",
-        "kmf-aes-256",
-        "kmf-aes-192",
-        "kmf-aes-128",
-        "kmf-etdea-192",
-        "kmf-etdea-128",
-        "kmf-edea",
-        "kmf-tdea-192",
-        "kmf-tdea-128",
-        "kmf-dea",
-        "kmctr-eaes-256",
-        "kmctr-eaes-192",
-        "kmctr-eaes-128",
-        "kmctr-aes-256",
-        "kmctr-aes-192",
-        "kmctr-aes-128",
-        "kmctr-etdea-192",
-        "kmctr-etdea-128",
-        "kmctr-edea",
-        "kmctr-tdea-192",
-        "kmctr-tdea-128",
-        "kmctr-dea",
-        "pckmo-aes-256",
-        "pckmo-aes-192",
-        "pckmo-aes-128",
-        "pckmo-etdea-192",
-        "pckmo-etdea-128",
-        "pckmo-edea",
-        "klmd-sha-1",
-        "kimd-ghash",
-        "kimd-sha-1",
-        "km-xts-eaes-256",
-        "km-xts-eaes-128",
-        "km-xts-aes-256",
-        "km-xts-aes-128",
-        "km-eaes-256",
-        "km-eaes-192",
-        "km-eaes-128",
-        "km-etdea-192",
-        "km-etdea-128",
-        "km-edea",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-eaes-256",
-        "kmc-eaes-192",
-        "kmc-eaes-128",
-        "kmc-etdea-192",
-        "kmc-etdea-128",
-        "kmc-edea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-eaes-256",
-        "kmac-eaes-192",
-        "kmac-eaes-128",
-        "kmac-aes-256",
-        "kmac-aes-192",
-        "kmac-aes-128",
-        "kmac-etdea-192",
-        "kmac-etdea-128",
-        "kmac-edea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "esop",
-        "sea_esop2",
-        "edat2",
-        "aefsi",
-        "sthyi",
-        "te",
-        "ri",
-        "cte",
-        "dfpzc",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "ipter",
-        "csske",
-        "edat",
-        "asnlxr",
-        "msa2",
-        "msa1",
-        "tods"
       ],
       "static": false,
       "migration-safe": true
@@ -5913,18 +4252,6 @@
       "name": "z990.5-base",
       "typename": "z990.5-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "hfpm"
       ],
       "static": true,
       "migration-safe": true
@@ -5933,27 +4260,6 @@
       "name": "z10BC-base",
       "typename": "z10BC-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "csske",
-        "asnlxr",
-        "tods"
       ],
       "static": true,
       "migration-safe": true
@@ -5970,134 +4276,6 @@
       "name": "z13.2",
       "typename": "z13.2-s390x-cpu",
       "unavailable-features": [
-        "ppno-sha-512-drng",
-        "pcc-xts-eaes-256",
-        "pcc-xts-eaes-128",
-        "pcc-xts-aes-256",
-        "pcc-xts-aes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-eaes-192",
-        "pcc-cmac-eaes-128",
-        "pcc-cmac-eaes-256",
-        "pcc-cmac-aes-192",
-        "pcc-cmac-aes-128",
-        "pcc-cmac-etdea-192",
-        "pcc-cmac-etdea-128",
-        "pcc-cmac-edea",
-        "pcc-cmac-tdea-192",
-        "pcc-cmac-tdea-128",
-        "pcc-cmac-dea",
-        "kmo-eaes-256",
-        "kmo-eaes-192",
-        "kmo-eaes-128",
-        "kmo-aes-256",
-        "kmo-aes-192",
-        "kmo-aes-128",
-        "kmo-etdea-192",
-        "kmo-etdea-128",
-        "kmo-edea",
-        "kmo-tdea-192",
-        "kmo-tdea-128",
-        "kmo-dea",
-        "kmf-eaes-256",
-        "kmf-eaes-192",
-        "kmf-eaes-128",
-        "kmf-aes-256",
-        "kmf-aes-192",
-        "kmf-aes-128",
-        "kmf-etdea-192",
-        "kmf-etdea-128",
-        "kmf-edea",
-        "kmf-tdea-192",
-        "kmf-tdea-128",
-        "kmf-dea",
-        "kmctr-eaes-256",
-        "kmctr-eaes-192",
-        "kmctr-eaes-128",
-        "kmctr-aes-256",
-        "kmctr-aes-192",
-        "kmctr-aes-128",
-        "kmctr-etdea-192",
-        "kmctr-etdea-128",
-        "kmctr-edea",
-        "kmctr-tdea-192",
-        "kmctr-tdea-128",
-        "kmctr-dea",
-        "pckmo-aes-256",
-        "pckmo-aes-192",
-        "pckmo-aes-128",
-        "pckmo-etdea-192",
-        "pckmo-etdea-128",
-        "pckmo-edea",
-        "klmd-sha-1",
-        "kimd-ghash",
-        "kimd-sha-1",
-        "km-xts-eaes-256",
-        "km-xts-eaes-128",
-        "km-xts-aes-256",
-        "km-xts-aes-128",
-        "km-eaes-256",
-        "km-eaes-192",
-        "km-eaes-128",
-        "km-etdea-192",
-        "km-etdea-128",
-        "km-edea",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-eaes-256",
-        "kmc-eaes-192",
-        "kmc-eaes-128",
-        "kmc-etdea-192",
-        "kmc-etdea-128",
-        "kmc-edea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-eaes-256",
-        "kmac-eaes-192",
-        "kmac-eaes-128",
-        "kmac-aes-256",
-        "kmac-aes-192",
-        "kmac-aes-128",
-        "kmac-etdea-192",
-        "kmac-etdea-128",
-        "kmac-edea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "esop",
-        "sea_esop2",
-        "vx",
-        "dfppc",
-        "edat2",
-        "aefsi",
-        "sthyi",
-        "te",
-        "ri",
-        "cte",
-        "dfpzc",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "ipter",
-        "csske",
-        "edat",
-        "asnlxr",
-        "msa2",
-        "msa1",
-        "gen13ptff",
-        "tods",
-        "type"
       ],
       "static": false,
       "migration-safe": true
@@ -6106,18 +4284,6 @@
       "name": "z890.3-base",
       "typename": "z890.3-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "hfpm"
       ],
       "static": true,
       "migration-safe": true
@@ -6126,32 +4292,6 @@
       "name": "zBC12-base",
       "typename": "zBC12-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "dfpzc",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "csske",
-        "asnlxr",
-        "tods"
       ],
       "static": true,
       "migration-safe": true
@@ -6160,35 +4300,6 @@
       "name": "z13.2-base",
       "typename": "z13.2-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "dfppc",
-        "dfpzc",
-        "cmpsceh",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "fpe",
-        "emon",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "nonqks",
-        "csske",
-        "asnlxr",
-        "gen13ptff",
-        "tods",
-        "type"
       ],
       "static": true,
       "migration-safe": true
@@ -6197,18 +4308,6 @@
       "name": "z990-base",
       "typename": "z990-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "hfpm"
       ],
       "static": true,
       "migration-safe": true
@@ -6217,32 +4316,6 @@
       "name": "z10EC.2",
       "typename": "z10EC.2-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "sthyi",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "csske",
-        "edat",
-        "asnlxr",
-        "msa2",
-        "msa1",
-        "tods"
       ],
       "static": false,
       "migration-safe": true
@@ -6251,25 +4324,6 @@
       "name": "z9BC",
       "typename": "z9BC-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "cmm",
-        "dateh2",
-        "sthyi",
-        "hfpue",
-        "hfpm",
-        "asnlxr",
-        "msa1",
-        "tods"
       ],
       "static": false,
       "migration-safe": true
@@ -6278,27 +4332,6 @@
       "name": "z10EC.3-base",
       "typename": "z10EC.3-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "dateh2",
-        "pfpo",
-        "dfphp",
-        "dfp",
-        "parseh",
-        "hfpue",
-        "hfpm",
-        "csske",
-        "asnlxr",
-        "tods"
       ],
       "static": true,
       "migration-safe": true
@@ -6307,76 +4340,44 @@
       "name": "z990.3-base",
       "typename": "z990.3-base-s390x-cpu",
       "unavailable-features": [
-        "klmd-sha-1",
-        "kimd-sha-1",
-        "km-tdea-192",
-        "km-tdea-128",
-        "km-dea",
-        "kmc-tdea-192",
-        "kmc-tdea-128",
-        "kmc-dea",
-        "kmac-tdea-192",
-        "kmac-tdea-128",
-        "kmac-dea",
-        "hfpm"
       ],
       "static": true,
       "migration-safe": true
     }
   ],
-  "id": "libvirt-36"
+  "id": "libvirt-32"
+}
+
+{
+  "execute": "query-tpm-models",
+  "id": "libvirt-33"
 }
 
 {
   "return": [
   ],
-  "id": "libvirt-37"
+  "id": "libvirt-33"
+}
+
+{
+  "execute": "query-tpm-types",
+  "id": "libvirt-34"
 }
 
 {
   "return": [
     "emulator"
   ],
-  "id": "libvirt-38"
+  "id": "libvirt-34"
+}
+
+{
+  "execute": "query-command-line-options",
+  "id": "libvirt-35"
 }
 
 {
   "return": [
-    {
-      "parameters": [
-        {
-          "name": "timeout",
-          "help": "Request timeout in seconds (default 0 = no timeout)",
-          "type": "number"
-        },
-        {
-          "name": "initiator-name",
-          "help": "Initiator iqn name to use when connecting",
-          "type": "string"
-        },
-        {
-          "name": "header-digest",
-          "help": "HeaderDigest setting. {CRC32C|CRC32C-NONE|NONE-CRC32C|NONE}",
-          "type": "string"
-        },
-        {
-          "name": "password-secret",
-          "help": "ID of the secret providing password for CHAP authentication to target",
-          "type": "string"
-        },
-        {
-          "name": "password",
-          "help": "password for CHAP authentication to target",
-          "type": "string"
-        },
-        {
-          "name": "user",
-          "help": "username for CHAP authentication to target",
-          "type": "string"
-        }
-      ],
-      "option": "iscsi"
-    },
     {
       "parameters": [
         {
@@ -7039,6 +5040,10 @@
     {
       "parameters": [
         {
+          "name": "x-oob",
+          "type": "boolean"
+        },
+        {
           "name": "pretty",
           "type": "boolean"
         },
@@ -7493,7 +5498,12 @@
       "option": "drive"
     }
   ],
-  "id": "libvirt-39"
+  "id": "libvirt-35"
+}
+
+{
+  "execute": "query-migrate-capabilities",
+  "id": "libvirt-36"
 }
 
 {
@@ -7555,7 +5565,12 @@
       "capability": "dirty-bitmaps"
     }
   ],
-  "id": "libvirt-40"
+  "id": "libvirt-36"
+}
+
+{
+  "execute": "query-qmp-schema",
+  "id": "libvirt-37"
 }
 
 {
@@ -15184,9 +13199,9 @@
           "type": "int"
         },
         {
-          "name": "static",
+          "name": "preallocation",
           "default": null,
-          "type": "bool"
+          "type": "356"
         }
       ],
       "meta-type": "object"
@@ -18923,11 +16938,2758 @@
       "meta-type": "object"
     }
   ],
-  "id": "libvirt-41"
+  "id": "libvirt-37"
 }
 
 {
-  "id": "libvirt-42",
+  "execute": "query-cpu-model-expansion",
+  "arguments": {
+    "type": "static",
+    "model": {
+      "name": "host"
+    }
+  },
+  "id": "libvirt-38"
+}
+
+{
+  "return": {
+    "model": {
+      "name": "z14-base",
+      "props": {
+        "aen": true,
+        "aefsi": true,
+        "msa8": true,
+        "msa7": true,
+        "msa6": true,
+        "msa5": true,
+        "msa4": true,
+        "msa3": true,
+        "msa2": true,
+        "msa1": true,
+        "sthyi": true,
+        "edat": true,
+        "ri": true,
+        "edat2": true,
+        "vx": true,
+        "ipter": true,
+        "vxeh": true,
+        "vxpd": true,
+        "esop": true,
+        "iep": true,
+        "cte": true,
+        "gs": true,
+        "ppa15": true,
+        "zpci": true,
+        "sea_esop2": true,
+        "te": true,
+        "cmm": true
+      }
+    }
+  },
+  "id": "libvirt-38"
+}
+
+{
+  "execute": "query-cpu-model-expansion",
+  "arguments": {
+    "type": "static",
+    "model": {
+      "name": "host",
+      "props": {
+        "migratable": false
+      }
+    }
+  },
+  "id": "libvirt-39"
+}
+
+{
+  "id": "libvirt-39",
+  "error": {
+    "class": "GenericError",
+    "desc": "Property '.migratable' not found"
+  }
+}
+
+{
+  "execute": "qmp_capabilities",
+  "id": "libvirt-1"
+}
+
+{
+  "return": {
+  },
+  "id": "libvirt-1"
+}
+
+{
+  "execute": "query-cpu-definitions",
+  "id": "libvirt-2"
+}
+
+{
+  "return": [
+    {
+      "name": "z890.2",
+      "typename": "z890.2-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "hfpm"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z990.4",
+      "typename": "z990.4-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "hfpm"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z10BC.2",
+      "typename": "z10BC.2-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "sthyi",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "csske",
+        "edat",
+        "asnlxr",
+        "msa2",
+        "msa1",
+        "tods"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z196.2",
+      "typename": "z196.2-s390x-cpu",
+      "unavailable-features": [
+        "pcc-xts-eaes-256",
+        "pcc-xts-eaes-128",
+        "pcc-xts-aes-256",
+        "pcc-xts-aes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-eaes-192",
+        "pcc-cmac-eaes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-aes-192",
+        "pcc-cmac-aes-128",
+        "pcc-cmac-etdea-192",
+        "pcc-cmac-etdea-128",
+        "pcc-cmac-edea",
+        "pcc-cmac-tdea-192",
+        "pcc-cmac-tdea-128",
+        "pcc-cmac-dea",
+        "kmo-eaes-256",
+        "kmo-eaes-192",
+        "kmo-eaes-128",
+        "kmo-aes-256",
+        "kmo-aes-192",
+        "kmo-aes-128",
+        "kmo-etdea-192",
+        "kmo-etdea-128",
+        "kmo-edea",
+        "kmo-tdea-192",
+        "kmo-tdea-128",
+        "kmo-dea",
+        "kmf-eaes-256",
+        "kmf-eaes-192",
+        "kmf-eaes-128",
+        "kmf-aes-256",
+        "kmf-aes-192",
+        "kmf-aes-128",
+        "kmf-etdea-192",
+        "kmf-etdea-128",
+        "kmf-edea",
+        "kmf-tdea-192",
+        "kmf-tdea-128",
+        "kmf-dea",
+        "kmctr-eaes-256",
+        "kmctr-eaes-192",
+        "kmctr-eaes-128",
+        "kmctr-aes-256",
+        "kmctr-aes-192",
+        "kmctr-aes-128",
+        "kmctr-etdea-192",
+        "kmctr-etdea-128",
+        "kmctr-edea",
+        "kmctr-tdea-192",
+        "kmctr-tdea-128",
+        "kmctr-dea",
+        "pckmo-aes-256",
+        "pckmo-aes-192",
+        "pckmo-aes-128",
+        "pckmo-etdea-192",
+        "pckmo-etdea-128",
+        "pckmo-edea",
+        "klmd-sha-1",
+        "kimd-ghash",
+        "kimd-sha-1",
+        "km-xts-eaes-256",
+        "km-xts-eaes-128",
+        "km-xts-aes-256",
+        "km-xts-aes-128",
+        "km-eaes-256",
+        "km-eaes-192",
+        "km-eaes-128",
+        "km-etdea-192",
+        "km-etdea-128",
+        "km-edea",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-eaes-256",
+        "kmc-eaes-192",
+        "kmc-eaes-128",
+        "kmc-etdea-192",
+        "kmc-etdea-128",
+        "kmc-edea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-eaes-256",
+        "kmac-eaes-192",
+        "kmac-eaes-128",
+        "kmac-aes-256",
+        "kmac-aes-192",
+        "kmac-aes-128",
+        "kmac-etdea-192",
+        "kmac-etdea-128",
+        "kmac-edea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "aefsi",
+        "sthyi",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "ipter",
+        "csske",
+        "edat",
+        "asnlxr",
+        "msa2",
+        "msa1",
+        "tods"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z14",
+      "typename": "z14-s390x-cpu",
+      "unavailable-features": [
+        "ppno-sha-512-drng",
+        "pcc-xts-eaes-256",
+        "pcc-xts-eaes-128",
+        "pcc-xts-aes-256",
+        "pcc-xts-aes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-eaes-192",
+        "pcc-cmac-eaes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-aes-192",
+        "pcc-cmac-aes-128",
+        "pcc-cmac-etdea-192",
+        "pcc-cmac-etdea-128",
+        "pcc-cmac-edea",
+        "pcc-cmac-tdea-192",
+        "pcc-cmac-tdea-128",
+        "pcc-cmac-dea",
+        "kmo-eaes-256",
+        "kmo-eaes-192",
+        "kmo-eaes-128",
+        "kmo-aes-256",
+        "kmo-aes-192",
+        "kmo-aes-128",
+        "kmo-etdea-192",
+        "kmo-etdea-128",
+        "kmo-edea",
+        "kmo-tdea-192",
+        "kmo-tdea-128",
+        "kmo-dea",
+        "kmf-eaes-256",
+        "kmf-eaes-192",
+        "kmf-eaes-128",
+        "kmf-aes-256",
+        "kmf-aes-192",
+        "kmf-aes-128",
+        "kmf-etdea-192",
+        "kmf-etdea-128",
+        "kmf-edea",
+        "kmf-tdea-192",
+        "kmf-tdea-128",
+        "kmf-dea",
+        "kmctr-eaes-256",
+        "kmctr-eaes-192",
+        "kmctr-eaes-128",
+        "kmctr-aes-256",
+        "kmctr-aes-192",
+        "kmctr-aes-128",
+        "kmctr-etdea-192",
+        "kmctr-etdea-128",
+        "kmctr-edea",
+        "kmctr-tdea-192",
+        "kmctr-tdea-128",
+        "kmctr-dea",
+        "pckmo-aes-256",
+        "pckmo-aes-192",
+        "pckmo-aes-128",
+        "pckmo-etdea-192",
+        "pckmo-etdea-128",
+        "pckmo-edea",
+        "klmd-sha-1",
+        "kimd-ghash",
+        "kimd-sha-1",
+        "km-xts-eaes-256",
+        "km-xts-eaes-128",
+        "km-xts-aes-256",
+        "km-xts-aes-128",
+        "km-eaes-256",
+        "km-eaes-192",
+        "km-eaes-128",
+        "km-etdea-192",
+        "km-etdea-128",
+        "km-edea",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-eaes-256",
+        "kmc-eaes-192",
+        "kmc-eaes-128",
+        "kmc-etdea-192",
+        "kmc-etdea-128",
+        "kmc-edea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-eaes-256",
+        "kmac-eaes-192",
+        "kmac-eaes-128",
+        "kmac-aes-256",
+        "kmac-aes-192",
+        "kmac-aes-128",
+        "kmac-etdea-192",
+        "kmac-etdea-128",
+        "kmac-edea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "esop",
+        "vxeh",
+        "vxpd",
+        "gs",
+        "sea_esop2",
+        "iep",
+        "vx",
+        "dfppc",
+        "edat2",
+        "aefsi",
+        "sthyi",
+        "te",
+        "ri",
+        "tsi",
+        "sema",
+        "minste2",
+        "eec",
+        "cte",
+        "dfpzc",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "opc",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "ipter",
+        "csske",
+        "edat",
+        "asnlxr",
+        "msa8",
+        "msa7",
+        "msa6",
+        "msa2",
+        "msa1",
+        "gen13ptff",
+        "tods",
+        "type"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z9BC-base",
+      "typename": "z9BC-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "hfpue",
+        "hfpm",
+        "asnlxr",
+        "tods"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "zEC12-base",
+      "typename": "zEC12-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "dfpzc",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "csske",
+        "asnlxr",
+        "tods"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z196-base",
+      "typename": "z196-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "csske",
+        "asnlxr",
+        "tods"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z13-base",
+      "typename": "z13-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "dfppc",
+        "dfpzc",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "csske",
+        "asnlxr",
+        "gen13ptff",
+        "tods",
+        "type"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z990.3",
+      "typename": "z990.3-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "hfpm"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "host",
+      "typename": "host-s390x-cpu",
+      "static": false,
+      "migration-safe": false
+    },
+    {
+      "name": "z9EC",
+      "typename": "z9EC-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "sthyi",
+        "hfpue",
+        "hfpm",
+        "asnlxr",
+        "msa1",
+        "tods"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "zBC12",
+      "typename": "zBC12-s390x-cpu",
+      "unavailable-features": [
+        "pcc-xts-eaes-256",
+        "pcc-xts-eaes-128",
+        "pcc-xts-aes-256",
+        "pcc-xts-aes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-eaes-192",
+        "pcc-cmac-eaes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-aes-192",
+        "pcc-cmac-aes-128",
+        "pcc-cmac-etdea-192",
+        "pcc-cmac-etdea-128",
+        "pcc-cmac-edea",
+        "pcc-cmac-tdea-192",
+        "pcc-cmac-tdea-128",
+        "pcc-cmac-dea",
+        "kmo-eaes-256",
+        "kmo-eaes-192",
+        "kmo-eaes-128",
+        "kmo-aes-256",
+        "kmo-aes-192",
+        "kmo-aes-128",
+        "kmo-etdea-192",
+        "kmo-etdea-128",
+        "kmo-edea",
+        "kmo-tdea-192",
+        "kmo-tdea-128",
+        "kmo-dea",
+        "kmf-eaes-256",
+        "kmf-eaes-192",
+        "kmf-eaes-128",
+        "kmf-aes-256",
+        "kmf-aes-192",
+        "kmf-aes-128",
+        "kmf-etdea-192",
+        "kmf-etdea-128",
+        "kmf-edea",
+        "kmf-tdea-192",
+        "kmf-tdea-128",
+        "kmf-dea",
+        "kmctr-eaes-256",
+        "kmctr-eaes-192",
+        "kmctr-eaes-128",
+        "kmctr-aes-256",
+        "kmctr-aes-192",
+        "kmctr-aes-128",
+        "kmctr-etdea-192",
+        "kmctr-etdea-128",
+        "kmctr-edea",
+        "kmctr-tdea-192",
+        "kmctr-tdea-128",
+        "kmctr-dea",
+        "pckmo-aes-256",
+        "pckmo-aes-192",
+        "pckmo-aes-128",
+        "pckmo-etdea-192",
+        "pckmo-etdea-128",
+        "pckmo-edea",
+        "klmd-sha-1",
+        "kimd-ghash",
+        "kimd-sha-1",
+        "km-xts-eaes-256",
+        "km-xts-eaes-128",
+        "km-xts-aes-256",
+        "km-xts-aes-128",
+        "km-eaes-256",
+        "km-eaes-192",
+        "km-eaes-128",
+        "km-etdea-192",
+        "km-etdea-128",
+        "km-edea",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-eaes-256",
+        "kmc-eaes-192",
+        "kmc-eaes-128",
+        "kmc-etdea-192",
+        "kmc-etdea-128",
+        "kmc-edea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-eaes-256",
+        "kmac-eaes-192",
+        "kmac-eaes-128",
+        "kmac-aes-256",
+        "kmac-aes-192",
+        "kmac-aes-128",
+        "kmac-etdea-192",
+        "kmac-etdea-128",
+        "kmac-edea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "esop",
+        "sea_esop2",
+        "edat2",
+        "aefsi",
+        "sthyi",
+        "te",
+        "ri",
+        "cte",
+        "dfpzc",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "ipter",
+        "csske",
+        "edat",
+        "asnlxr",
+        "msa2",
+        "msa1",
+        "tods"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z9EC.3",
+      "typename": "z9EC.3-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "sthyi",
+        "hfpue",
+        "hfpm",
+        "asnlxr",
+        "msa1",
+        "tods"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z196.2-base",
+      "typename": "z196.2-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "csske",
+        "asnlxr",
+        "tods"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "qemu",
+      "typename": "qemu-s390x-cpu",
+      "unavailable-features": [
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "zEC12.2-base",
+      "typename": "zEC12.2-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "dfpzc",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "csske",
+        "asnlxr",
+        "tods"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z800-base",
+      "typename": "z800-base-s390x-cpu",
+      "unavailable-features": [
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z9EC.2",
+      "typename": "z9EC.2-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "sthyi",
+        "hfpue",
+        "hfpm",
+        "asnlxr",
+        "msa1",
+        "tods"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z900.2-base",
+      "typename": "z900.2-base-s390x-cpu",
+      "unavailable-features": [
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z900.3",
+      "typename": "z900.3-s390x-cpu",
+      "unavailable-features": [
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z890-base",
+      "typename": "z890-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "hfpm"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z890",
+      "typename": "z890-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "hfpm"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z990.4-base",
+      "typename": "z990.4-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "hfpm"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z10BC.2-base",
+      "typename": "z10BC.2-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "csske",
+        "asnlxr",
+        "tods"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z900.2",
+      "typename": "z900.2-s390x-cpu",
+      "unavailable-features": [
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z9BC.2-base",
+      "typename": "z9BC.2-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "hfpue",
+        "hfpm",
+        "asnlxr",
+        "tods"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z800",
+      "typename": "z800-s390x-cpu",
+      "unavailable-features": [
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z114",
+      "typename": "z114-s390x-cpu",
+      "unavailable-features": [
+        "pcc-xts-eaes-256",
+        "pcc-xts-eaes-128",
+        "pcc-xts-aes-256",
+        "pcc-xts-aes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-eaes-192",
+        "pcc-cmac-eaes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-aes-192",
+        "pcc-cmac-aes-128",
+        "pcc-cmac-etdea-192",
+        "pcc-cmac-etdea-128",
+        "pcc-cmac-edea",
+        "pcc-cmac-tdea-192",
+        "pcc-cmac-tdea-128",
+        "pcc-cmac-dea",
+        "kmo-eaes-256",
+        "kmo-eaes-192",
+        "kmo-eaes-128",
+        "kmo-aes-256",
+        "kmo-aes-192",
+        "kmo-aes-128",
+        "kmo-etdea-192",
+        "kmo-etdea-128",
+        "kmo-edea",
+        "kmo-tdea-192",
+        "kmo-tdea-128",
+        "kmo-dea",
+        "kmf-eaes-256",
+        "kmf-eaes-192",
+        "kmf-eaes-128",
+        "kmf-aes-256",
+        "kmf-aes-192",
+        "kmf-aes-128",
+        "kmf-etdea-192",
+        "kmf-etdea-128",
+        "kmf-edea",
+        "kmf-tdea-192",
+        "kmf-tdea-128",
+        "kmf-dea",
+        "kmctr-eaes-256",
+        "kmctr-eaes-192",
+        "kmctr-eaes-128",
+        "kmctr-aes-256",
+        "kmctr-aes-192",
+        "kmctr-aes-128",
+        "kmctr-etdea-192",
+        "kmctr-etdea-128",
+        "kmctr-edea",
+        "kmctr-tdea-192",
+        "kmctr-tdea-128",
+        "kmctr-dea",
+        "pckmo-aes-256",
+        "pckmo-aes-192",
+        "pckmo-aes-128",
+        "pckmo-etdea-192",
+        "pckmo-etdea-128",
+        "pckmo-edea",
+        "klmd-sha-1",
+        "kimd-ghash",
+        "kimd-sha-1",
+        "km-xts-eaes-256",
+        "km-xts-eaes-128",
+        "km-xts-aes-256",
+        "km-xts-aes-128",
+        "km-eaes-256",
+        "km-eaes-192",
+        "km-eaes-128",
+        "km-etdea-192",
+        "km-etdea-128",
+        "km-edea",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-eaes-256",
+        "kmc-eaes-192",
+        "kmc-eaes-128",
+        "kmc-etdea-192",
+        "kmc-etdea-128",
+        "kmc-edea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-eaes-256",
+        "kmac-eaes-192",
+        "kmac-eaes-128",
+        "kmac-aes-256",
+        "kmac-aes-192",
+        "kmac-aes-128",
+        "kmac-etdea-192",
+        "kmac-etdea-128",
+        "kmac-edea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "aefsi",
+        "sthyi",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "ipter",
+        "csske",
+        "edat",
+        "asnlxr",
+        "msa2",
+        "msa1",
+        "tods"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z13",
+      "typename": "z13-s390x-cpu",
+      "unavailable-features": [
+        "ppno-sha-512-drng",
+        "pcc-xts-eaes-256",
+        "pcc-xts-eaes-128",
+        "pcc-xts-aes-256",
+        "pcc-xts-aes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-eaes-192",
+        "pcc-cmac-eaes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-aes-192",
+        "pcc-cmac-aes-128",
+        "pcc-cmac-etdea-192",
+        "pcc-cmac-etdea-128",
+        "pcc-cmac-edea",
+        "pcc-cmac-tdea-192",
+        "pcc-cmac-tdea-128",
+        "pcc-cmac-dea",
+        "kmo-eaes-256",
+        "kmo-eaes-192",
+        "kmo-eaes-128",
+        "kmo-aes-256",
+        "kmo-aes-192",
+        "kmo-aes-128",
+        "kmo-etdea-192",
+        "kmo-etdea-128",
+        "kmo-edea",
+        "kmo-tdea-192",
+        "kmo-tdea-128",
+        "kmo-dea",
+        "kmf-eaes-256",
+        "kmf-eaes-192",
+        "kmf-eaes-128",
+        "kmf-aes-256",
+        "kmf-aes-192",
+        "kmf-aes-128",
+        "kmf-etdea-192",
+        "kmf-etdea-128",
+        "kmf-edea",
+        "kmf-tdea-192",
+        "kmf-tdea-128",
+        "kmf-dea",
+        "kmctr-eaes-256",
+        "kmctr-eaes-192",
+        "kmctr-eaes-128",
+        "kmctr-aes-256",
+        "kmctr-aes-192",
+        "kmctr-aes-128",
+        "kmctr-etdea-192",
+        "kmctr-etdea-128",
+        "kmctr-edea",
+        "kmctr-tdea-192",
+        "kmctr-tdea-128",
+        "kmctr-dea",
+        "pckmo-aes-256",
+        "pckmo-aes-192",
+        "pckmo-aes-128",
+        "pckmo-etdea-192",
+        "pckmo-etdea-128",
+        "pckmo-edea",
+        "klmd-sha-1",
+        "kimd-ghash",
+        "kimd-sha-1",
+        "km-xts-eaes-256",
+        "km-xts-eaes-128",
+        "km-xts-aes-256",
+        "km-xts-aes-128",
+        "km-eaes-256",
+        "km-eaes-192",
+        "km-eaes-128",
+        "km-etdea-192",
+        "km-etdea-128",
+        "km-edea",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-eaes-256",
+        "kmc-eaes-192",
+        "kmc-eaes-128",
+        "kmc-etdea-192",
+        "kmc-etdea-128",
+        "kmc-edea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-eaes-256",
+        "kmac-eaes-192",
+        "kmac-eaes-128",
+        "kmac-aes-256",
+        "kmac-aes-192",
+        "kmac-aes-128",
+        "kmac-etdea-192",
+        "kmac-etdea-128",
+        "kmac-edea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "esop",
+        "sea_esop2",
+        "vx",
+        "dfppc",
+        "edat2",
+        "aefsi",
+        "sthyi",
+        "te",
+        "ri",
+        "cte",
+        "dfpzc",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "ipter",
+        "csske",
+        "edat",
+        "asnlxr",
+        "msa2",
+        "msa1",
+        "gen13ptff",
+        "tods",
+        "type"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z13s-base",
+      "typename": "z13s-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "dfppc",
+        "dfpzc",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "csske",
+        "asnlxr",
+        "gen13ptff",
+        "tods",
+        "type"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z990",
+      "typename": "z990-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "hfpm"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z990.2",
+      "typename": "z990.2-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "hfpm"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z14-base",
+      "typename": "z14-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "dfppc",
+        "tsi",
+        "sema",
+        "minste2",
+        "eec",
+        "dfpzc",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "opc",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "csske",
+        "asnlxr",
+        "gen13ptff",
+        "tods",
+        "type"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z890.2-base",
+      "typename": "z890.2-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "hfpm"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z196",
+      "typename": "z196-s390x-cpu",
+      "unavailable-features": [
+        "pcc-xts-eaes-256",
+        "pcc-xts-eaes-128",
+        "pcc-xts-aes-256",
+        "pcc-xts-aes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-eaes-192",
+        "pcc-cmac-eaes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-aes-192",
+        "pcc-cmac-aes-128",
+        "pcc-cmac-etdea-192",
+        "pcc-cmac-etdea-128",
+        "pcc-cmac-edea",
+        "pcc-cmac-tdea-192",
+        "pcc-cmac-tdea-128",
+        "pcc-cmac-dea",
+        "kmo-eaes-256",
+        "kmo-eaes-192",
+        "kmo-eaes-128",
+        "kmo-aes-256",
+        "kmo-aes-192",
+        "kmo-aes-128",
+        "kmo-etdea-192",
+        "kmo-etdea-128",
+        "kmo-edea",
+        "kmo-tdea-192",
+        "kmo-tdea-128",
+        "kmo-dea",
+        "kmf-eaes-256",
+        "kmf-eaes-192",
+        "kmf-eaes-128",
+        "kmf-aes-256",
+        "kmf-aes-192",
+        "kmf-aes-128",
+        "kmf-etdea-192",
+        "kmf-etdea-128",
+        "kmf-edea",
+        "kmf-tdea-192",
+        "kmf-tdea-128",
+        "kmf-dea",
+        "kmctr-eaes-256",
+        "kmctr-eaes-192",
+        "kmctr-eaes-128",
+        "kmctr-aes-256",
+        "kmctr-aes-192",
+        "kmctr-aes-128",
+        "kmctr-etdea-192",
+        "kmctr-etdea-128",
+        "kmctr-edea",
+        "kmctr-tdea-192",
+        "kmctr-tdea-128",
+        "kmctr-dea",
+        "pckmo-aes-256",
+        "pckmo-aes-192",
+        "pckmo-aes-128",
+        "pckmo-etdea-192",
+        "pckmo-etdea-128",
+        "pckmo-edea",
+        "klmd-sha-1",
+        "kimd-ghash",
+        "kimd-sha-1",
+        "km-xts-eaes-256",
+        "km-xts-eaes-128",
+        "km-xts-aes-256",
+        "km-xts-aes-128",
+        "km-eaes-256",
+        "km-eaes-192",
+        "km-eaes-128",
+        "km-etdea-192",
+        "km-etdea-128",
+        "km-edea",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-eaes-256",
+        "kmc-eaes-192",
+        "kmc-eaes-128",
+        "kmc-etdea-192",
+        "kmc-etdea-128",
+        "kmc-edea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-eaes-256",
+        "kmac-eaes-192",
+        "kmac-eaes-128",
+        "kmac-aes-256",
+        "kmac-aes-192",
+        "kmac-aes-128",
+        "kmac-etdea-192",
+        "kmac-etdea-128",
+        "kmac-edea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "aefsi",
+        "sthyi",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "ipter",
+        "csske",
+        "edat",
+        "asnlxr",
+        "msa2",
+        "msa1",
+        "tods"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z10EC",
+      "typename": "z10EC-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "sthyi",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "csske",
+        "edat",
+        "asnlxr",
+        "msa2",
+        "msa1",
+        "tods"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z13s",
+      "typename": "z13s-s390x-cpu",
+      "unavailable-features": [
+        "ppno-sha-512-drng",
+        "pcc-xts-eaes-256",
+        "pcc-xts-eaes-128",
+        "pcc-xts-aes-256",
+        "pcc-xts-aes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-eaes-192",
+        "pcc-cmac-eaes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-aes-192",
+        "pcc-cmac-aes-128",
+        "pcc-cmac-etdea-192",
+        "pcc-cmac-etdea-128",
+        "pcc-cmac-edea",
+        "pcc-cmac-tdea-192",
+        "pcc-cmac-tdea-128",
+        "pcc-cmac-dea",
+        "kmo-eaes-256",
+        "kmo-eaes-192",
+        "kmo-eaes-128",
+        "kmo-aes-256",
+        "kmo-aes-192",
+        "kmo-aes-128",
+        "kmo-etdea-192",
+        "kmo-etdea-128",
+        "kmo-edea",
+        "kmo-tdea-192",
+        "kmo-tdea-128",
+        "kmo-dea",
+        "kmf-eaes-256",
+        "kmf-eaes-192",
+        "kmf-eaes-128",
+        "kmf-aes-256",
+        "kmf-aes-192",
+        "kmf-aes-128",
+        "kmf-etdea-192",
+        "kmf-etdea-128",
+        "kmf-edea",
+        "kmf-tdea-192",
+        "kmf-tdea-128",
+        "kmf-dea",
+        "kmctr-eaes-256",
+        "kmctr-eaes-192",
+        "kmctr-eaes-128",
+        "kmctr-aes-256",
+        "kmctr-aes-192",
+        "kmctr-aes-128",
+        "kmctr-etdea-192",
+        "kmctr-etdea-128",
+        "kmctr-edea",
+        "kmctr-tdea-192",
+        "kmctr-tdea-128",
+        "kmctr-dea",
+        "pckmo-aes-256",
+        "pckmo-aes-192",
+        "pckmo-aes-128",
+        "pckmo-etdea-192",
+        "pckmo-etdea-128",
+        "pckmo-edea",
+        "klmd-sha-1",
+        "kimd-ghash",
+        "kimd-sha-1",
+        "km-xts-eaes-256",
+        "km-xts-eaes-128",
+        "km-xts-aes-256",
+        "km-xts-aes-128",
+        "km-eaes-256",
+        "km-eaes-192",
+        "km-eaes-128",
+        "km-etdea-192",
+        "km-etdea-128",
+        "km-edea",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-eaes-256",
+        "kmc-eaes-192",
+        "kmc-eaes-128",
+        "kmc-etdea-192",
+        "kmc-etdea-128",
+        "kmc-edea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-eaes-256",
+        "kmac-eaes-192",
+        "kmac-eaes-128",
+        "kmac-aes-256",
+        "kmac-aes-192",
+        "kmac-aes-128",
+        "kmac-etdea-192",
+        "kmac-etdea-128",
+        "kmac-edea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "esop",
+        "sea_esop2",
+        "vx",
+        "dfppc",
+        "edat2",
+        "aefsi",
+        "sthyi",
+        "te",
+        "ri",
+        "cte",
+        "dfpzc",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "ipter",
+        "csske",
+        "edat",
+        "asnlxr",
+        "msa2",
+        "msa1",
+        "gen13ptff",
+        "tods",
+        "type"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z900",
+      "typename": "z900-s390x-cpu",
+      "unavailable-features": [
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z10EC.3",
+      "typename": "z10EC.3-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "sthyi",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "csske",
+        "edat",
+        "asnlxr",
+        "msa2",
+        "msa1",
+        "tods"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z10EC.2-base",
+      "typename": "z10EC.2-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "csske",
+        "asnlxr",
+        "tods"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z114-base",
+      "typename": "z114-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "csske",
+        "asnlxr",
+        "tods"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z990.2-base",
+      "typename": "z990.2-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "hfpm"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z9EC.2-base",
+      "typename": "z9EC.2-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "hfpue",
+        "hfpm",
+        "asnlxr",
+        "tods"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z890.3",
+      "typename": "z890.3-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "hfpm"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z900.3-base",
+      "typename": "z900.3-base-s390x-cpu",
+      "unavailable-features": [
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z9BC.2",
+      "typename": "z9BC.2-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "sthyi",
+        "hfpue",
+        "hfpm",
+        "asnlxr",
+        "msa1",
+        "tods"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z10BC",
+      "typename": "z10BC-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "sthyi",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "csske",
+        "edat",
+        "asnlxr",
+        "msa2",
+        "msa1",
+        "tods"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z990.5",
+      "typename": "z990.5-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "hfpm"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "zEC12.2",
+      "typename": "zEC12.2-s390x-cpu",
+      "unavailable-features": [
+        "pcc-xts-eaes-256",
+        "pcc-xts-eaes-128",
+        "pcc-xts-aes-256",
+        "pcc-xts-aes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-eaes-192",
+        "pcc-cmac-eaes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-aes-192",
+        "pcc-cmac-aes-128",
+        "pcc-cmac-etdea-192",
+        "pcc-cmac-etdea-128",
+        "pcc-cmac-edea",
+        "pcc-cmac-tdea-192",
+        "pcc-cmac-tdea-128",
+        "pcc-cmac-dea",
+        "kmo-eaes-256",
+        "kmo-eaes-192",
+        "kmo-eaes-128",
+        "kmo-aes-256",
+        "kmo-aes-192",
+        "kmo-aes-128",
+        "kmo-etdea-192",
+        "kmo-etdea-128",
+        "kmo-edea",
+        "kmo-tdea-192",
+        "kmo-tdea-128",
+        "kmo-dea",
+        "kmf-eaes-256",
+        "kmf-eaes-192",
+        "kmf-eaes-128",
+        "kmf-aes-256",
+        "kmf-aes-192",
+        "kmf-aes-128",
+        "kmf-etdea-192",
+        "kmf-etdea-128",
+        "kmf-edea",
+        "kmf-tdea-192",
+        "kmf-tdea-128",
+        "kmf-dea",
+        "kmctr-eaes-256",
+        "kmctr-eaes-192",
+        "kmctr-eaes-128",
+        "kmctr-aes-256",
+        "kmctr-aes-192",
+        "kmctr-aes-128",
+        "kmctr-etdea-192",
+        "kmctr-etdea-128",
+        "kmctr-edea",
+        "kmctr-tdea-192",
+        "kmctr-tdea-128",
+        "kmctr-dea",
+        "pckmo-aes-256",
+        "pckmo-aes-192",
+        "pckmo-aes-128",
+        "pckmo-etdea-192",
+        "pckmo-etdea-128",
+        "pckmo-edea",
+        "klmd-sha-1",
+        "kimd-ghash",
+        "kimd-sha-1",
+        "km-xts-eaes-256",
+        "km-xts-eaes-128",
+        "km-xts-aes-256",
+        "km-xts-aes-128",
+        "km-eaes-256",
+        "km-eaes-192",
+        "km-eaes-128",
+        "km-etdea-192",
+        "km-etdea-128",
+        "km-edea",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-eaes-256",
+        "kmc-eaes-192",
+        "kmc-eaes-128",
+        "kmc-etdea-192",
+        "kmc-etdea-128",
+        "kmc-edea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-eaes-256",
+        "kmac-eaes-192",
+        "kmac-eaes-128",
+        "kmac-aes-256",
+        "kmac-aes-192",
+        "kmac-aes-128",
+        "kmac-etdea-192",
+        "kmac-etdea-128",
+        "kmac-edea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "esop",
+        "sea_esop2",
+        "edat2",
+        "aefsi",
+        "sthyi",
+        "te",
+        "ri",
+        "cte",
+        "dfpzc",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "ipter",
+        "csske",
+        "edat",
+        "asnlxr",
+        "msa2",
+        "msa1",
+        "tods"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z10EC-base",
+      "typename": "z10EC-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "csske",
+        "asnlxr",
+        "tods"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z9EC-base",
+      "typename": "z9EC-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "hfpue",
+        "hfpm",
+        "asnlxr",
+        "tods"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z9EC.3-base",
+      "typename": "z9EC.3-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "hfpue",
+        "hfpm",
+        "asnlxr",
+        "tods"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "zEC12",
+      "typename": "zEC12-s390x-cpu",
+      "unavailable-features": [
+        "pcc-xts-eaes-256",
+        "pcc-xts-eaes-128",
+        "pcc-xts-aes-256",
+        "pcc-xts-aes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-eaes-192",
+        "pcc-cmac-eaes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-aes-192",
+        "pcc-cmac-aes-128",
+        "pcc-cmac-etdea-192",
+        "pcc-cmac-etdea-128",
+        "pcc-cmac-edea",
+        "pcc-cmac-tdea-192",
+        "pcc-cmac-tdea-128",
+        "pcc-cmac-dea",
+        "kmo-eaes-256",
+        "kmo-eaes-192",
+        "kmo-eaes-128",
+        "kmo-aes-256",
+        "kmo-aes-192",
+        "kmo-aes-128",
+        "kmo-etdea-192",
+        "kmo-etdea-128",
+        "kmo-edea",
+        "kmo-tdea-192",
+        "kmo-tdea-128",
+        "kmo-dea",
+        "kmf-eaes-256",
+        "kmf-eaes-192",
+        "kmf-eaes-128",
+        "kmf-aes-256",
+        "kmf-aes-192",
+        "kmf-aes-128",
+        "kmf-etdea-192",
+        "kmf-etdea-128",
+        "kmf-edea",
+        "kmf-tdea-192",
+        "kmf-tdea-128",
+        "kmf-dea",
+        "kmctr-eaes-256",
+        "kmctr-eaes-192",
+        "kmctr-eaes-128",
+        "kmctr-aes-256",
+        "kmctr-aes-192",
+        "kmctr-aes-128",
+        "kmctr-etdea-192",
+        "kmctr-etdea-128",
+        "kmctr-edea",
+        "kmctr-tdea-192",
+        "kmctr-tdea-128",
+        "kmctr-dea",
+        "pckmo-aes-256",
+        "pckmo-aes-192",
+        "pckmo-aes-128",
+        "pckmo-etdea-192",
+        "pckmo-etdea-128",
+        "pckmo-edea",
+        "klmd-sha-1",
+        "kimd-ghash",
+        "kimd-sha-1",
+        "km-xts-eaes-256",
+        "km-xts-eaes-128",
+        "km-xts-aes-256",
+        "km-xts-aes-128",
+        "km-eaes-256",
+        "km-eaes-192",
+        "km-eaes-128",
+        "km-etdea-192",
+        "km-etdea-128",
+        "km-edea",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-eaes-256",
+        "kmc-eaes-192",
+        "kmc-eaes-128",
+        "kmc-etdea-192",
+        "kmc-etdea-128",
+        "kmc-edea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-eaes-256",
+        "kmac-eaes-192",
+        "kmac-eaes-128",
+        "kmac-aes-256",
+        "kmac-aes-192",
+        "kmac-aes-128",
+        "kmac-etdea-192",
+        "kmac-etdea-128",
+        "kmac-edea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "esop",
+        "sea_esop2",
+        "edat2",
+        "aefsi",
+        "sthyi",
+        "te",
+        "ri",
+        "cte",
+        "dfpzc",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "ipter",
+        "csske",
+        "edat",
+        "asnlxr",
+        "msa2",
+        "msa1",
+        "tods"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z990.5-base",
+      "typename": "z990.5-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "hfpm"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z10BC-base",
+      "typename": "z10BC-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "csske",
+        "asnlxr",
+        "tods"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z900-base",
+      "typename": "z900-base-s390x-cpu",
+      "unavailable-features": [
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z13.2",
+      "typename": "z13.2-s390x-cpu",
+      "unavailable-features": [
+        "ppno-sha-512-drng",
+        "pcc-xts-eaes-256",
+        "pcc-xts-eaes-128",
+        "pcc-xts-aes-256",
+        "pcc-xts-aes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-eaes-192",
+        "pcc-cmac-eaes-128",
+        "pcc-cmac-eaes-256",
+        "pcc-cmac-aes-192",
+        "pcc-cmac-aes-128",
+        "pcc-cmac-etdea-192",
+        "pcc-cmac-etdea-128",
+        "pcc-cmac-edea",
+        "pcc-cmac-tdea-192",
+        "pcc-cmac-tdea-128",
+        "pcc-cmac-dea",
+        "kmo-eaes-256",
+        "kmo-eaes-192",
+        "kmo-eaes-128",
+        "kmo-aes-256",
+        "kmo-aes-192",
+        "kmo-aes-128",
+        "kmo-etdea-192",
+        "kmo-etdea-128",
+        "kmo-edea",
+        "kmo-tdea-192",
+        "kmo-tdea-128",
+        "kmo-dea",
+        "kmf-eaes-256",
+        "kmf-eaes-192",
+        "kmf-eaes-128",
+        "kmf-aes-256",
+        "kmf-aes-192",
+        "kmf-aes-128",
+        "kmf-etdea-192",
+        "kmf-etdea-128",
+        "kmf-edea",
+        "kmf-tdea-192",
+        "kmf-tdea-128",
+        "kmf-dea",
+        "kmctr-eaes-256",
+        "kmctr-eaes-192",
+        "kmctr-eaes-128",
+        "kmctr-aes-256",
+        "kmctr-aes-192",
+        "kmctr-aes-128",
+        "kmctr-etdea-192",
+        "kmctr-etdea-128",
+        "kmctr-edea",
+        "kmctr-tdea-192",
+        "kmctr-tdea-128",
+        "kmctr-dea",
+        "pckmo-aes-256",
+        "pckmo-aes-192",
+        "pckmo-aes-128",
+        "pckmo-etdea-192",
+        "pckmo-etdea-128",
+        "pckmo-edea",
+        "klmd-sha-1",
+        "kimd-ghash",
+        "kimd-sha-1",
+        "km-xts-eaes-256",
+        "km-xts-eaes-128",
+        "km-xts-aes-256",
+        "km-xts-aes-128",
+        "km-eaes-256",
+        "km-eaes-192",
+        "km-eaes-128",
+        "km-etdea-192",
+        "km-etdea-128",
+        "km-edea",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-eaes-256",
+        "kmc-eaes-192",
+        "kmc-eaes-128",
+        "kmc-etdea-192",
+        "kmc-etdea-128",
+        "kmc-edea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-eaes-256",
+        "kmac-eaes-192",
+        "kmac-eaes-128",
+        "kmac-aes-256",
+        "kmac-aes-192",
+        "kmac-aes-128",
+        "kmac-etdea-192",
+        "kmac-etdea-128",
+        "kmac-edea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "esop",
+        "sea_esop2",
+        "vx",
+        "dfppc",
+        "edat2",
+        "aefsi",
+        "sthyi",
+        "te",
+        "ri",
+        "cte",
+        "dfpzc",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "ipter",
+        "csske",
+        "edat",
+        "asnlxr",
+        "msa2",
+        "msa1",
+        "gen13ptff",
+        "tods",
+        "type"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z890.3-base",
+      "typename": "z890.3-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "hfpm"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "zBC12-base",
+      "typename": "zBC12-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "dfpzc",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "csske",
+        "asnlxr",
+        "tods"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z13.2-base",
+      "typename": "z13.2-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "dfppc",
+        "dfpzc",
+        "cmpsceh",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "fpe",
+        "emon",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "nonqks",
+        "csske",
+        "asnlxr",
+        "gen13ptff",
+        "tods",
+        "type"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z990-base",
+      "typename": "z990-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "hfpm"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z10EC.2",
+      "typename": "z10EC.2-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "sthyi",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "csske",
+        "edat",
+        "asnlxr",
+        "msa2",
+        "msa1",
+        "tods"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z9BC",
+      "typename": "z9BC-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "cmm",
+        "dateh2",
+        "sthyi",
+        "hfpue",
+        "hfpm",
+        "asnlxr",
+        "msa1",
+        "tods"
+      ],
+      "static": false,
+      "migration-safe": true
+    },
+    {
+      "name": "z10EC.3-base",
+      "typename": "z10EC.3-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "dateh2",
+        "pfpo",
+        "dfphp",
+        "dfp",
+        "parseh",
+        "hfpue",
+        "hfpm",
+        "csske",
+        "asnlxr",
+        "tods"
+      ],
+      "static": true,
+      "migration-safe": true
+    },
+    {
+      "name": "z990.3-base",
+      "typename": "z990.3-base-s390x-cpu",
+      "unavailable-features": [
+        "klmd-sha-1",
+        "kimd-sha-1",
+        "km-tdea-192",
+        "km-tdea-128",
+        "km-dea",
+        "kmc-tdea-192",
+        "kmc-tdea-128",
+        "kmc-dea",
+        "kmac-tdea-192",
+        "kmac-tdea-128",
+        "kmac-dea",
+        "hfpm"
+      ],
+      "static": true,
+      "migration-safe": true
+    }
+  ],
+  "id": "libvirt-2"
+}
+
+{
+  "execute": "query-cpu-model-expansion",
+  "arguments": {
+    "type": "static",
+    "model": {
+      "name": "max"
+    }
+  },
+  "id": "libvirt-3"
+}
+
+{
+  "id": "libvirt-3",
   "error": {
     "class": "GenericError",
     "desc": "The CPU definition 'max' is unknown."

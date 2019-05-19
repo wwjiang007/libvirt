@@ -928,8 +928,7 @@ prlsdkParseNetAddress(char *addr)
         goto cleanup;
     ip->prefix = nbits;
 
-    ret = ip;
-    ip = NULL;
+    VIR_STEAL_PTR(ret, ip);
 
  cleanup:
     if (!ret)
@@ -1105,16 +1104,13 @@ prlsdkGetNetInfo(PRL_HANDLE netAdapter, virDomainNetDefPtr net, bool isCt)
 
         switch ((int)type) {
         case PNT_RTL:
-            if (VIR_STRDUP(net->model, "rtl8139") < 0)
-                goto cleanup;
+            net->model = VIR_DOMAIN_NET_MODEL_RTL8139;
             break;
         case PNT_E1000:
-            if (VIR_STRDUP(net->model, "e1000") < 0)
-                goto cleanup;
+            net->model = VIR_DOMAIN_NET_MODEL_E1000;
             break;
         case PNT_VIRTIO:
-            if (VIR_STRDUP(net->model, "virtio") < 0)
-                goto cleanup;
+            net->model = VIR_DOMAIN_NET_MODEL_VIRTIO;
             break;
         default:
             virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -1958,7 +1954,7 @@ prlsdkLoadDomain(vzDriverPtr driver,
             goto error;
 
         virObjectLock(driver);
-        if (!(olddom = virDomainObjListFindByUUIDRef(driver->domains, def->uuid)))
+        if (!(olddom = virDomainObjListFindByUUID(driver->domains, def->uuid)))
             dom = virDomainObjListAdd(driver->domains, def, driver->xmlopt, 0, NULL);
         virObjectUnlock(driver);
 
@@ -1969,7 +1965,6 @@ prlsdkLoadDomain(vzDriverPtr driver,
             goto error;
         }
 
-        virObjectRef(dom);
         pdom = dom->privateData;
         pdom->sdkdom = sdkdom;
         PrlHandle_AddRef(sdkdom);
@@ -2094,8 +2089,7 @@ prlsdkSendEvent(vzDriverPtr driver,
     event = virDomainEventLifecycleNewFromObj(dom,
                                               lvEventType,
                                               lvEventTypeDetails);
-    if (event)
-        virObjectEventStateQueue(driver->domainEventState, event);
+    virObjectEventStateQueue(driver->domainEventState, event);
 }
 
 static void
@@ -2166,7 +2160,7 @@ prlsdkHandleVmStateEvent(vzDriverPtr driver,
 
  cleanup:
     PrlHandle_Free(eventParam);
-    virObjectUnlock(dom);
+    virDomainObjEndAPI(&dom);
     return;
 }
 
@@ -2177,7 +2171,7 @@ prlsdkHandleVmConfigEvent(vzDriverPtr driver,
     virDomainObjPtr dom = NULL;
     bool job = false;
 
-    dom = virDomainObjListFindByUUIDRef(driver->domains, uuid);
+    dom = virDomainObjListFindByUUID(driver->domains, uuid);
     if (dom == NULL)
         return;
 
@@ -2207,7 +2201,7 @@ prlsdkHandleVmAddedEvent(vzDriverPtr driver,
 {
     virDomainObjPtr dom = NULL;
 
-    if (!(dom = virDomainObjListFindByUUIDRef(driver->domains, uuid)) &&
+    if (!(dom = virDomainObjListFindByUUID(driver->domains, uuid)) &&
         !(dom = prlsdkAddDomainByUUID(driver, uuid)))
         goto cleanup;
 
@@ -2235,6 +2229,7 @@ prlsdkHandleVmRemovedEvent(vzDriverPtr driver,
                     VIR_DOMAIN_EVENT_UNDEFINED_REMOVED);
 
     virDomainObjListRemove(driver->domains, dom);
+    virDomainObjEndAPI(&dom);
     return;
 }
 
@@ -2255,7 +2250,7 @@ prlsdkHandlePerfEvent(vzDriverPtr driver,
     PrlHandle_Free(privdom->stats);
     privdom->stats = event;
 
-    virObjectUnlock(dom);
+    virDomainObjEndAPI(&dom);
 }
 
 static void
@@ -2283,7 +2278,7 @@ prlsdkHandleMigrationProgress(vzDriverPtr driver,
 
  cleanup:
     PrlHandle_Free(param);
-    virObjectUnlock(dom);
+    virDomainObjEndAPI(&dom);
 }
 
 static PRL_RESULT
@@ -2602,7 +2597,7 @@ prlsdkCheckUnsupportedParams(PRL_HANDLE sdkdom, virDomainDefPtr def)
 
     /* we fill only type and arch fields in vzLoadDomain for
      * hvm type and also init for containers, so we can check that all
-     * other paramenters are null and boot devices config is default */
+     * other parameters are null and boot devices config is default */
 
     if (def->os.machine != NULL || def->os.bootmenu != 0 ||
         def->os.kernel != NULL || def->os.initrd != NULL ||
@@ -3379,15 +3374,15 @@ static int prlsdkConfigureNet(vzDriverPtr driver ATTRIBUTE_UNUSED,
         goto cleanup;
 
     if (isCt) {
-        if (net->model)
+        if (net->model != VIR_DOMAIN_NET_MODEL_UNKNOWN)
             VIR_WARN("Setting network adapter for containers is not "
                      "supported by vz driver.");
     } else {
-        if (STREQ(net->model, "rtl8139")) {
+        if (net->model == VIR_DOMAIN_NET_MODEL_RTL8139) {
             pret = PrlVmDevNet_SetAdapterType(sdknet, PNT_RTL);
-        } else if (STREQ(net->model, "e1000")) {
+        } else if (net->model == VIR_DOMAIN_NET_MODEL_E1000) {
             pret = PrlVmDevNet_SetAdapterType(sdknet, PNT_E1000);
-        } else if (STREQ(net->model, "virtio")) {
+        } else if (net->model == VIR_DOMAIN_NET_MODEL_VIRTIO) {
             pret = PrlVmDevNet_SetAdapterType(sdknet, PNT_VIRTIO);
         } else {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
@@ -4127,7 +4122,6 @@ prlsdkCreateVm(vzDriverPtr driver, virDomainDefPtr def)
 static int
 virStorageTranslatePoolLocal(virConnectPtr conn, virStorageSourcePtr src)
 {
-
     virStoragePoolPtr pool = NULL;
     virStorageVolPtr vol = NULL;
     virStorageVolInfo info;
@@ -4332,7 +4326,6 @@ prlsdkUnregisterDomain(vzDriverPtr driver, virDomainObjPtr dom, unsigned int fla
                     VIR_DOMAIN_EVENT_UNDEFINED_REMOVED);
 
     virDomainObjListRemove(driver->domains, dom);
-    virObjectLock(dom);
 
     ret = 0;
  cleanup:
@@ -4659,8 +4652,7 @@ prlsdkParseSnapshotTree(const char *treexml)
     xmlNodePtr root;
     xmlNodePtr *nodes = NULL;
     virDomainSnapshotDefPtr def = NULL;
-    virDomainSnapshotObjPtr snapshot;
-    virDomainSnapshotObjPtr current = NULL;
+    virDomainMomentObjPtr snapshot;
     virDomainSnapshotObjListPtr snapshots = NULL;
     char *xmlstr = NULL;
     int n;
@@ -4704,14 +4696,14 @@ prlsdkParseSnapshotTree(const char *treexml)
 
         ctxt->node = nodes[i];
 
-        def->name = virXPathString("string(./@guid)", ctxt);
-        if (!def->name) {
+        def->parent.name = virXPathString("string(./@guid)", ctxt);
+        if (!def->parent.name) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("missing 'guid' attribute"));
             goto cleanup;
         }
 
-        def->parent = virXPathString("string(../@guid)", ctxt);
+        def->parent.parent_name = virXPathString("string(../@guid)", ctxt);
 
         xmlstr = virXPathString("string(./DateTime)", ctxt);
         if (!xmlstr) {
@@ -4719,11 +4711,11 @@ prlsdkParseSnapshotTree(const char *treexml)
                            _("missing 'DateTime' element"));
             goto cleanup;
         }
-        if ((def->creationTime = prlsdkParseDateTime(xmlstr)) < 0)
+        if ((def->parent.creationTime = prlsdkParseDateTime(xmlstr)) < 0)
             goto cleanup;
         VIR_FREE(xmlstr);
 
-        def->description = virXPathString("string(./Description)", ctxt);
+        def->parent.description = virXPathString("string(./Description)", ctxt);
 
         def->memory = VIR_DOMAIN_SNAPSHOT_LOCATION_NONE;
         xmlstr = virXPathString("string(./@state)", ctxt);
@@ -4747,22 +4739,21 @@ prlsdkParseSnapshotTree(const char *treexml)
         }
         VIR_FREE(xmlstr);
 
-        xmlstr = virXPathString("string(./@current)", ctxt);
-        def->current = xmlstr && STREQ("yes", xmlstr);
-        VIR_FREE(xmlstr);
-
         if (!(snapshot = virDomainSnapshotAssignDef(snapshots, def)))
             goto cleanup;
         def = NULL;
 
-        if (snapshot->def->current) {
-            if (current) {
+        xmlstr = virXPathString("string(./@current)", ctxt);
+        if (xmlstr && STREQ("yes", xmlstr)) {
+            if (virDomainSnapshotGetCurrent(snapshots)) {
                 virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                                _("too many current snapshots"));
+                VIR_FREE(xmlstr);
                 goto cleanup;
             }
-            current = snapshot;
+            virDomainSnapshotSetCurrent(snapshots, snapshot);
         }
+        VIR_FREE(xmlstr);
     }
 
     if (virDomainSnapshotUpdateRelations(snapshots) < 0) {
@@ -4771,8 +4762,7 @@ prlsdkParseSnapshotTree(const char *treexml)
         goto cleanup;
     }
 
-    ret = snapshots;
-    snapshots = NULL;
+    VIR_STEAL_PTR(ret, snapshots);
 
  cleanup:
     virDomainSnapshotObjListFree(snapshots);

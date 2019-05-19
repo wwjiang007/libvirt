@@ -14,16 +14,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Michal Privoznik <mprivozn@redhat.com>
  */
 
 #include <config.h>
 
-#ifdef __linux__
+#if defined(__linux__) || defined(__FreeBSD__)
 # include "virmock.h"
-# include <stdio.h>
-# include <stdlib.h>
 # include <unistd.h>
 # include <fcntl.h>
 # include <sys/stat.h>
@@ -35,14 +31,10 @@
 # include "dirname.h"
 
 static int (*real_access)(const char *path, int mode);
-static int (*real_lstat)(const char *path, struct stat *sb);
-static int (*real___lxstat)(int ver, const char *path, struct stat *sb);
-static int (*real_stat)(const char *path, struct stat *sb);
-static int (*real___xstat)(int ver, const char *path, struct stat *sb);
-static char *(*real_canonicalize_file_name)(const char *path);
 static int (*real_open)(const char *path, int flags, ...);
 static int (*real_close)(int fd);
 static DIR * (*real_opendir)(const char *name);
+static char *(*real_virFileCanonicalizePath)(const char *path);
 
 /* Don't make static, since it causes problems with clang
  * when passed as an arg to virAsprintf()
@@ -126,7 +118,7 @@ struct pciDevice {
     char *id;
     int vendor;
     int device;
-    int class;
+    int klass;
     int iommuGroup;
     struct pciDriver *driver;   /* Driver attached. NULL if attached to no driver */
 };
@@ -341,6 +333,7 @@ pci_device_new_from_stub(const struct pciDevice *data)
     char *configSrc;
     char tmp[256];
     struct stat sb;
+    bool configSrcExists = false;
 
     if (VIR_STRDUP_QUIET(id, data->id) < 0)
         ABORT_OOM();
@@ -368,10 +361,12 @@ pci_device_new_from_stub(const struct pciDevice *data)
     if (virFileMakePath(devpath) < 0)
         ABORT("Unable to create: %s", devpath);
 
+    if (stat(configSrc, &sb) == 0)
+        configSrcExists = true;
+
     /* If there is a config file for the device within virpcitestdata dir,
      * symlink it. Otherwise create a dummy config file. */
-    if ((real_stat && real_stat(configSrc, &sb) == 0) ||
-        (real___xstat && real___xstat(_STAT_VER, configSrc, &sb) == 0)) {
+    if (configSrcExists) {
         /* On success, copy @configSrc into the destination (a copy,
          * rather than a symlink, is required since we write into the
          * file, and parallel VPATH builds must not stomp on the
@@ -399,7 +394,7 @@ pci_device_new_from_stub(const struct pciDevice *data)
         ABORT("@tmp overflow");
     make_file(devpath, "device", tmp, -1);
 
-    if (snprintf(tmp, sizeof(tmp),  "0x%.4x", dev->class) < 0)
+    if (snprintf(tmp, sizeof(tmp),  "0x%.4x", dev->klass) < 0)
         ABORT("@tmp overflow");
     make_file(devpath, "class", tmp, -1);
 
@@ -808,12 +803,10 @@ init_syms(void)
         return;
 
     VIR_MOCK_REAL_INIT(access);
-    VIR_MOCK_REAL_INIT_ALT(lstat, __lxstat);
-    VIR_MOCK_REAL_INIT_ALT(stat, __xstat);
-    VIR_MOCK_REAL_INIT(canonicalize_file_name);
     VIR_MOCK_REAL_INIT(open);
     VIR_MOCK_REAL_INIT(close);
     VIR_MOCK_REAL_INIT(opendir);
+    VIR_MOCK_REAL_INIT(virFileCanonicalizePath);
 }
 
 static void
@@ -853,10 +846,10 @@ init_env(void)
     MAKE_PCI_DEVICE("0000:00:01.0", 0x8086, 0x0044);
     MAKE_PCI_DEVICE("0000:00:02.0", 0x8086, 0x0046);
     MAKE_PCI_DEVICE("0000:00:03.0", 0x8086, 0x0048);
-    MAKE_PCI_DEVICE("0001:00:00.0", 0x1014, 0x03b9, .class = 0x060400);
+    MAKE_PCI_DEVICE("0001:00:00.0", 0x1014, 0x03b9, .klass = 0x060400);
     MAKE_PCI_DEVICE("0001:01:00.0", 0x8086, 0x105e, .iommuGroup = 0);
     MAKE_PCI_DEVICE("0001:01:00.1", 0x8086, 0x105e, .iommuGroup = 0);
-    MAKE_PCI_DEVICE("0005:80:00.0", 0x10b5, 0x8112, .class = 0x060400);
+    MAKE_PCI_DEVICE("0005:80:00.0", 0x10b5, 0x8112, .klass = 0x060400);
     MAKE_PCI_DEVICE("0005:90:01.0", 0x1033, 0x0035, .iommuGroup = 1);
     MAKE_PCI_DEVICE("0005:90:01.1", 0x1033, 0x0035, .iommuGroup = 1);
     MAKE_PCI_DEVICE("0005:90:01.2", 0x1033, 0x00e0, .iommuGroup = 1);
@@ -891,100 +884,17 @@ access(const char *path, int mode)
     return ret;
 }
 
-int
-__lxstat(int ver, const char *path, struct stat *sb)
+
+static int
+virMockStatRedirect(const char *path, char **newpath)
 {
-    int ret;
-
-    init_syms();
-
     if (STRPREFIX(path, SYSFS_PCI_PREFIX)) {
-        char *newpath;
-        if (getrealpath(&newpath, path) < 0)
+        if (getrealpath(newpath, path) < 0)
             return -1;
-        ret = real___lxstat(ver, newpath, sb);
-        VIR_FREE(newpath);
-    } else {
-        ret = real___lxstat(ver, path, sb);
     }
-    return ret;
+    return 0;
 }
 
-int
-lstat(const char *path, struct stat *sb)
-{
-    int ret;
-
-    init_syms();
-
-    if (STRPREFIX(path, SYSFS_PCI_PREFIX)) {
-        char *newpath;
-        if (getrealpath(&newpath, path) < 0)
-            return -1;
-        ret = real_lstat(newpath, sb);
-        VIR_FREE(newpath);
-    } else {
-        ret = real_lstat(path, sb);
-    }
-    return ret;
-}
-
-int
-__xstat(int ver, const char *path, struct stat *sb)
-{
-    int ret;
-
-    init_syms();
-
-    if (STRPREFIX(path, SYSFS_PCI_PREFIX)) {
-        char *newpath;
-        if (getrealpath(&newpath, path) < 0)
-            return -1;
-        ret = real___xstat(ver, newpath, sb);
-        VIR_FREE(newpath);
-    } else {
-        ret = real___xstat(ver, path, sb);
-    }
-    return ret;
-}
-
-int
-stat(const char *path, struct stat *sb)
-{
-    int ret;
-
-    init_syms();
-
-    if (STRPREFIX(path, SYSFS_PCI_PREFIX)) {
-        char *newpath;
-        if (getrealpath(&newpath, path) < 0)
-            return -1;
-        ret = real_stat(newpath, sb);
-        VIR_FREE(newpath);
-    } else {
-        ret = real_stat(path, sb);
-    }
-    return ret;
-}
-
-char *
-canonicalize_file_name(const char *path)
-{
-    char *ret;
-
-    init_syms();
-
-    if (STRPREFIX(path, SYSFS_PCI_PREFIX)) {
-        char *newpath;
-        if (getrealpath(&newpath, path) < 0)
-            return NULL;
-        ret = real_canonicalize_file_name(newpath);
-        VIR_FREE(newpath);
-    } else {
-        ret = real_canonicalize_file_name(path);
-    }
-    return ret;
-}
 
 int
 open(const char *path, int flags, ...)
@@ -1002,7 +912,7 @@ open(const char *path, int flags, ...)
         va_list ap;
         mode_t mode;
         va_start(ap, flags);
-        mode = va_arg(ap, mode_t);
+        mode = (mode_t) va_arg(ap, int);
         va_end(ap);
         ret = real_open(newpath ? newpath : path, flags, mode);
     } else {
@@ -1046,6 +956,31 @@ close(int fd)
         return -1;
     return real_close(fd);
 }
+
+char *
+virFileCanonicalizePath(const char *path)
+{
+    char *ret;
+
+    init_syms();
+
+    if (STRPREFIX(path, SYSFS_PCI_PREFIX)) {
+        char *newpath;
+
+        if (getrealpath(&newpath, path) < 0)
+            return NULL;
+
+        ret = real_virFileCanonicalizePath(newpath);
+        VIR_FREE(newpath);
+    } else {
+        ret = real_virFileCanonicalizePath(path);
+    }
+
+    return ret;
+}
+
+# include "virmockstathelpers.c"
+
 #else
-/* Nothing to override on non-__linux__ platforms */
+/* Nothing to override on this platform */
 #endif

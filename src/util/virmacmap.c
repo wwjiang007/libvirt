@@ -16,9 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Michal Privoznik <mprivozn@redhat.com>
  */
 
 #include <config.h>
@@ -90,7 +87,6 @@ virMacMapAddLocked(virMacMapPtr mgr,
 {
     int ret = -1;
     char **macsList = NULL;
-    char **newMacsList = NULL;
 
     if ((macsList = virHashLookup(mgr->macs, domain)) &&
         virStringListHasString((const char**) macsList, mac)) {
@@ -98,15 +94,12 @@ virMacMapAddLocked(virMacMapPtr mgr,
         goto cleanup;
     }
 
-    if (!(newMacsList = virStringListAdd((const char **) macsList, mac)) ||
-        virHashUpdateEntry(mgr->macs, domain, newMacsList) < 0)
+    if (virStringListAdd(&macsList, mac) < 0 ||
+        virHashUpdateEntry(mgr->macs, domain, macsList) < 0)
         goto cleanup;
-    newMacsList = NULL;
-    virStringListFree(macsList);
 
     ret = 0;
  cleanup:
-    virStringListFree(newMacsList);
     return ret;
 }
 

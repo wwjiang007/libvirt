@@ -18,10 +18,8 @@
 
 #include <config.h>
 
-#ifdef WITH_GNUTLS
-# include <gnutls/gnutls.h>
-# include <gnutls/x509.h>
-#endif
+#include <gnutls/gnutls.h>
+#include <gnutls/x509.h>
 
 #include "locking/domain_lock.h"
 #include "viralloc.h"
@@ -52,7 +50,8 @@ VIR_ENUM_IMPL(qemuMigrationCookieFlag,
               "cpu-hotplug",
               "cpu",
               "allowReboot",
-              "capabilities");
+              "capabilities",
+);
 
 
 static void
@@ -131,7 +130,6 @@ qemuMigrationCookieFree(qemuMigrationCookiePtr mig)
 }
 
 
-#ifdef WITH_GNUTLS
 static char *
 qemuDomainExtractTLSSubject(const char *certdir)
 {
@@ -188,7 +186,7 @@ qemuDomainExtractTLSSubject(const char *certdir)
     VIR_FREE(pemdata);
     return NULL;
 }
-#endif
+
 
 static qemuMigrationCookieGraphicsPtr
 qemuMigrationCookieGraphicsSpiceAlloc(virQEMUDriverPtr driver,
@@ -212,11 +210,10 @@ qemuMigrationCookieGraphicsSpiceAlloc(virQEMUDriverPtr driver,
     if (!glisten || !(listenAddr = glisten->address))
         listenAddr = cfg->spiceListen;
 
-#ifdef WITH_GNUTLS
     if (cfg->spiceTLS &&
         !(mig->tlsSubject = qemuDomainExtractTLSSubject(cfg->spiceTLSx509certdir)))
         goto error;
-#endif
+
     if (VIR_STRDUP(mig->listen, listenAddr) < 0)
         goto error;
 
@@ -283,22 +280,22 @@ qemuMigrationCookieNetworkAlloc(virQEMUDriverPtr driver ATTRIBUTE_UNUSED,
 
 
 static qemuMigrationCookiePtr
-qemuMigrationCookieNew(virDomainObjPtr dom)
+qemuMigrationCookieNew(const virDomainDef *def,
+                       const char *origname)
 {
-    qemuDomainObjPrivatePtr priv = dom->privateData;
     qemuMigrationCookiePtr mig = NULL;
     const char *name;
 
     if (VIR_ALLOC(mig) < 0)
         goto error;
 
-    if (priv->origname)
-        name = priv->origname;
+    if (origname)
+        name = origname;
     else
-        name = dom->def->name;
+        name = def->name;
     if (VIR_STRDUP(mig->name, name) < 0)
         goto error;
-    memcpy(mig->uuid, dom->def->uuid, VIR_UUID_BUFLEN);
+    memcpy(mig->uuid, def->uuid, VIR_UUID_BUFLEN);
 
     if (!(mig->localHostname = virGetHostname()))
         goto error;
@@ -707,6 +704,9 @@ qemuMigrationCookieStatisticsXMLFormat(virBufferPtr buf,
     virBufferAsprintf(buf, "<%1$s>%2$llu</%1$s>\n",
                       VIR_DOMAIN_JOB_MEMORY_ITERATION,
                       stats->ram_iteration);
+    virBufferAsprintf(buf, "<%1$s>%2$llu</%1$s>\n",
+                      VIR_DOMAIN_JOB_MEMORY_POSTCOPY_REQS,
+                      stats->ram_postcopy_reqs);
 
     virBufferAsprintf(buf, "<%1$s>%2$llu</%1$s>\n",
                       VIR_DOMAIN_JOB_MEMORY_PAGE_SIZE,
@@ -946,7 +946,7 @@ qemuMigrationCookieNetworkXMLParse(xmlXPathContextPtr ctxt)
     int n;
     xmlNodePtr *interfaces = NULL;
     char *vporttype;
-    xmlNodePtr save_ctxt = ctxt->node;
+    VIR_XPATH_NODE_AUTORESTORE(ctxt);
 
     if (VIR_ALLOC(optr) < 0)
         goto error;
@@ -978,7 +978,6 @@ qemuMigrationCookieNetworkXMLParse(xmlXPathContextPtr ctxt)
     VIR_FREE(interfaces);
 
  cleanup:
-    ctxt->node = save_ctxt;
     return optr;
 
  error:
@@ -997,7 +996,7 @@ qemuMigrationCookieNBDXMLParse(xmlXPathContextPtr ctxt)
     size_t i;
     int n;
     xmlNodePtr *disks = NULL;
-    xmlNodePtr save_ctxt = ctxt->node;
+    VIR_XPATH_NODE_AUTORESTORE(ctxt);
 
     if (VIR_ALLOC(ret) < 0)
         goto error;
@@ -1044,7 +1043,6 @@ qemuMigrationCookieNBDXMLParse(xmlXPathContextPtr ctxt)
     VIR_FREE(port);
     VIR_FREE(capacity);
     VIR_FREE(disks);
-    ctxt->node = save_ctxt;
     return ret;
  error:
     qemuMigrationCookieNBDFree(ret);
@@ -1058,7 +1056,7 @@ qemuMigrationCookieStatisticsXMLParse(xmlXPathContextPtr ctxt)
 {
     qemuDomainJobInfoPtr jobInfo = NULL;
     qemuMonitorMigrationStats *stats;
-    xmlNodePtr save_ctxt = ctxt->node;
+    VIR_XPATH_NODE_AUTORESTORE(ctxt);
 
     if (!(ctxt->node = virXPathNode("./statistics", ctxt)))
         goto cleanup;
@@ -1106,6 +1104,8 @@ qemuMigrationCookieStatisticsXMLParse(xmlXPathContextPtr ctxt)
                       ctxt, &stats->ram_dirty_rate);
     virXPathULongLong("string(./" VIR_DOMAIN_JOB_MEMORY_ITERATION "[1])",
                       ctxt, &stats->ram_iteration);
+    virXPathULongLong("string(./" VIR_DOMAIN_JOB_MEMORY_POSTCOPY_REQS "[1])",
+                      ctxt, &stats->ram_postcopy_reqs);
 
     virXPathULongLong("string(./" VIR_DOMAIN_JOB_MEMORY_PAGE_SIZE "[1])",
                       ctxt, &stats->ram_page_size);
@@ -1134,7 +1134,6 @@ qemuMigrationCookieStatisticsXMLParse(xmlXPathContextPtr ctxt)
     virXPathInt("string(./" VIR_DOMAIN_JOB_AUTO_CONVERGE_THROTTLE "[1])",
                 ctxt, &stats->cpu_throttle_percentage);
  cleanup:
-    ctxt->node = save_ctxt;
     return jobInfo;
 }
 
@@ -1476,12 +1475,13 @@ qemuMigrationBakeCookie(qemuMigrationCookiePtr mig,
 
 qemuMigrationCookiePtr
 qemuMigrationEatCookie(virQEMUDriverPtr driver,
-                       virDomainObjPtr dom,
+                       const virDomainDef *def,
+                       const char *origname,
+                       qemuDomainObjPrivatePtr priv,
                        const char *cookiein,
                        int cookieinlen,
                        unsigned int flags)
 {
-    qemuDomainObjPrivatePtr priv = dom->privateData;
     qemuMigrationCookiePtr mig = NULL;
 
     /* Parse & validate incoming cookie (if any) */
@@ -1494,7 +1494,7 @@ qemuMigrationEatCookie(virQEMUDriverPtr driver,
 
     VIR_DEBUG("cookielen=%d cookie='%s'", cookieinlen, NULLSTR(cookiein));
 
-    if (!(mig = qemuMigrationCookieNew(dom)))
+    if (!(mig = qemuMigrationCookieNew(def, origname)))
         return NULL;
 
     if (cookiein && cookieinlen &&
@@ -1506,9 +1506,9 @@ qemuMigrationEatCookie(virQEMUDriverPtr driver,
 
     if (flags & QEMU_MIGRATION_COOKIE_PERSISTENT &&
         mig->persistent &&
-        STRNEQ(dom->def->name, mig->persistent->name)) {
+        STRNEQ(def->name, mig->persistent->name)) {
         VIR_FREE(mig->persistent->name);
-        if (VIR_STRDUP(mig->persistent->name, dom->def->name) < 0)
+        if (VIR_STRDUP(mig->persistent->name, def->name) < 0)
             goto error;
     }
 

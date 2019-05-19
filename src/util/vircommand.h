@@ -19,11 +19,12 @@
  *
  */
 
-#ifndef __VIR_COMMAND_H__
-# define __VIR_COMMAND_H__
+#ifndef LIBVIRT_VIRCOMMAND_H
+# define LIBVIRT_VIRCOMMAND_H
 
 # include "internal.h"
 # include "virbuffer.h"
+# include "virautoclean.h"
 
 typedef struct _virCommand virCommand;
 typedef virCommand *virCommandPtr;
@@ -121,6 +122,8 @@ void virCommandAddEnvPassAllowSUID(virCommandPtr cmd,
 
 void virCommandAddEnvPassCommon(virCommandPtr cmd);
 
+void virCommandAddEnvXDG(virCommandPtr cmd, const char *baseDir);
+
 void virCommandAddArg(virCommandPtr cmd,
                       const char *val) ATTRIBUTE_NONNULL(2);
 
@@ -171,7 +174,7 @@ void virCommandSetPreExecHook(virCommandPtr cmd,
 void virCommandWriteArgLog(virCommandPtr cmd,
                            int logfd);
 
-char *virCommandToString(virCommandPtr cmd) ATTRIBUTE_RETURN_CHECK;
+char *virCommandToString(virCommandPtr cmd, bool linebreaks) ATTRIBUTE_RETURN_CHECK;
 
 int virCommandExec(virCommandPtr cmd, gid_t *groups, int ngroups) ATTRIBUTE_RETURN_CHECK;
 
@@ -218,5 +221,6 @@ int virCommandRunNul(virCommandPtr cmd,
                      virCommandRunNulFunc func,
                      void *data);
 
+VIR_DEFINE_AUTOPTR_FUNC(virCommand, virCommandFree);
 
-#endif /* __VIR_COMMAND_H__ */
+#endif /* LIBVIRT_VIRCOMMAND_H */

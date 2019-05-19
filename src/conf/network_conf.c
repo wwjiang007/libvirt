@@ -17,8 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -28,7 +26,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <string.h>
 
 #include "virerror.h"
 #include "datatypes.h"
@@ -50,25 +47,31 @@ VIR_ENUM_IMPL(virNetworkForward,
               VIR_NETWORK_FORWARD_LAST,
               "none", "nat", "route", "open",
               "bridge", "private", "vepa", "passthrough",
-              "hostdev")
+              "hostdev",
+);
 
 VIR_ENUM_IMPL(virNetworkBridgeMACTableManager,
               VIR_NETWORK_BRIDGE_MAC_TABLE_MANAGER_LAST,
-              "default", "kernel", "libvirt")
+              "default", "kernel", "libvirt",
+);
 
-VIR_ENUM_DECL(virNetworkForwardHostdevDevice)
+VIR_ENUM_DECL(virNetworkForwardHostdevDevice);
 VIR_ENUM_IMPL(virNetworkForwardHostdevDevice,
               VIR_NETWORK_FORWARD_HOSTDEV_DEVICE_LAST,
-              "none", "pci", "netdev")
+              "none", "pci", "netdev",
+);
 
 VIR_ENUM_IMPL(virNetworkForwardDriverName,
               VIR_NETWORK_FORWARD_DRIVER_NAME_LAST,
               "default",
               "kvm",
-              "vfio")
+              "vfio",
+);
 
-VIR_ENUM_IMPL(virNetworkTaint, VIR_NETWORK_TAINT_LAST,
-              "hook-script");
+VIR_ENUM_IMPL(virNetworkTaint,
+              VIR_NETWORK_TAINT_LAST,
+              "hook-script",
+);
 
 static void
 virPortGroupDefClear(virPortGroupDefPtr def)
@@ -206,6 +209,7 @@ virNetworkDefFree(virNetworkDefPtr def)
 
     VIR_FREE(def->name);
     VIR_FREE(def->bridge);
+    VIR_FREE(def->bridgeZone);
     VIR_FREE(def->domain);
 
     virNetworkForwardDefClear(&def->forward);
@@ -355,8 +359,6 @@ virSocketAddrRangeParseXML(const char *networkName,
                            xmlNodePtr node,
                            virSocketAddrRangePtr range)
 {
-
-
     char *start = NULL, *end = NULL;
     int ret = -1;
 
@@ -1186,7 +1188,7 @@ virNetworkPortGroupParseXML(virPortGroupDefPtr def,
 
     bandwidth_node = virXPathNode("./bandwidth", ctxt);
     if (bandwidth_node &&
-        virNetDevBandwidthParse(&def->bandwidth, bandwidth_node, -1) < 0)
+        virNetDevBandwidthParse(&def->bandwidth, bandwidth_node, false) < 0)
         goto cleanup;
 
     vlanNode = virXPathNode("./vlan", ctxt);
@@ -1619,7 +1621,7 @@ virNetworkDefParseXML(xmlXPathContextPtr ctxt)
     /* Extract network uuid */
     tmp = virXPathString("string(./uuid[1])", ctxt);
     if (!tmp) {
-        if (virUUIDGenerate(def->uuid)) {
+        if (virUUIDGenerate(def->uuid) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            "%s", _("Failed to generate UUID"));
             goto error;
@@ -1680,7 +1682,7 @@ virNetworkDefParseXML(xmlXPathContextPtr ctxt)
     }
 
     if ((bandwidthNode = virXPathNode("./bandwidth", ctxt)) &&
-        virNetDevBandwidthParse(&def->bandwidth, bandwidthNode, -1) < 0)
+        virNetDevBandwidthParse(&def->bandwidth, bandwidthNode, false) < 0)
         goto error;
 
     vlanNode = virXPathNode("./vlan", ctxt);
@@ -1689,6 +1691,7 @@ virNetworkDefParseXML(xmlXPathContextPtr ctxt)
 
     /* Parse bridge information */
     def->bridge = virXPathString("string(./bridge[1]/@name)", ctxt);
+    def->bridgeZone = virXPathString("string(./bridge[1]/@zone)", ctxt);
     stp = virXPathString("string(./bridge[1]/@stp)", ctxt);
     def->stp = (stp && STREQ(stp, "off")) ? false : true;
 
@@ -1874,7 +1877,7 @@ virNetworkDefParseXML(xmlXPathContextPtr ctxt)
     /* Validate some items in the main NetworkDef that need to align
      * with the chosen forward mode.
      */
-    switch (def->forward.type) {
+    switch ((virNetworkForwardType) def->forward.type) {
     case VIR_NETWORK_FORWARD_NONE:
         break;
 
@@ -1925,6 +1928,13 @@ virNetworkDefParseXML(xmlXPathContextPtr ctxt)
                            def->name);
             goto error;
         }
+        if (def->bridgeZone) {
+            virReportError(VIR_ERR_XML_ERROR,
+                           _("bridge zone not allowed in %s mode (network '%s')"),
+                           virNetworkForwardTypeToString(def->forward.type),
+                           def->name);
+            goto error;
+        }
         if (def->macTableManager) {
             virReportError(VIR_ERR_XML_ERROR,
                            _("bridge macTableManager setting not allowed "
@@ -1936,9 +1946,9 @@ virNetworkDefParseXML(xmlXPathContextPtr ctxt)
         ATTRIBUTE_FALLTHROUGH;
 
     case VIR_NETWORK_FORWARD_BRIDGE:
-        if (def->delay || stp) {
+        if (def->delay || stp || def->bridgeZone) {
             virReportError(VIR_ERR_XML_ERROR,
-                           _("bridge delay/stp options only allowed in "
+                           _("bridge delay/stp/zone options only allowed in "
                              "route, nat, and isolated mode, not in %s "
                              "(network '%s')"),
                            virNetworkForwardTypeToString(def->forward.type),
@@ -1955,21 +1965,40 @@ virNetworkDefParseXML(xmlXPathContextPtr ctxt)
             goto error;
         }
         break;
+
+    case VIR_NETWORK_FORWARD_LAST:
+    default:
+        virReportEnumRangeError(virNetworkForwardType, def->forward.type);
+        goto error;
     }
 
     VIR_FREE(stp);
 
-    if (def->mtu &&
-        (def->forward.type != VIR_NETWORK_FORWARD_NONE &&
-         def->forward.type != VIR_NETWORK_FORWARD_NAT &&
-         def->forward.type != VIR_NETWORK_FORWARD_ROUTE &&
-         def->forward.type != VIR_NETWORK_FORWARD_OPEN)) {
-        virReportError(VIR_ERR_XML_ERROR,
-                       _("mtu size only allowed in open, route, nat, "
-                         "and isolated mode, not in %s (network '%s')"),
-                       virNetworkForwardTypeToString(def->forward.type),
-                       def->name);
-        goto error;
+    if (def->mtu) {
+        switch ((virNetworkForwardType) def->forward.type) {
+        case VIR_NETWORK_FORWARD_NONE:
+        case VIR_NETWORK_FORWARD_NAT:
+        case VIR_NETWORK_FORWARD_ROUTE:
+        case VIR_NETWORK_FORWARD_OPEN:
+            break;
+
+        case VIR_NETWORK_FORWARD_BRIDGE:
+        case VIR_NETWORK_FORWARD_PRIVATE:
+        case VIR_NETWORK_FORWARD_VEPA:
+        case VIR_NETWORK_FORWARD_PASSTHROUGH:
+        case VIR_NETWORK_FORWARD_HOSTDEV:
+            virReportError(VIR_ERR_XML_ERROR,
+                           _("mtu size only allowed in open, route, nat, "
+                             "and isolated mode, not in %s (network '%s')"),
+                           virNetworkForwardTypeToString(def->forward.type),
+                           def->name);
+            goto error;
+
+        case VIR_NETWORK_FORWARD_LAST:
+        default:
+            virReportEnumRangeError(virNetworkForwardType, def->forward.type);
+            goto error;
+        }
     }
 
     /* Extract custom metadata */
@@ -2349,6 +2378,7 @@ virNetworkDefFormatBuf(virBufferPtr buf,
     char uuidstr[VIR_UUID_STRING_BUFLEN];
     size_t i;
     bool shortforward;
+    bool hasbridge = false;
 
     virBufferAddLit(buf, "<network");
     if (!(flags & VIR_NETWORK_XML_INACTIVE) && (def->connections > 0))
@@ -2456,10 +2486,9 @@ virNetworkDefFormatBuf(virBufferPtr buf,
                     virBufferAddLit(buf, "/>\n");
                 } else {
                     if (def->forward.ifs[i].type ==  VIR_NETWORK_FORWARD_HOSTDEV_DEVICE_PCI) {
-                        if (virPCIDeviceAddressFormat(buf,
-                                                      def->forward.ifs[i].device.pci,
-                                                      true) < 0)
-                            goto error;
+                        virPCIDeviceAddressFormat(buf,
+                                                  def->forward.ifs[i].device.pci,
+                                                  true);
                     }
                 }
             }
@@ -2469,22 +2498,34 @@ virNetworkDefFormatBuf(virBufferPtr buf,
             virBufferAddLit(buf, "</forward>\n");
     }
 
+    switch ((virNetworkForwardType) def->forward.type) {
+    case VIR_NETWORK_FORWARD_NONE:
+    case VIR_NETWORK_FORWARD_NAT:
+    case VIR_NETWORK_FORWARD_ROUTE:
+    case VIR_NETWORK_FORWARD_OPEN:
+        hasbridge = true;
+        break;
 
-    if (def->forward.type == VIR_NETWORK_FORWARD_NONE ||
-        def->forward.type == VIR_NETWORK_FORWARD_NAT ||
-        def->forward.type == VIR_NETWORK_FORWARD_ROUTE ||
-        def->forward.type == VIR_NETWORK_FORWARD_OPEN ||
-        def->bridge || def->macTableManager) {
+    case VIR_NETWORK_FORWARD_BRIDGE:
+    case VIR_NETWORK_FORWARD_PRIVATE:
+    case VIR_NETWORK_FORWARD_VEPA:
+    case VIR_NETWORK_FORWARD_PASSTHROUGH:
+    case VIR_NETWORK_FORWARD_HOSTDEV:
+        break;
 
+    case VIR_NETWORK_FORWARD_LAST:
+    default:
+        virReportEnumRangeError(virNetworkForwardType, def->forward.type);
+        goto error;
+    }
+
+    if (hasbridge || def->bridge || def->macTableManager) {
         virBufferAddLit(buf, "<bridge");
         virBufferEscapeString(buf, " name='%s'", def->bridge);
-        if (def->forward.type == VIR_NETWORK_FORWARD_NONE ||
-            def->forward.type == VIR_NETWORK_FORWARD_NAT ||
-            def->forward.type == VIR_NETWORK_FORWARD_ROUTE ||
-            def->forward.type == VIR_NETWORK_FORWARD_OPEN) {
+        virBufferEscapeString(buf, " zone='%s'", def->bridgeZone);
+        if (hasbridge)
             virBufferAsprintf(buf, " stp='%s' delay='%ld'",
                               def->stp ? "on" : "off", def->delay);
-        }
         if (def->macTableManager) {
             virBufferAsprintf(buf, " macTableManager='%s'",
                              virNetworkBridgeMACTableManagerTypeToString(def->macTableManager));

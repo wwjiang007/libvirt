@@ -1,9 +1,6 @@
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
-#include <string.h>
 
 #include <sys/types.h>
 #include <fcntl.h>
@@ -144,6 +141,7 @@ mymain(void)
     DO_TEST("nat-network-dns-forwarder-no-resolv");
     DO_TEST("nat-network-forward-nat-address");
     DO_TEST("nat-network-forward-nat-no-address");
+    DO_TEST("nat-network-mtu");
     DO_TEST("8021Qbh-net");
     DO_TEST("direct-net");
     DO_TEST("host-bridge-net");

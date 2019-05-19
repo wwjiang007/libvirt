@@ -2,6 +2,7 @@
  * xen_xl.c: Xen XL parsing functions
  *
  * Copyright (c) 2015 SUSE LINUX Products GmbH, Nuernberg, Germany.
+ * Copyright (C) 2014 David Kiarie Kahurani
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,9 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Kiarie Kahurani <davidkiarie4@gmail.com>
- * Author: Jim Fehlig <jfehlig@suse.com>
  */
 
 #include <config.h>
@@ -66,7 +64,9 @@ extern int xlu_disk_parse(XLU_Config *cfg,
 static int xenParseCmdline(virConfPtr conf, char **r_cmdline)
 {
     char *cmdline = NULL;
-    const char *root, *extra, *buf;
+    VIR_AUTOFREE(char *) root = NULL;
+    VIR_AUTOFREE(char *) extra = NULL;
+    VIR_AUTOFREE(char *) buf = NULL;
 
     if (xenConfigGetString(conf, "cmdline", &buf, NULL) < 0)
         return -1;
@@ -105,8 +105,8 @@ xenParseXLOS(virConfPtr conf, virDomainDefPtr def, virCapsPtr caps)
     size_t i;
 
     if (def->os.type == VIR_DOMAIN_OSTYPE_HVM) {
-        const char *bios;
-        const char *boot;
+        VIR_AUTOFREE(char *) bios = NULL;
+        VIR_AUTOFREE(char *) boot = NULL;
         int val = 0;
 
         if (xenConfigGetString(conf, "bios", &bios, NULL) < 0)
@@ -256,7 +256,7 @@ xenTranslateCPUFeature(const char *feature_name, bool from_libxl)
 static int
 xenParseXLCPUID(virConfPtr conf, virDomainDefPtr def)
 {
-    const char *cpuid_str = NULL;
+    VIR_AUTOFREE(char *) cpuid_str = NULL;
     char **cpuid_pairs = NULL;
     char **name_and_value = NULL;
     size_t i;
@@ -476,15 +476,12 @@ xenParseXLVnuma(virConfPtr conf,
                 data++;
 
                 if (*data) {
-                    size_t len;
                     char vtoken[64];
 
                     if (STRPREFIX(str, "pnode")) {
                         unsigned int cellid;
 
-                        len = strlen(data);
-                        if (!virStrncpy(vtoken, data,
-                                        len, sizeof(vtoken))) {
+                        if (virStrcpyStatic(vtoken, data) < 0) {
                             virReportError(VIR_ERR_INTERNAL_ERROR,
                                            _("vnuma vnode %zu pnode '%s' too long for destination"),
                                            vnodeCnt, data);
@@ -500,9 +497,7 @@ xenParseXLVnuma(virConfPtr conf,
                         }
                         pnode = cellid;
                     } else if (STRPREFIX(str, "size")) {
-                        len = strlen(data);
-                        if (!virStrncpy(vtoken, data,
-                                        len, sizeof(vtoken))) {
+                        if (virStrcpyStatic(vtoken, data) < 0) {
                             virReportError(VIR_ERR_INTERNAL_ERROR,
                                            _("vnuma vnode %zu size '%s' too long for destination"),
                                            vnodeCnt, data);
@@ -515,9 +510,7 @@ xenParseXLVnuma(virConfPtr conf,
                         virDomainNumaSetNodeMemorySize(numa, vnodeCnt, (kbsize * 1024));
 
                     } else if (STRPREFIX(str, "vcpus")) {
-                        len = strlen(data);
-                        if (!virStrncpy(vtoken, data,
-                                        len, sizeof(vtoken))) {
+                        if (virStrcpyStatic(vtoken, data) < 0) {
                             virReportError(VIR_ERR_INTERNAL_ERROR,
                                            _("vnuma vnode %zu vcpus '%s' too long for destination"),
                                            vnodeCnt, data);
@@ -534,9 +527,7 @@ xenParseXLVnuma(virConfPtr conf,
                         size_t i, ndistances;
                         unsigned int value;
 
-                        len = strlen(data);
-                        if (!virStrncpy(vtoken, data,
-                                        len, sizeof(vtoken))) {
+                        if (virStrcpyStatic(vtoken, data) < 0) {
                             virReportError(VIR_ERR_INTERNAL_ERROR,
                                            _("vnuma vnode %zu vdistances '%s' too long for destination"),
                                            vnodeCnt, data);
@@ -613,6 +604,34 @@ xenParseXLVnuma(virConfPtr conf,
     VIR_FREE(tmp);
 
     return ret;
+}
+#endif
+
+#ifdef LIBXL_HAVE_BUILDINFO_GRANT_LIMITS
+static int
+xenParseXLGntLimits(virConfPtr conf, virDomainDefPtr def)
+{
+    unsigned long max_gntframes;
+    int ctlr_idx;
+    virDomainControllerDefPtr xenbus_ctlr;
+
+    if (xenConfigGetULong(conf, "max_grant_frames", &max_gntframes, 0) < 0)
+        return -1;
+
+    if (max_gntframes <= 0)
+        return 0;
+
+    ctlr_idx = virDomainControllerFindByType(def, VIR_DOMAIN_CONTROLLER_TYPE_XENBUS);
+    if (ctlr_idx == -1)
+        xenbus_ctlr = virDomainDefAddController(def, VIR_DOMAIN_CONTROLLER_TYPE_XENBUS, -1, -1);
+    else
+        xenbus_ctlr = def->controllers[ctlr_idx];
+
+    if (xenbus_ctlr == NULL)
+        return -1;
+
+    xenbus_ctlr->opts.xenbusopts.maxGrantFrames = max_gntframes;
+    return 0;
 }
 #endif
 
@@ -909,16 +928,16 @@ xenParseXLUSBController(virConfPtr conf, virDomainDefPtr def)
                 data++;
 
                 if (STRPREFIX(key, "type=")) {
-                    int len = nextkey ? (nextkey - data) : sizeof(type) - 1;
-                    if (virStrncpy(type, data, len, sizeof(type)) == NULL) {
+                    int len = nextkey ? (nextkey - data) : strlen(data);
+                    if (virStrncpy(type, data, len, sizeof(type)) < 0) {
                         virReportError(VIR_ERR_INTERNAL_ERROR,
                                        _("type %s invalid"),
                                        data);
                         goto skipusbctrl;
                     }
                 } else if (STRPREFIX(key, "version=")) {
-                    int len = nextkey ? (nextkey - data) : sizeof(version) - 1;
-                    if (virStrncpy(version, data, len, sizeof(version)) == NULL) {
+                    int len = nextkey ? (nextkey - data) : strlen(data);
+                    if (virStrncpy(version, data, len, sizeof(version)) < 0) {
                         virReportError(VIR_ERR_INTERNAL_ERROR,
                                        _("version %s invalid"),
                                        data);
@@ -927,8 +946,8 @@ xenParseXLUSBController(virConfPtr conf, virDomainDefPtr def)
                     if (virStrToLong_i(version, NULL, 16, &usbctrl_version) < 0)
                         goto skipusbctrl;
                 } else if (STRPREFIX(key, "ports=")) {
-                    int len = nextkey ? (nextkey - data) : sizeof(ports) - 1;
-                    if (virStrncpy(ports, data, len, sizeof(ports)) == NULL) {
+                    int len = nextkey ? (nextkey - data) : strlen(data);
+                    if (virStrncpy(ports, data, len, sizeof(ports)) < 0) {
                         virReportError(VIR_ERR_INTERNAL_ERROR,
                                        _("version %s invalid"),
                                        data);
@@ -1011,16 +1030,16 @@ xenParseXLUSB(virConfPtr conf, virDomainDefPtr def)
                 data++;
 
                 if (STRPREFIX(key, "hostbus=")) {
-                    int len = nextkey ? (nextkey - data) : sizeof(bus) - 1;
-                    if (virStrncpy(bus, data, len, sizeof(bus)) == NULL) {
+                    int len = nextkey ? (nextkey - data) : strlen(data);
+                    if (virStrncpy(bus, data, len, sizeof(bus)) < 0) {
                         virReportError(VIR_ERR_INTERNAL_ERROR,
                                        _("bus %s too big for destination"),
                                        data);
                         goto skipusb;
                     }
                 } else if (STRPREFIX(key, "hostaddr=")) {
-                    int len = nextkey ? (nextkey - data) : sizeof(device) - 1;
-                    if (virStrncpy(device, data, len, sizeof(device)) == NULL) {
+                    int len = nextkey ? (nextkey - data) : strlen(data);
+                    if (virStrncpy(device, data, len, sizeof(device)) < 0) {
                         virReportError(VIR_ERR_INTERNAL_ERROR,
                                        _("device %s too big for destination"),
                                        data);
@@ -1087,8 +1106,8 @@ xenParseXLChannel(virConfPtr conf, virDomainDefPtr def)
                 data++;
 
                 if (STRPREFIX(key, "connection=")) {
-                    int len = nextkey ? (nextkey - data) : sizeof(type) - 1;
-                    if (virStrncpy(type, data, len, sizeof(type)) == NULL) {
+                    int len = nextkey ? (nextkey - data) : strlen(data);
+                    if (virStrncpy(type, data, len, sizeof(type)) < 0) {
                         virReportError(VIR_ERR_INTERNAL_ERROR,
                                        _("connection %s too big"), data);
                         goto skipchannel;
@@ -1171,6 +1190,11 @@ xenParseXL(virConfPtr conf,
 
 #ifdef LIBXL_HAVE_VNUMA
     if (xenParseXLVnuma(conf, def) < 0)
+        goto cleanup;
+#endif
+
+#ifdef LIBXL_HAVE_BUILDINFO_GRANT_LIMITS
+    if (xenParseXLGntLimits(conf, def) < 0)
         goto cleanup;
 #endif
 
@@ -1295,6 +1319,11 @@ xenFormatXLOS(virConfPtr conf, virDomainDefPtr def)
 
         /* XXX floppy disks */
     } else {
+        if (def->os.type == VIR_DOMAIN_OSTYPE_XENPVH) {
+            if (xenConfigSetString(conf, "type", "pvh") < 0)
+                return -1;
+        }
+
         if (def->os.bootloader &&
              xenConfigSetString(conf, "bootloader", def->os.bootloader) < 0)
             return -1;
@@ -1521,6 +1550,24 @@ xenFormatXLDomainVnuma(virConfPtr conf,
 }
 #endif
 
+#ifdef LIBXL_HAVE_BUILDINFO_GRANT_LIMITS
+static int
+xenFormatXLGntLimits(virConfPtr conf, virDomainDefPtr def)
+{
+    size_t i;
+
+    for (i = 0; i < def->ncontrollers; i++) {
+        if (def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_XENBUS &&
+            def->controllers[i]->opts.xenbusopts.maxGrantFrames > 0) {
+            if (xenConfigSetInt(conf, "max_grant_frames",
+                                def->controllers[i]->opts.xenbusopts.maxGrantFrames) < 0)
+                return -1;
+        }
+    }
+    return 0;
+}
+#endif
+
 static char *
 xenFormatXLDiskSrcNet(virStorageSourcePtr src)
 {
@@ -1601,7 +1648,7 @@ xenFormatXLDiskSrc(virStorageSourcePtr src, char **srcstr)
     if (virStorageSourceIsEmpty(src))
         return 0;
 
-    switch ((virStorageType) actualType) {
+    switch ((virStorageType)actualType) {
     case VIR_STORAGE_TYPE_BLOCK:
     case VIR_STORAGE_TYPE_FILE:
     case VIR_STORAGE_TYPE_DIR:
@@ -2167,6 +2214,11 @@ xenFormatXL(virDomainDefPtr def, virConnectPtr conn)
 
 #ifdef LIBXL_HAVE_VNUMA
     if (xenFormatXLDomainVnuma(conf, def) < 0)
+        goto cleanup;
+#endif
+
+#ifdef LIBXL_HAVE_BUILDINFO_GRANT_LIMITS
+    if (xenFormatXLGntLimits(conf, def) < 0)
         goto cleanup;
 #endif
 

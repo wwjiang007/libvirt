@@ -19,12 +19,12 @@
  *
  */
 
-
-#ifndef __VIR_TYPED_PARAM_H_
-# define __VIR_TYPED_PARAM_H_
+#ifndef LIBVIRT_VIRTYPEDPARAM_H
+# define LIBVIRT_VIRTYPEDPARAM_H
 
 # include "internal.h"
 # include "virutil.h"
+# include "virenum.h"
 
 /**
  * VIR_TYPED_PARAM_MULTIPLE:
@@ -118,7 +118,7 @@ int virTypedParamsSerialize(virTypedParameterPtr params,
                             unsigned int *remote_params_len,
                             unsigned int flags);
 
-VIR_ENUM_DECL(virTypedParameter)
+VIR_ENUM_DECL(virTypedParameter);
 
 # define VIR_TYPED_PARAMS_DEBUG(params, nparams) \
     do { \
@@ -135,4 +135,4 @@ VIR_ENUM_DECL(virTypedParameter)
         } \
     } while (0)
 
-#endif /* __VIR_TYPED_PARAM_H */
+#endif /* LIBVIRT_VIRTYPEDPARAM_H */

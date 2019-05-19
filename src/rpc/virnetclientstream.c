@@ -16,8 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -36,8 +34,6 @@ VIR_LOG_INIT("rpc.netclientstream");
 struct _virNetClientStream {
     virObjectLockable parent;
 
-    virStreamPtr stream; /* Reverse pointer to parent stream */
-
     virNetClientProgramPtr prog;
     int proc;
     unsigned serial;
@@ -53,6 +49,7 @@ struct _virNetClientStream {
      */
     virNetMessagePtr rx;
     bool incomingEOF;
+    virNetClientStreamClosed closed;
 
     bool allowSkip;
     long long holeLength;  /* Size of incoming hole in stream. */
@@ -77,7 +74,7 @@ static int virNetClientStreamOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(virNetClientStream)
+VIR_ONCE_GLOBAL_INIT(virNetClientStream);
 
 
 static void
@@ -88,7 +85,7 @@ virNetClientStreamEventTimerUpdate(virNetClientStreamPtr st)
 
     VIR_DEBUG("Check timer rx=%p cbEvents=%d", st->rx, st->cbEvents);
 
-    if (((st->rx || st->incomingEOF) &&
+    if (((st->rx || st->incomingEOF || st->err.code != VIR_ERR_OK || st->closed) &&
          (st->cbEvents & VIR_STREAM_EVENT_READABLE)) ||
         (st->cbEvents & VIR_STREAM_EVENT_WRITABLE)) {
         VIR_DEBUG("Enabling event timer");
@@ -110,7 +107,7 @@ virNetClientStreamEventTimer(int timer ATTRIBUTE_UNUSED, void *opaque)
 
     if (st->cb &&
         (st->cbEvents & VIR_STREAM_EVENT_READABLE) &&
-        (st->rx || st->incomingEOF))
+        (st->rx || st->incomingEOF || st->err.code != VIR_ERR_OK || st->closed))
         events |= VIR_STREAM_EVENT_READABLE;
     if (st->cb &&
         (st->cbEvents & VIR_STREAM_EVENT_WRITABLE))
@@ -135,8 +132,7 @@ virNetClientStreamEventTimer(int timer ATTRIBUTE_UNUSED, void *opaque)
 }
 
 
-virNetClientStreamPtr virNetClientStreamNew(virStreamPtr stream,
-                                            virNetClientProgramPtr prog,
+virNetClientStreamPtr virNetClientStreamNew(virNetClientProgramPtr prog,
                                             int proc,
                                             unsigned serial,
                                             bool allowSkip)
@@ -149,7 +145,6 @@ virNetClientStreamPtr virNetClientStreamNew(virStreamPtr stream,
     if (!(st = virObjectLockableNew(virNetClientStreamClass)))
         return NULL;
 
-    st->stream = virObjectRef(stream);
     st->prog = virObjectRef(prog);
     st->proc = proc;
     st->serial = serial;
@@ -169,7 +164,6 @@ void virNetClientStreamDispose(void *obj)
         virNetMessageFree(msg);
     }
     virObjectUnref(st->prog);
-    virObjectUnref(st->stream);
 }
 
 bool virNetClientStreamMatches(virNetClientStreamPtr st,
@@ -186,14 +180,9 @@ bool virNetClientStreamMatches(virNetClientStreamPtr st,
 }
 
 
-bool virNetClientStreamRaiseError(virNetClientStreamPtr st)
+static
+void virNetClientStreamRaiseError(virNetClientStreamPtr st)
 {
-    virObjectLock(st);
-    if (st->err.code == VIR_ERR_OK) {
-        virObjectUnlock(st);
-        return false;
-    }
-
     virRaiseErrorFull(__FILE__, __FUNCTION__, __LINE__,
                       st->err.domain,
                       st->err.code,
@@ -204,8 +193,69 @@ bool virNetClientStreamRaiseError(virNetClientStreamPtr st)
                       st->err.int1,
                       st->err.int2,
                       "%s", st->err.message ? st->err.message : _("Unknown error"));
+}
+
+
+/* MUST be called under stream or client lock */
+int virNetClientStreamCheckState(virNetClientStreamPtr st)
+{
+    if (st->err.code != VIR_ERR_OK) {
+        virNetClientStreamRaiseError(st);
+        return -1;
+    }
+
+    if (st->closed) {
+        virReportError(VIR_ERR_OPERATION_FAILED, "%s",
+                       _("stream is closed"));
+        return -1;
+    }
+
+    return 0;
+}
+
+
+/* MUST be called under stream or client lock. This should
+ * be called only for message that expect reply.  */
+int virNetClientStreamCheckSendStatus(virNetClientStreamPtr st,
+                                      virNetMessagePtr msg)
+{
+    if (st->err.code != VIR_ERR_OK) {
+        virNetClientStreamRaiseError(st);
+        return -1;
+    }
+
+    /* We can not check if the message is dummy in a usual way
+     * by checking msg->bufferLength because at this point message payload
+     * is cleared. As caller must not call this function for messages
+     * not expecting reply we can check for dummy messages just by status.
+     */
+    if (msg->header.status == VIR_NET_CONTINUE) {
+        if (st->closed) {
+            virReportError(VIR_ERR_OPERATION_FAILED, "%s",
+                           _("stream is closed"));
+            return -1;
+        }
+        return 0;
+    } else if (msg->header.status == VIR_NET_OK &&
+               st->closed != VIR_NET_CLIENT_STREAM_CLOSED_FINISHED) {
+        virReportError(VIR_ERR_OPERATION_FAILED, "%s",
+                       _("stream aborted by another thread"));
+        return -1;
+    }
+
+    return 0;
+}
+
+
+void virNetClientStreamSetClosed(virNetClientStreamPtr st,
+                                 virNetClientStreamClosed closed)
+{
+    virObjectLock(st);
+
+    st->closed = closed;
+    virNetClientStreamEventTimerUpdate(st);
+
     virObjectUnlock(st);
-    return true;
 }
 
 
@@ -256,7 +306,6 @@ int virNetClientStreamSetError(virNetClientStreamPtr st,
     st->err.int1 = err.int1;
     st->err.int2 = err.int2;
 
-    st->incomingEOF = true;
     virNetClientStreamEventTimerUpdate(st);
 
     ret = 0;
@@ -345,17 +394,13 @@ int virNetClientStreamSendPacket(virNetClientStreamPtr st,
     if (status == VIR_NET_CONTINUE) {
         if (virNetMessageEncodePayloadRaw(msg, data, nbytes) < 0)
             goto error;
-
-        if (virNetClientSendNoReply(client, msg) < 0)
-            goto error;
     } else {
         if (virNetMessageEncodePayloadRaw(msg, NULL, 0) < 0)
             goto error;
-
-        if (virNetClientSendWithReply(client, msg) < 0)
-            goto error;
     }
 
+    if (virNetClientSendStream(client, msg, st) < 0)
+        goto error;
 
     virNetMessageFree(msg);
 
@@ -440,7 +485,7 @@ virNetClientStreamHandleHole(virNetClientPtr client,
     }
 
     if (virNetMessageDecodePayload(msg,
-                                   (xdrproc_t) xdr_virNetStreamHole,
+                                   (xdrproc_t)xdr_virNetStreamHole,
                                    &data) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Malformed stream hole packet"));
@@ -480,6 +525,9 @@ int virNetClientStreamRecvPacket(virNetClientStreamPtr st,
     virObjectLock(st);
 
  reread:
+    if (virNetClientStreamCheckState(st) < 0)
+        goto cleanup;
+
     if (!st->rx && !st->incomingEOF) {
         virNetMessagePtr msg;
         int ret;
@@ -502,7 +550,7 @@ int virNetClientStreamRecvPacket(virNetClientStreamPtr st,
 
         VIR_DEBUG("Dummy packet to wait for stream data");
         virObjectUnlock(st);
-        ret = virNetClientSendWithReplyStream(client, msg, st);
+        ret = virNetClientSendStream(client, msg, st);
         virObjectLock(st);
         virNetMessageFree(msg);
 
@@ -625,11 +673,11 @@ virNetClientStreamSendHole(virNetClientStreamPtr st,
         goto cleanup;
 
     if (virNetMessageEncodePayload(msg,
-                                   (xdrproc_t) xdr_virNetStreamHole,
+                                   (xdrproc_t)xdr_virNetStreamHole,
                                    &data) < 0)
         goto cleanup;
 
-    if (virNetClientSendNoReply(client, msg) < 0)
+    if (virNetClientSendStream(client, msg, st) < 0)
         goto cleanup;
 
     ret = 0;
@@ -650,8 +698,17 @@ virNetClientStreamRecvHole(virNetClientPtr client ATTRIBUTE_UNUSED,
         return -1;
     }
 
+    virObjectLock(st);
+
+    if (virNetClientStreamCheckState(st) < 0) {
+        virObjectUnlock(st);
+        return -1;
+    }
+
     *length = st->holeLength;
     st->holeLength = 0;
+
+    virObjectUnlock(st);
     return 0;
 }
 

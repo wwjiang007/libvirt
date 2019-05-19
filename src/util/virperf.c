@@ -14,9 +14,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *  Ren Qiaowei <qiaowei.ren@intel.com>
  */
 #include <config.h>
 
@@ -26,18 +23,19 @@
 #endif
 
 #include "virperf.h"
-#include "viralloc.h"
 #include "virerror.h"
 #include "virlog.h"
 #include "virfile.h"
 #include "virstring.h"
 #include "virtypedparam.h"
+#include "viralloc.h"
 
 VIR_LOG_INIT("util.perf");
 
 #define VIR_FROM_THIS VIR_FROM_PERF
 
-VIR_ENUM_IMPL(virPerfEvent, VIR_PERF_EVENT_LAST,
+VIR_ENUM_IMPL(virPerfEvent,
+              VIR_PERF_EVENT_LAST,
               "cmt", "mbmt", "mbml",
               "cpu_cycles", "instructions",
               "cache_references", "cache_misses",
@@ -47,7 +45,8 @@ VIR_ENUM_IMPL(virPerfEvent, VIR_PERF_EVENT_LAST,
               "cpu_clock", "task_clock", "page_faults",
               "context_switches", "cpu_migrations",
               "page_faults_min", "page_faults_maj",
-              "alignment_faults", "emulation_faults");
+              "alignment_faults", "emulation_faults",
+);
 
 struct virPerfEvent {
     int fd;
@@ -61,7 +60,7 @@ struct virPerfEvent {
 };
 typedef struct virPerfEvent *virPerfEventPtr;
 
-struct virPerf {
+struct _virPerf {
     struct virPerfEvent events[VIR_PERF_EVENT_LAST];
 };
 
@@ -176,12 +175,12 @@ typedef struct virPerfEventAttr *virPerfEventAttrPtr;
 static int
 virPerfRdtAttrInit(void)
 {
-    char *buf = NULL;
     char *tmp = NULL;
     unsigned int attr_type = 0;
+    VIR_AUTOFREE(char *) buf = NULL;
 
     if (virFileReadAllQuiet("/sys/devices/intel_cqm/type", 10, &buf) < 0)
-        goto error;
+        return -1;
 
     if ((tmp = strchr(buf, '\n')))
         *tmp = '\0';
@@ -189,19 +188,14 @@ virPerfRdtAttrInit(void)
     if (virStrToLong_ui(buf, NULL, 10, &attr_type) < 0) {
         virReportSystemError(errno, "%s",
                              _("failed to get rdt event type"));
-        goto error;
+        return -1;
     }
-    VIR_FREE(buf);
 
     attrs[VIR_PERF_EVENT_CMT].attrType = attr_type;
     attrs[VIR_PERF_EVENT_MBMT].attrType = attr_type;
     attrs[VIR_PERF_EVENT_MBML].attrType = attr_type;
 
     return 0;
-
- error:
-    VIR_FREE(buf);
-    return -1;
 }
 
 
@@ -210,7 +204,6 @@ virPerfEventEnable(virPerfPtr perf,
                    virPerfEventType type,
                    pid_t pid)
 {
-    char *buf = NULL;
     struct perf_event_attr attr;
     virPerfEventPtr event = &(perf->events[type]);
     virPerfEventAttrPtr event_attr = &attrs[type];
@@ -219,8 +212,8 @@ virPerfEventEnable(virPerfPtr perf,
         return 0;
 
     if (event_attr->attrType == 0 && (type == VIR_PERF_EVENT_CMT ||
-                                       type == VIR_PERF_EVENT_MBMT ||
-                                       type == VIR_PERF_EVENT_MBML)) {
+                                      type == VIR_PERF_EVENT_MBMT ||
+                                      type == VIR_PERF_EVENT_MBML)) {
         virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED,
                        _("unable to enable host cpu perf event for %s"),
                        virPerfEventTypeToString(type));
@@ -228,6 +221,8 @@ virPerfEventEnable(virPerfPtr perf,
     }
 
     if (type == VIR_PERF_EVENT_CMT) {
+        VIR_AUTOFREE(char *) buf = NULL;
+
         if (virFileReadAll("/sys/devices/intel_cqm/events/llc_occupancy.scale",
                            10, &buf) < 0)
             goto error;
@@ -237,8 +232,6 @@ virPerfEventEnable(virPerfPtr perf,
                                  _("failed to get cmt scaling factor"));
             goto error;
         }
-
-        VIR_FREE(buf);
     }
 
     memset(&attr, 0, sizeof(attr));
@@ -269,7 +262,6 @@ virPerfEventEnable(virPerfPtr perf,
 
  error:
     VIR_FORCE_CLOSE(event->fd);
-    VIR_FREE(buf);
     return -1;
 }
 

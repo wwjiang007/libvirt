@@ -17,12 +17,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __QEMU_ALIAS_H__
-# define __QEMU_ALIAS_H__
+#ifndef LIBVIRT_QEMU_ALIAS_H
+# define LIBVIRT_QEMU_ALIAS_H
 
 # include "domain_conf.h"
 
@@ -39,7 +37,8 @@ int qemuAssignDeviceControllerAlias(virDomainDefPtr domainDef,
                                     virDomainControllerDefPtr controller);
 
 int qemuAssignDeviceDiskAlias(virDomainDefPtr def,
-                              virDomainDiskDefPtr disk);
+                              virDomainDiskDefPtr disk,
+                              virQEMUCapsPtr qemuCaps);
 
 int qemuAssignDeviceHostdevAlias(virDomainDefPtr def,
                                  char **alias,
@@ -70,12 +69,14 @@ int qemuAssignDeviceInputAlias(virDomainDefPtr def,
                                virDomainInputDefPtr input,
                                int idx);
 
+int qemuAssignDeviceVsockAlias(virDomainVsockDefPtr vsock);
+
 int qemuAssignDeviceAliases(virDomainDefPtr def, virQEMUCapsPtr qemuCaps);
 
 int qemuDomainDeviceAliasIndex(const virDomainDeviceInfo *info,
                                const char *prefix);
 
-char *qemuAliasFromDisk(const virDomainDiskDef *disk);
+char *qemuAliasDiskDriveFromDisk(const virDomainDiskDef *disk);
 
 const char *qemuAliasDiskDriveSkipPrefix(const char *dev_name);
 
@@ -92,4 +93,8 @@ char *qemuAliasTLSObjFromSrcAlias(const char *srcAlias)
 char *qemuAliasChardevFromDevAlias(const char *devAlias)
     ATTRIBUTE_NONNULL(1);
 
-#endif /* __QEMU_ALIAS_H__*/
+const char *qemuDomainGetManagedPRAlias(void);
+
+char *qemuDomainGetUnmanagedPRAlias(const char *parentalias);
+
+#endif /* LIBVIRT_QEMU_ALIAS_H */

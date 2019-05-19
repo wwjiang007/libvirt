@@ -18,12 +18,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: David F. Lively <dlively@virtualiron.com>
  */
 
-#ifndef __VIR_NODE_DEVICE_CONF_H__
-# define __VIR_NODE_DEVICE_CONF_H__
+#ifndef LIBVIRT_NODE_DEVICE_CONF_H
+# define LIBVIRT_NODE_DEVICE_CONF_H
 
 # include "internal.h"
 # include "virbitmap.h"
@@ -33,6 +31,7 @@
 # include "virvhba.h"
 # include "device_conf.h"
 # include "storage_adapter_conf.h"
+# include "virenum.h"
 
 # include <libxml/tree.h>
 
@@ -47,7 +46,7 @@ typedef enum {
     VIR_NODE_DEV_DEVNODE_LAST
 } virNodeDevDevnodeType;
 
-VIR_ENUM_DECL(virNodeDevDevnode)
+VIR_ENUM_DECL(virNodeDevDevnode);
 
 typedef enum {
     /* Keep in sync with VIR_ENUM_IMPL in node_device_conf.c */
@@ -78,8 +77,8 @@ typedef enum {
     VIR_NODE_DEV_CAP_NET_LAST
 } virNodeDevNetCapType;
 
-VIR_ENUM_DECL(virNodeDevCap)
-VIR_ENUM_DECL(virNodeDevNetCap)
+VIR_ENUM_DECL(virNodeDevCap);
+VIR_ENUM_DECL(virNodeDevNetCap);
 
 typedef enum {
     VIR_NODE_DEV_CAP_STORAGE_REMOVABLE                  = (1 << 0),
@@ -112,7 +111,7 @@ typedef enum {
     VIR_NODE_DEV_DRM_LAST
 } virNodeDevDRMType;
 
-VIR_ENUM_DECL(virNodeDevDRM)
+VIR_ENUM_DECL(virNodeDevDRM);
 
 typedef struct _virNodeDevCapSystemHardware virNodeDevCapSystemHardware;
 typedef virNodeDevCapSystemHardware *virNodeDevCapSystemHardwarePtr;
@@ -155,7 +154,7 @@ struct _virNodeDevCapPCIDev {
     unsigned int function;
     unsigned int product;
     unsigned int vendor;
-    unsigned int class;
+    int klass;
     char *product_name;
     char *vendor_name;
     virPCIDeviceAddressPtr physical_function;
@@ -188,7 +187,7 @@ typedef struct _virNodeDevCapUSBIf virNodeDevCapUSBIf;
 typedef virNodeDevCapUSBIf *virNodeDevCapUSBIfPtr;
 struct _virNodeDevCapUSBIf {
     unsigned int number;
-    unsigned int _class;                /* "class" is reserved in C */
+    unsigned int klass;
     unsigned int subclass;
     unsigned int protocol;
     char *description;
@@ -367,17 +366,6 @@ virNodeDevCapsDefFree(virNodeDevCapsDefPtr caps);
                  VIR_CONNECT_LIST_NODE_DEVICES_CAP_MDEV          | \
                  VIR_CONNECT_LIST_NODE_DEVICES_CAP_CCW_DEV)
 
-char *
-virNodeDeviceGetParentName(virConnectPtr conn,
-                           const char *nodedev_name);
-
-char *
-virNodeDeviceCreateVport(virStorageAdapterFCHostPtr fchost);
-
-int
-virNodeDeviceDeleteVport(virConnectPtr conn,
-                         virStorageAdapterFCHostPtr fchost);
-
 int
 virNodeDeviceGetSCSIHostCaps(virNodeDevCapSCSIHostPtr scsi_host);
 
@@ -396,4 +384,4 @@ int
 virNodeDeviceCapsListExport(virNodeDeviceDefPtr def,
                             virNodeDevCapType **list);
 
-#endif /* __VIR_NODE_DEVICE_CONF_H__ */
+#endif /* LIBVIRT_NODE_DEVICE_CONF_H */

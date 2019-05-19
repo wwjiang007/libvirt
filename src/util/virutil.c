@@ -19,19 +19,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
- * File created Jul 18, 2007 - Shuveb Hussain <shuveb@binarykarma.com>
  */
 
 #include <config.h>
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <stdarg.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <errno.h>
 #include <poll.h>
 #include <sys/stat.h>
 
@@ -42,8 +35,6 @@
 #endif
 
 #include <sys/types.h>
-#include <sys/ioctl.h>
-#include <string.h>
 #include <termios.h>
 
 #if WITH_DEVMAPPER
@@ -92,37 +83,6 @@ verify(sizeof(gid_t) <= sizeof(unsigned int) &&
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 VIR_LOG_INIT("util.util");
-
-VIR_ENUM_IMPL(virTristateBool, VIR_TRISTATE_BOOL_LAST,
-              "default",
-              "yes",
-              "no")
-
-VIR_ENUM_IMPL(virTristateSwitch, VIR_TRISTATE_SWITCH_LAST,
-              "default",
-              "on",
-              "off")
-
-
-virTristateBool
-virTristateBoolFromBool(bool val)
-{
-    if (val)
-        return VIR_TRISTATE_BOOL_YES;
-    else
-        return VIR_TRISTATE_BOOL_NO;
-}
-
-
-virTristateSwitch
-virTristateSwitchFromBool(bool val)
-{
-    if (val)
-        return VIR_TRISTATE_SWITCH_ON;
-    else
-        return VIR_TRISTATE_SWITCH_OFF;
-}
-
 
 #ifndef WIN32
 
@@ -198,88 +158,6 @@ int virSetSockReuseAddr(int fd, bool fatal)
 }
 #endif
 
-int
-virPipeReadUntilEOF(int outfd, int errfd,
-                    char **outbuf, char **errbuf) {
-
-    struct pollfd fds[2];
-    size_t i;
-    bool finished[2];
-
-    fds[0].fd = outfd;
-    fds[0].events = POLLIN;
-    fds[0].revents = 0;
-    finished[0] = false;
-    fds[1].fd = errfd;
-    fds[1].events = POLLIN;
-    fds[1].revents = 0;
-    finished[1] = false;
-
-    while (!(finished[0] && finished[1])) {
-
-        if (poll(fds, ARRAY_CARDINALITY(fds), -1) < 0) {
-            if ((errno == EAGAIN) || (errno == EINTR))
-                continue;
-            goto pollerr;
-        }
-
-        for (i = 0; i < ARRAY_CARDINALITY(fds); ++i) {
-            char data[1024], **buf;
-            int got, size;
-
-            if (!(fds[i].revents))
-                continue;
-            else if (fds[i].revents & POLLHUP)
-                finished[i] = true;
-
-            if (!(fds[i].revents & POLLIN)) {
-                if (fds[i].revents & POLLHUP)
-                    continue;
-
-                virReportError(VIR_ERR_INTERNAL_ERROR,
-                               "%s", _("Unknown poll response."));
-                goto error;
-            }
-
-            got = read(fds[i].fd, data, sizeof(data));
-
-            if (got == sizeof(data))
-                finished[i] = false;
-
-            if (got == 0) {
-                finished[i] = true;
-                continue;
-            }
-            if (got < 0) {
-                if (errno == EINTR)
-                    continue;
-                if (errno == EAGAIN)
-                    break;
-                goto pollerr;
-            }
-
-            buf = ((fds[i].fd == outfd) ? outbuf : errbuf);
-            size = (*buf ? strlen(*buf) : 0);
-            if (VIR_REALLOC_N(*buf, size+got+1) < 0)
-                goto error;
-            memmove(*buf+size, data, got);
-            (*buf)[size+got] = '\0';
-        }
-        continue;
-
-    pollerr:
-        virReportSystemError(errno,
-                             "%s", _("poll error"));
-        goto error;
-    }
-
-    return 0;
-
- error:
-    VIR_FREE(*outbuf);
-    VIR_FREE(*errbuf);
-    return -1;
-}
 
 /* Convert C from hexadecimal character to integer.  */
 int
@@ -327,7 +205,7 @@ virScaleInteger(unsigned long long *value, const char *suffix,
             base = 1000;
         } else {
             virReportError(VIR_ERR_INVALID_ARG,
-                         _("unknown suffix '%s'"), suffix);
+                           _("unknown suffix '%s'"), suffix);
             return -1;
         }
         scale = 1;
@@ -366,37 +244,6 @@ virScaleInteger(unsigned long long *value, const char *suffix,
     return 0;
 }
 
-
-/**
- * virParseNumber:
- * @str: pointer to the char pointer used
- *
- * Parse an unsigned number
- *
- * Returns the unsigned number or -1 in case of error. @str will be
- *         updated to skip the number.
- */
-int
-virParseNumber(const char **str)
-{
-    int ret = 0;
-    const char *cur = *str;
-
-    if ((*cur < '0') || (*cur > '9'))
-        return -1;
-
-    while (c_isdigit(*cur)) {
-        unsigned int c = *cur - '0';
-
-        if ((ret > INT_MAX / 10) ||
-            ((ret == INT_MAX / 10) && (c > INT_MAX % 10)))
-            return -1;
-        ret = ret * 10 + c;
-        cur++;
-    }
-    *str = cur;
-    return ret;
-}
 
 /**
  * virParseVersionString:
@@ -444,22 +291,6 @@ virParseVersionString(const char *str, unsigned long *version,
     return 0;
 }
 
-int virEnumFromString(const char *const*types,
-                      unsigned int ntypes,
-                      const char *type)
-{
-    size_t i;
-    if (!type)
-        return -1;
-
-    for (i = 0; i < ntypes; i++)
-        if (STREQ(types[i], type))
-            return i;
-
-    return -1;
-}
-
-
 /**
  * Format @val as a base-10 decimal number, in the
  * buffer @buf of size @buflen. To allocate a suitable
@@ -497,6 +328,10 @@ virFormatIntDecimal(char *buf, size_t buflen, int val)
  *
  * Similar to vshPrettyCapacity, but operates on integers and not doubles
  *
+ * NB: Since using unsigned long long, we are limited to at most a "PiB"
+ *     to make pretty. This is because a PiB is 1152921504606846976 bytes,
+ *     but that value * 1024 > ULLONG_MAX value 18446744073709551615 bytes.
+ *
  * Returns shortened value that can be used with @unit.
  */
 unsigned long long
@@ -530,25 +365,10 @@ virFormatIntPretty(unsigned long long val,
         return val / (limit / 1024);
     }
     limit *= 1024;
-    if (val % limit) {
-        *unit = "PiB";
-        return val / (limit / 1024);
-    }
-    limit *= 1024;
-    *unit = "EiB";
+    *unit = "PiB";
     return val / (limit / 1024);
 }
 
-
-const char *virEnumToString(const char *const*types,
-                            unsigned int ntypes,
-                            int type)
-{
-    if (type < 0 || type >= ntypes)
-        return NULL;
-
-    return types[type];
-}
 
 /* Translates a device name of the form (regex) /^[fhv]d[a-z]+[0-9]*$/
  * into the corresponding index and partition number
@@ -942,7 +762,7 @@ char *virGetUserConfigDirectory(void)
 
 char *virGetUserCacheDirectory(void)
 {
-     return virGetXDGDirectory("XDG_CACHE_HOME", ".cache");
+    return virGetXDGDirectory("XDG_CACHE_HOME", ".cache");
 }
 
 char *virGetUserRuntimeDirectory(void)
@@ -973,9 +793,11 @@ char *virGetGroupName(gid_t gid)
 
 /* Search in the password database for a user id that matches the user name
  * `name`. Returns 0 on success, -1 on failure or 1 if name cannot be found.
+ *
+ * Warns if @missing_ok is false
  */
 static int
-virGetUserIDByName(const char *name, uid_t *uid)
+virGetUserIDByName(const char *name, uid_t *uid, bool missing_ok)
 {
     char *strbuf = NULL;
     struct passwd pwbuf;
@@ -998,7 +820,7 @@ virGetUserIDByName(const char *name, uid_t *uid)
     }
 
     if (!pw) {
-        if (rc != 0) {
+        if (rc != 0 && !missing_ok) {
             char buf[1024];
             /* log the possible error from getpwnam_r. Unfortunately error
              * reporting from this function is bad and we can't really
@@ -1011,7 +833,8 @@ virGetUserIDByName(const char *name, uid_t *uid)
         goto cleanup;
     }
 
-    *uid = pw->pw_uid;
+    if (uid)
+        *uid = pw->pw_uid;
     ret = 0;
 
  cleanup:
@@ -1034,7 +857,7 @@ virGetUserID(const char *user, uid_t *uid)
     if (*user == '+') {
         user++;
     } else {
-        int rc = virGetUserIDByName(user, uid);
+        int rc = virGetUserIDByName(user, uid, false);
         if (rc <= 0)
             return rc;
     }
@@ -1053,9 +876,11 @@ virGetUserID(const char *user, uid_t *uid)
 
 /* Search in the group database for a group id that matches the group name
  * `name`. Returns 0 on success, -1 on failure or 1 if name cannot be found.
+ *
+ * Warns if @missing_ok is false
  */
 static int
-virGetGroupIDByName(const char *name, gid_t *gid)
+virGetGroupIDByName(const char *name, gid_t *gid, bool missing_ok)
 {
     char *strbuf = NULL;
     struct group grbuf;
@@ -1078,7 +903,7 @@ virGetGroupIDByName(const char *name, gid_t *gid)
     }
 
     if (!gr) {
-        if (rc != 0) {
+        if (rc != 0 && !missing_ok) {
             char buf[1024];
             /* log the possible error from getgrnam_r. Unfortunately error
              * reporting from this function is bad and we can't really
@@ -1091,7 +916,8 @@ virGetGroupIDByName(const char *name, gid_t *gid)
         goto cleanup;
     }
 
-    *gid = gr->gr_gid;
+    if (gid)
+        *gid = gr->gr_gid;
     ret = 0;
 
  cleanup:
@@ -1114,7 +940,7 @@ virGetGroupID(const char *group, gid_t *gid)
     if (*group == '+') {
         group++;
     } else {
-        int rc = virGetGroupIDByName(group, gid);
+        int rc = virGetGroupIDByName(group, gid, false);
         if (rc <= 0)
             return rc;
     }
@@ -1129,6 +955,24 @@ virGetGroupID(const char *group, gid_t *gid)
     *gid = uint_gid;
 
     return 0;
+}
+
+/* Silently checks if User @name exists.
+ * Returns if the user exists and fallbacks to false on error.
+ */
+bool
+virDoesUserExist(const char *name)
+{
+    return virGetUserIDByName(name, NULL, true) == 0;
+}
+
+/* Silently checks if Group @name exists.
+ * Returns if the group exists and fallbacks to false on error.
+ */
+bool
+virDoesGroupExist(const char *name)
+{
+    return virGetGroupIDByName(name, NULL, true) == 0;
 }
 
 
@@ -1224,6 +1068,18 @@ virGetGroupList(uid_t uid ATTRIBUTE_UNUSED, gid_t gid ATTRIBUTE_UNUSED,
 {
     *list = NULL;
     return 0;
+}
+
+bool
+virDoesUserExist(const char *name ATTRIBUTE_UNUSED)
+{
+    return false;
+}
+
+bool
+virDoesGroupExist(const char *name ATTRIBUTE_UNUSED)
+{
+    return false;
 }
 
 # ifdef WIN32
@@ -1476,8 +1332,10 @@ virSetUIDGIDWithCaps(uid_t uid, gid_t gid, gid_t *groups, int ngroups,
 {
     size_t i;
     int capng_ret, ret = -1;
-    bool need_setgid = false, need_setuid = false;
+    bool need_setgid = false;
+    bool need_setuid = false;
     bool need_setpcap = false;
+    const char *capstr = NULL;
 
     /* First drop all caps (unless the requested uid is "unchanged" or
      * root and clearExistingCaps wasn't requested), then add back
@@ -1486,14 +1344,18 @@ virSetUIDGIDWithCaps(uid_t uid, gid_t gid, gid_t *groups, int ngroups,
      */
 
     if (clearExistingCaps || (uid != (uid_t)-1 && uid != 0))
-       capng_clear(CAPNG_SELECT_BOTH);
+        capng_clear(CAPNG_SELECT_BOTH);
 
     for (i = 0; i <= CAP_LAST_CAP; i++) {
+        capstr = capng_capability_to_name(i);
+
         if (capBits & (1ULL << i)) {
             capng_update(CAPNG_ADD,
                          CAPNG_EFFECTIVE|CAPNG_INHERITABLE|
                          CAPNG_PERMITTED|CAPNG_BOUNDING_SET,
                          i);
+
+            VIR_DEBUG("Added '%s' to child capabilities' set", capstr);
         }
     }
 
@@ -1553,6 +1415,27 @@ virSetUIDGIDWithCaps(uid_t uid, gid_t gid, gid_t *groups, int ngroups,
         goto cleanup;
     }
 
+# ifdef PR_CAP_AMBIENT
+    /* we couldn't do this in the loop earlier above, because the capabilities
+     * were not applied yet, since in order to add a capability into the AMBIENT
+     * set, it has to be present in both the PERMITTED and INHERITABLE sets
+     * (capabilities(7))
+     */
+    for (i = 0; i <= CAP_LAST_CAP; i++) {
+        capstr = capng_capability_to_name(i);
+
+        if (capBits & (1ULL << i)) {
+            if (prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_RAISE, i, 0, 0) < 0) {
+                virReportSystemError(errno,
+                                     _("prctl failed to enable '%s' in the "
+                                       "AMBIENT set"),
+                                     capstr);
+                goto cleanup;
+            }
+        }
+    }
+# endif
+
     /* Set bounding set while we have CAP_SETPCAP.  Unfortunately we cannot
      * do this if we failed to get the capability above, so ignore the
      * return value.
@@ -1596,31 +1479,24 @@ virSetUIDGIDWithCaps(uid_t uid, gid_t gid, gid_t *groups, int ngroups,
 #endif
 
 
-#if defined(UDEVADM) || defined(UDEVSETTLE)
 void virWaitForDevices(void)
 {
-# ifdef UDEVADM
-    const char *const settleprog[] = { UDEVADM, "settle", NULL };
-# else
-    const char *const settleprog[] = { UDEVSETTLE, NULL };
-# endif
+    VIR_AUTOPTR(virCommand) cmd = NULL;
+    VIR_AUTOFREE(char *) udev = NULL;
     int exitstatus;
 
-    if (access(settleprog[0], X_OK) != 0)
+    if (!(udev = virFindFileInPath(UDEVADM)))
+        return;
+
+    if (!(cmd = virCommandNewArgList(udev, "settle", NULL)))
         return;
 
     /*
      * NOTE: we ignore errors here; this is just to make sure that any device
      * nodes that are being created finish before we try to scan them.
-     * If this fails for any reason, we still have the backup of polling for
-     * 5 seconds for device nodes.
      */
-    ignore_value(virRun(settleprog, &exitstatus));
+    ignore_value(virCommandRun(cmd, &exitstatus));
 }
-#else
-void virWaitForDevices(void)
-{}
-#endif
 
 #if WITH_DEVMAPPER
 bool
@@ -1690,7 +1566,6 @@ virGetDeviceID(const char *path ATTRIBUTE_UNUSED,
                int *maj ATTRIBUTE_UNUSED,
                int *min ATTRIBUTE_UNUSED)
 {
-
     return -ENOSYS;
 }
 #endif
@@ -2091,4 +1966,79 @@ virMemoryMaxValue(bool capped)
         return 1024ull * ULONG_MAX;
     else
         return LLONG_MAX;
+}
+
+
+bool
+virHostHasIOMMU(void)
+{
+    DIR *iommuDir = NULL;
+    struct dirent *iommuGroup = NULL;
+    bool ret = false;
+    int direrr;
+
+    if (virDirOpenQuiet(&iommuDir, "/sys/kernel/iommu_groups/") < 0)
+        goto cleanup;
+
+    while ((direrr = virDirRead(iommuDir, &iommuGroup, NULL)) > 0)
+        break;
+
+    if (direrr < 0 || !iommuGroup)
+        goto cleanup;
+
+    ret = true;
+
+ cleanup:
+    VIR_DIR_CLOSE(iommuDir);
+    return ret;
+}
+
+
+/**
+ * virHostGetDRMRenderNode:
+ *
+ * Picks the first DRM render node available. Missing DRI or missing DRM render
+ * nodes in the system results in an error.
+ *
+ * Returns an absolute path to the first render node available or NULL in case
+ * of an error with the error being reported.
+ * Caller is responsible for freeing the result string.
+ *
+ */
+char *
+virHostGetDRMRenderNode(void)
+{
+    char *ret = NULL;
+    DIR *driDir = NULL;
+    const char *driPath = "/dev/dri";
+    struct dirent *ent = NULL;
+    int dirErr = 0;
+    bool have_rendernode = false;
+
+    if (virDirOpen(&driDir, driPath) < 0)
+        return NULL;
+
+    while ((dirErr = virDirRead(driDir, &ent, driPath)) > 0) {
+        if (STRPREFIX(ent->d_name, "renderD")) {
+            have_rendernode = true;
+            break;
+        }
+    }
+
+    if (dirErr < 0)
+        goto cleanup;
+
+    /* even if /dev/dri exists, there might be no renderDX nodes available */
+    if (!have_rendernode) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("No DRM render nodes available"));
+        goto cleanup;
+    }
+
+    if (virAsprintf(&ret, "%s/%s", driPath, ent->d_name) < 0)
+        goto cleanup;
+
+ cleanup:
+    VIR_DIR_CLOSE(driDir);
+    return ret;
 }

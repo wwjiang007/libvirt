@@ -18,14 +18,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: David F. Lively <dlively@virtualiron.com>
  */
 
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <libhal.h>
 
 #include "node_device_conf.h"
@@ -175,7 +171,7 @@ gather_usb_cap(LibHalContext *ctx, const char *udi,
     (void)get_int_prop(ctx, udi, "usb.interface.number",
                        (int *)&d->usb_if.number);
     (void)get_int_prop(ctx, udi, "usb.interface.class",
-                       (int *)&d->usb_if._class);
+                       (int *)&d->usb_if.klass);
     (void)get_int_prop(ctx, udi, "usb.interface.subclass",
                        (int *)&d->usb_if.subclass);
     (void)get_int_prop(ctx, udi, "usb.interface.protocol",

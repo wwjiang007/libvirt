@@ -23,9 +23,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#define LIBVIRT_VIRRESCTRLPRIV_H_ALLOW
 #include "virresctrlpriv.h"
-#include "c-ctype.h"
-#include "count-one-bits.h"
 #include "viralloc.h"
 #include "virfile.h"
 #include "virlog.h"
@@ -34,41 +33,93 @@
 
 #define VIR_FROM_THIS VIR_FROM_RESCTRL
 
-VIR_LOG_INIT("util.virresctrl")
+VIR_LOG_INIT("util.virresctrl");
+
+
+/* Resctrl is short for Resource Control.  It might be implemented for various
+ * resources. Currently this supports cache allocation technology (aka CAT),
+ * memory bandwidth allocation (aka MBA) and cache monitoring technology (aka
+ * CMT). More resources technologies may be added in the future.
+ */
 
 
 /* Common definitions */
 #define SYSFS_RESCTRL_PATH "/sys/fs/resctrl"
 
-/* Resctrl is short for Resource Control.  It might be implemented for various
- * resources, but at the time of this writing this is only supported for cache
- * allocation technology (aka CAT).  Hence the reson for leaving 'Cache' out of
- * all the structure and function names for now (can be added later if needed.
- */
 
-/* Our naming for cache types and scopes */
-VIR_ENUM_IMPL(virCache, VIR_CACHE_TYPE_LAST,
+/* Following are three different enum implementations for the same enum.  Each
+ * one of them helps translating to/from strings for different interfaces.  The
+ * delimiter must be VIR_CACHE_TYPE_LAST for all of them in order to stay
+ * consistent in between all of them. */
+
+/* Cache name mapping for Linux kernel naming. */
+VIR_ENUM_IMPL(virCacheKernel,
+              VIR_CACHE_TYPE_LAST,
+              "Unified",
+              "Instruction",
+              "Data",
+);
+
+/* Cache name mapping for our XML naming. */
+VIR_ENUM_IMPL(virCache,
+              VIR_CACHE_TYPE_LAST,
               "both",
               "code",
-              "data")
+              "data",
+);
 
-/*
- * This is the same enum, but for the resctrl naming
- * of the type (L<level><type>)
- */
-VIR_ENUM_DECL(virResctrl)
-VIR_ENUM_IMPL(virResctrl, VIR_CACHE_TYPE_LAST,
+/* Cache name mapping for resctrl interface naming. */
+VIR_ENUM_DECL(virResctrl);
+VIR_ENUM_IMPL(virResctrl,
+              VIR_CACHE_TYPE_LAST,
               "",
               "CODE",
-              "DATA")
+              "DATA",
+);
+
+/* Monitor feature name prefix mapping for monitor naming */
+VIR_ENUM_IMPL(virResctrlMonitorPrefix,
+              VIR_RESCTRL_MONITOR_TYPE_LAST,
+              "__unsupported__",
+              "llc_",
+              "mbm_",
+);
 
 
-/* Info-related definitions and InfoClass-related functions */
+/* All private typedefs so that they exist for all later definitions.  This way
+ * structs can be included in one or another without reorganizing the code every
+ * time. */
 typedef struct _virResctrlInfoPerType virResctrlInfoPerType;
 typedef virResctrlInfoPerType *virResctrlInfoPerTypePtr;
+
+typedef struct _virResctrlInfoPerLevel virResctrlInfoPerLevel;
+typedef virResctrlInfoPerLevel *virResctrlInfoPerLevelPtr;
+
+typedef struct _virResctrlInfoMemBW virResctrlInfoMemBW;
+typedef virResctrlInfoMemBW *virResctrlInfoMemBWPtr;
+
+typedef struct _virResctrlInfoMongrp virResctrlInfoMongrp;
+typedef virResctrlInfoMongrp *virResctrlInfoMongrpPtr;
+
+typedef struct _virResctrlAllocPerType virResctrlAllocPerType;
+typedef virResctrlAllocPerType *virResctrlAllocPerTypePtr;
+
+typedef struct _virResctrlAllocPerLevel virResctrlAllocPerLevel;
+typedef virResctrlAllocPerLevel *virResctrlAllocPerLevelPtr;
+
+typedef struct _virResctrlAllocMemBW virResctrlAllocMemBW;
+typedef virResctrlAllocMemBW *virResctrlAllocMemBWPtr;
+
+
+/* Class definitions and initializations */
+static virClassPtr virResctrlInfoClass;
+static virClassPtr virResctrlAllocClass;
+static virClassPtr virResctrlMonitorClass;
+
+
+/* virResctrlInfo */
 struct _virResctrlInfoPerType {
     /* Kernel-provided information */
-    char *cbm_mask;
     unsigned int min_cbm_bits;
 
     /* Our computed information from the above */
@@ -86,10 +137,47 @@ struct _virResctrlInfoPerType {
     virResctrlInfoPerCache control;
 };
 
-typedef struct _virResctrlInfoPerLevel virResctrlInfoPerLevel;
-typedef virResctrlInfoPerLevel *virResctrlInfoPerLevelPtr;
 struct _virResctrlInfoPerLevel {
     virResctrlInfoPerTypePtr *types;
+};
+
+/* Information about memory bandwidth allocation */
+struct _virResctrlInfoMemBW {
+    /* minimum memory bandwidth allowed */
+    unsigned int min_bandwidth;
+    /* bandwidth granularity */
+    unsigned int bandwidth_granularity;
+    /* Maximum number of simultaneous allocations */
+    unsigned int max_allocation;
+    /* level number of last level cache */
+    unsigned int last_level_cache;
+    /* max id of last level cache, this is used to track
+     * how many last level cache available in host system,
+     * the number of memory bandwidth allocation controller
+     * is identical with last level cache. */
+    unsigned int max_id;
+};
+
+struct _virResctrlInfoMongrp {
+    /* Maximum number of simultaneous monitors */
+    unsigned int max_monitor;
+    /* null-terminal string list for monitor features */
+    char **features;
+    /* Number of monitor features */
+    size_t nfeatures;
+
+    /* Last level cache related information */
+
+    /* This adjustable value affects the final reuse of resources used by
+     * monitor. After the action of removing a monitor, the kernel may not
+     * release all hardware resources that monitor used immediately if the
+     * cache occupancy value associated with 'removed' monitor is above this
+     * threshold. Once the cache occupancy is below this threshold, the
+     * underlying hardware resource will be reclaimed and be put into the
+     * resource pool for next reusing.*/
+    unsigned int cache_reuse_threshold;
+    /* The cache 'level' that has the monitor capability */
+    unsigned int cache_level;
 };
 
 struct _virResctrlInfo {
@@ -97,9 +185,12 @@ struct _virResctrlInfo {
 
     virResctrlInfoPerLevelPtr *levels;
     size_t nlevels;
+
+    virResctrlInfoMemBWPtr membw_info;
+
+    virResctrlInfoMongrpPtr monitor_info;
 };
 
-static virClassPtr virResctrlInfoClass;
 
 static void
 virResctrlInfoDispose(void *obj)
@@ -116,51 +207,54 @@ virResctrlInfoDispose(void *obj)
             continue;
 
         if (level->types) {
-            for (j = 0; j < VIR_CACHE_TYPE_LAST; j++) {
-                if (level->types[j])
-                    VIR_FREE(level->types[j]->cbm_mask);
+            for (j = 0; j < VIR_CACHE_TYPE_LAST; j++)
                 VIR_FREE(level->types[j]);
-            }
         }
         VIR_FREE(level->types);
         VIR_FREE(level);
     }
 
+    if (resctrl->monitor_info)
+        virStringListFree(resctrl->monitor_info->features);
+
+    VIR_FREE(resctrl->membw_info);
     VIR_FREE(resctrl->levels);
+    VIR_FREE(resctrl->monitor_info);
 }
 
 
-static int
-virResctrlInfoOnceInit(void)
+void
+virResctrlInfoMonFree(virResctrlInfoMonPtr mon)
 {
-    if (!VIR_CLASS_NEW(virResctrlInfo, virClassForObject()))
-        return -1;
+    if (!mon)
+        return;
 
-    return 0;
+    virStringListFree(mon->features);
+    VIR_FREE(mon);
 }
 
 
-VIR_ONCE_GLOBAL_INIT(virResctrlInfo)
-
-
-virResctrlInfoPtr
-virResctrlInfoNew(void)
-{
-    if (virResctrlInfoInitialize() < 0)
-        return NULL;
-
-    return virObjectNew(virResctrlInfoClass);
-}
-
-
-/* Alloc-related definitions and AllocClass-related functions */
+/* virResctrlAlloc and virResctrlMonitor*/
 
 /*
- * virResctrlAlloc represents one allocation (in XML under cputune/cachetune and
- * consequently a directory under /sys/fs/resctrl).  Since it can have multiple
+ * virResctrlAlloc and virResctrlMonitor are representing a resource control
+ * group (in XML under cputune/cachetune and consequently a directory under
+ * /sys/fs/resctrl). virResctrlAlloc is the data structure for resource
+ * allocation, while the virResctrlMonitor represents the resource monitoring
+ * part.
+ *
+ * virResctrlAlloc represents one allocation. Since it can have multiple
  * parts of multiple caches allocated it is represented as bunch of nested
  * sparse arrays (by sparse I mean array of pointers so that each might be NULL
- * in case there is no allocation for that particular one (level, cache, ...)).
+ * in case there is no allocation for that particular cache allocation (level,
+ * cache, ...) or memory allocation for particular node).
+ *
+ * Allocation corresponding to root directory, /sys/fs/sysctrl/, defines the
+ * default resource allocating policy, which is created immediately after
+ * mounting, and owns all the tasks and cpus in the system. Cache or memory
+ * bandwidth resource will be shared for tasks in this allocation.
+ *
+ * =====Cache allocation technology (CAT)=====
  *
  * Since one allocation can be made for caches on different levels, the first
  * nested sparse array is of types virResctrlAllocPerLevel.  For example if you
@@ -185,9 +279,30 @@ virResctrlInfoNew(void)
  * all of them.  While doing that we store the bitmask in a sparse array of
  * virBitmaps named `masks` indexed the same way as `sizes`.  The upper bounds
  * of the sparse arrays are stored in nmasks or nsizes, respectively.
+ *
+ * =====Memory Bandwidth allocation technology (MBA)=====
+ *
+ * The memory bandwidth allocation support in virResctrlAlloc works in the
+ * same fashion as CAT. However, memory bandwidth controller doesn't have a
+ * hierarchy organization as cache, each node have one memory bandwidth
+ * controller to memory bandwidth distribution. The number of memory bandwidth
+ * controller is identical with number of last level cache. So MBA also employs
+ * a sparse array to represent whether a memory bandwidth allocation happens
+ * on corresponding node. The available memory controller number is collected
+ * in 'virResctrlInfo'.
+ *
+ * =====Cache monitoring technology (CMT)=====
+ *
+ * Cache monitoring technology is used to perceive how many cache the process
+ * is using actually. virResctrlMonitor represents the resource control
+ * monitoring group, it is supported to monitor resource utilization
+ * information on granularity of vcpu.
+ *
+ * From a hardware perspective, cache monitoring technology (CMT), memory
+ * bandwidth technology (MBM), as well as the CAT and MBA, are all orthogonal
+ * features. The monitor will be created under the scope of default resctrl
+ * group if no specific CAT or MBA entries are provided for the guest."
  */
-typedef struct _virResctrlAllocPerType virResctrlAllocPerType;
-typedef virResctrlAllocPerType *virResctrlAllocPerTypePtr;
 struct _virResctrlAllocPerType {
     /* There could be bool saying whether this is set or not, but since everything
      * in virResctrlAlloc (and most of libvirt) goes with pointer arrays we would
@@ -201,12 +316,20 @@ struct _virResctrlAllocPerType {
     size_t nmasks;
 };
 
-typedef struct _virResctrlAllocPerLevel virResctrlAllocPerLevel;
-typedef virResctrlAllocPerLevel *virResctrlAllocPerLevelPtr;
 struct _virResctrlAllocPerLevel {
     virResctrlAllocPerTypePtr *types; /* Indexed with enum virCacheType */
     /* There is no `ntypes` member variable as it is always allocated for
      * VIR_CACHE_TYPE_LAST number of items */
+};
+
+/*
+ * virResctrlAllocMemBW represents one memory bandwidth allocation.
+ * Since it can have several last level caches in a NUMA system, it is
+ * also represented as a nested sparse arrays as virRestrlAllocPerLevel.
+ */
+struct _virResctrlAllocMemBW {
+    unsigned int **bandwidths;
+    size_t nbandwidths;
 };
 
 struct _virResctrlAlloc {
@@ -215,6 +338,8 @@ struct _virResctrlAlloc {
     virResctrlAllocPerLevelPtr *levels;
     size_t nlevels;
 
+    virResctrlAllocMemBWPtr mem_bw;
+
     /* The identifier (any unique string for now) */
     char *id;
     /* libvirt-generated path in /sys/fs/resctrl for this particular
@@ -222,7 +347,30 @@ struct _virResctrlAlloc {
     char *path;
 };
 
-static virClassPtr virResctrlAllocClass;
+/*
+ * virResctrlMonitor is the data structure for resctrl monitor. Resctrl
+ * monitor represents a resctrl monitoring group, which can be used to
+ * monitor the resource utilization information for either cache or
+ * memory bandwidth.
+ */
+struct _virResctrlMonitor {
+    virObject parent;
+
+    /* Each virResctrlMonitor is associated with one specific allocation,
+     * either the root directory allocation under /sys/fs/resctrl or a
+     * specific allocation defined under the root directory.
+     * This pointer points to the allocation this monitor is associated with.
+     */
+    virResctrlAllocPtr alloc;
+    /* The monitor identifier. For a monitor has the same @path name as its
+     * @alloc, the @id will be set to the same value as it is in @alloc->id.
+     */
+    char *id;
+    /* libvirt-generated path in /sys/fs/resctrl for this particular
+     * monitor */
+    char *path;
+};
+
 
 static void
 virResctrlAllocDispose(void *obj)
@@ -231,10 +379,10 @@ virResctrlAllocDispose(void *obj)
     size_t j = 0;
     size_t k = 0;
 
-    virResctrlAllocPtr resctrl = obj;
+    virResctrlAllocPtr alloc = obj;
 
-    for (i = 0; i < resctrl->nlevels; i++) {
-        virResctrlAllocPerLevelPtr level = resctrl->levels[i];
+    for (i = 0; i < alloc->nlevels; i++) {
+        virResctrlAllocPerLevelPtr level = alloc->levels[i];
 
         if (!level)
             continue;
@@ -259,39 +407,53 @@ virResctrlAllocDispose(void *obj)
         VIR_FREE(level);
     }
 
-    VIR_FREE(resctrl->id);
-    VIR_FREE(resctrl->path);
-    VIR_FREE(resctrl->levels);
+    if (alloc->mem_bw) {
+        virResctrlAllocMemBWPtr mem_bw = alloc->mem_bw;
+        for (i = 0; i < mem_bw->nbandwidths; i++)
+            VIR_FREE(mem_bw->bandwidths[i]);
+        VIR_FREE(alloc->mem_bw->bandwidths);
+        VIR_FREE(alloc->mem_bw);
+    }
+
+    VIR_FREE(alloc->id);
+    VIR_FREE(alloc->path);
+    VIR_FREE(alloc->levels);
 }
 
 
-static int
-virResctrlAllocOnceInit(void)
+static void
+virResctrlMonitorDispose(void *obj)
 {
+    virResctrlMonitorPtr monitor = obj;
+
+    virObjectUnref(monitor->alloc);
+    VIR_FREE(monitor->id);
+    VIR_FREE(monitor->path);
+}
+
+
+/* Global initialization for classes */
+static int
+virResctrlOnceInit(void)
+{
+    if (!VIR_CLASS_NEW(virResctrlInfo, virClassForObject()))
+        return -1;
+
     if (!VIR_CLASS_NEW(virResctrlAlloc, virClassForObject()))
+        return -1;
+
+    if (!VIR_CLASS_NEW(virResctrlMonitor, virClassForObject()))
         return -1;
 
     return 0;
 }
 
-
-VIR_ONCE_GLOBAL_INIT(virResctrlAlloc)
-
-
-virResctrlAllocPtr
-virResctrlAllocNew(void)
-{
-    if (virResctrlAllocInitialize() < 0)
-        return NULL;
-
-    return virObjectNew(virResctrlAllocClass);
-}
+VIR_ONCE_GLOBAL_INIT(virResctrl);
 
 
 /* Common functions */
-#ifdef __linux__
 static int
-virResctrlLockInternal(int op)
+virResctrlLockWrite(void)
 {
     int fd = open(SYSFS_RESCTRL_PATH, O_DIRECTORY | O_CLOEXEC);
 
@@ -300,7 +462,7 @@ virResctrlLockInternal(int op)
         return -1;
     }
 
-    if (flock(fd, op) < 0) {
+    if (virFileFlock(fd, true, true) < 0) {
         virReportSystemError(errno, "%s", _("Cannot lock resctrl"));
         VIR_FORCE_CLOSE(fd);
         return -1;
@@ -310,82 +472,33 @@ virResctrlLockInternal(int op)
 }
 
 
-static inline int
-virResctrlLockWrite(void)
-{
-    return virResctrlLockInternal(LOCK_EX);
-}
-
-#else
-
-static inline int
-virResctrlLockWrite(void)
-{
-    virReportSystemError(ENOSYS, "%s",
-                         _("resctrl not supported on this platform"));
-    return -1;
-}
-
-#endif
-
-
-
-
 static int
 virResctrlUnlock(int fd)
 {
     if (fd == -1)
         return 0;
 
-#ifdef __linux__
     /* The lock gets unlocked by closing the fd, which we need to do anyway in
      * order to clean up properly */
     if (VIR_CLOSE(fd) < 0) {
         virReportSystemError(errno, "%s", _("Cannot close resctrl"));
 
         /* Trying to save the already broken */
-        if (flock(fd, LOCK_UN) < 0)
+        if (virFileFlock(fd, false, false) < 0)
             virReportSystemError(errno, "%s", _("Cannot unlock resctrl"));
+
         return -1;
     }
-#endif /* ! __linux__ */
 
     return 0;
 }
 
 
-/* Info-related functions */
-static bool
-virResctrlInfoIsEmpty(virResctrlInfoPtr resctrl)
+/* virResctrlInfo-related definitions */
+static int
+virResctrlGetCacheInfo(virResctrlInfoPtr resctrl,
+                       DIR *dirp)
 {
-    size_t i = 0;
-    size_t j = 0;
-
-    if (!resctrl)
-        return true;
-
-    for (i = 0; i < resctrl->nlevels; i++) {
-        virResctrlInfoPerLevelPtr i_level = resctrl->levels[i];
-
-        if (!i_level)
-            continue;
-
-        for (j = 0; j < VIR_CACHE_TYPE_LAST; j++) {
-            if (i_level->types[j])
-                return false;
-        }
-    }
-
-    return true;
-}
-
-
-#ifdef __linux__
-
-int
-virResctrlGetInfo(virResctrlInfoPtr resctrl)
-{
-    DIR *dirp = NULL;
     char *endptr = NULL;
     char *tmp_str = NULL;
     int ret = -1;
@@ -393,14 +506,9 @@ virResctrlGetInfo(virResctrlInfoPtr resctrl)
     int type = 0;
     struct dirent *ent = NULL;
     unsigned int level = 0;
+    virBitmapPtr tmp_map = NULL;
     virResctrlInfoPerLevelPtr i_level = NULL;
     virResctrlInfoPerTypePtr i_type = NULL;
-
-    rv = virDirOpenIfExists(&dirp, SYSFS_RESCTRL_PATH "/info");
-    if (rv <= 0) {
-        ret = rv;
-        goto cleanup;
-    }
 
     while ((rv = virDirRead(dirp, &ent, SYSFS_RESCTRL_PATH "/info")) > 0) {
         VIR_DEBUG("Parsing info type '%s'", ent->d_name);
@@ -437,7 +545,7 @@ virResctrlGetInfo(virResctrlInfoPtr resctrl)
             goto cleanup;
         }
 
-        rv = virFileReadValueString(&i_type->cbm_mask,
+        rv = virFileReadValueString(&tmp_str,
                                     SYSFS_RESCTRL_PATH
                                     "/info/%s/cbm_mask",
                                     ent->d_name);
@@ -452,7 +560,19 @@ virResctrlGetInfo(virResctrlInfoPtr resctrl)
         if (rv < 0)
             goto cleanup;
 
-        virStringTrimOptionalNewline(i_type->cbm_mask);
+        virStringTrimOptionalNewline(tmp_str);
+
+        tmp_map = virBitmapNewString(tmp_str);
+        VIR_FREE(tmp_str);
+        if (!tmp_map) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                           _("Cannot parse cbm_mask from resctrl cache info"));
+            goto cleanup;
+        }
+
+        i_type->bits = virBitmapCountBits(tmp_map);
+        virBitmapFree(tmp_map);
+        tmp_map = NULL;
 
         rv = virFileReadValueUint(&i_type->min_cbm_bits,
                                   SYSFS_RESCTRL_PATH "/info/%s/min_cbm_bits",
@@ -490,39 +610,255 @@ virResctrlGetInfo(virResctrlInfoPtr resctrl)
             goto cleanup;
         }
 
-        for (tmp_str = i_type->cbm_mask; *tmp_str != '\0'; tmp_str++) {
-            if (!c_isxdigit(*tmp_str)) {
-                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                               _("Cannot parse cbm_mask from resctrl cache info"));
-                goto cleanup;
-            }
-
-            i_type->bits += count_one_bits(virHexToBin(*tmp_str));
-        }
-
         VIR_STEAL_PTR(i_level->types[type], i_type);
     }
 
     ret = 0;
  cleanup:
-    VIR_DIR_CLOSE(dirp);
-    if (i_type)
-        VIR_FREE(i_type->cbm_mask);
     VIR_FREE(i_type);
     return ret;
 }
 
-#else /* ! __linux__ */
 
-int
-virResctrlGetInfo(virResctrlInfoPtr resctrl ATTRIBUTE_UNUSED)
+static int
+virResctrlGetMemoryBandwidthInfo(virResctrlInfoPtr resctrl)
 {
-    virReportSystemError(ENOSYS, "%s",
-                         _("Cache tune not supported on this platform"));
-    return -1;
+    int ret = -1;
+    int rv = -1;
+    virResctrlInfoMemBWPtr i_membw = NULL;
+
+    /* query memory bandwidth allocation info */
+    if (VIR_ALLOC(i_membw) < 0)
+        goto cleanup;
+    rv = virFileReadValueUint(&i_membw->bandwidth_granularity,
+                              SYSFS_RESCTRL_PATH "/info/MB/bandwidth_gran");
+    if (rv == -2) {
+        /* The file doesn't exist, so it's unusable for us,
+         * probably memory bandwidth allocation unsupported */
+        VIR_INFO("The path '" SYSFS_RESCTRL_PATH "/info/MB/bandwidth_gran'"
+                 "does not exist");
+        ret = 0;
+        goto cleanup;
+    } else if (rv < 0) {
+        /* Other failures are fatal, so just quit */
+        goto cleanup;
+    }
+
+    rv = virFileReadValueUint(&i_membw->min_bandwidth,
+                              SYSFS_RESCTRL_PATH "/info/MB/min_bandwidth");
+    if (rv == -2) {
+        /* If the previous file exists, so should this one. Hence -2 is
+         * fatal in this case (errors out in next condition) - the kernel
+         * interface might've changed too much or something else is wrong. */
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Cannot get min bandwidth from resctrl memory info"));
+    }
+    if (rv < 0)
+        goto cleanup;
+
+    rv = virFileReadValueUint(&i_membw->max_allocation,
+                              SYSFS_RESCTRL_PATH "/info/MB/num_closids");
+    if (rv == -2) {
+         /* Similar reasoning to min_bandwidth above. */
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Cannot get max allocation from resctrl memory info"));
+    }
+    if (rv < 0)
+        goto cleanup;
+
+    VIR_STEAL_PTR(resctrl->membw_info, i_membw);
+    ret = 0;
+ cleanup:
+    VIR_FREE(i_membw);
+    return ret;
 }
 
-#endif /* ! __linux__ */
+
+/*
+ * Retrieve monitor capability from the resource control file system.
+ *
+ * The monitor capability is exposed through "SYSFS_RESCTRL_PATH/info/L3_MON"
+ * directory under the resource control file system. The monitor capability is
+ * parsed by reading the interface files and stored in the structure
+ * 'virResctrlInfoMongrp'.
+ *
+ * Not all host supports the resource monitor, leave the pointer
+ * @resctrl->monitor_info empty if not supported.
+ */
+static int
+virResctrlGetMonitorInfo(virResctrlInfoPtr resctrl)
+{
+    int ret = -1;
+    int rv = -1;
+    char *featurestr = NULL;
+    char **features = NULL;
+    size_t nfeatures = 0;
+    virResctrlInfoMongrpPtr info_monitor = NULL;
+
+    if (VIR_ALLOC(info_monitor) < 0)
+        return -1;
+
+    /* For now, monitor only exists in level 3 cache */
+    info_monitor->cache_level = 3;
+
+    rv = virFileReadValueUint(&info_monitor->max_monitor,
+                              SYSFS_RESCTRL_PATH "/info/L3_MON/num_rmids");
+    if (rv == -2) {
+        /* The file doesn't exist, so it's unusable for us, probably resource
+         * monitor unsupported */
+        VIR_INFO("The file '" SYSFS_RESCTRL_PATH "/info/L3_MON/num_rmids' "
+                 "does not exist");
+        ret = 0;
+        goto cleanup;
+    } else if (rv < 0) {
+        /* Other failures are fatal, so just quit */
+        goto cleanup;
+    }
+
+    rv = virFileReadValueUint(&info_monitor->cache_reuse_threshold,
+                              SYSFS_RESCTRL_PATH
+                              "/info/L3_MON/max_threshold_occupancy");
+    if (rv == -2) {
+        /* If CMT is not supported, then 'max_threshold_occupancy' file
+         * will not exist. */
+        VIR_DEBUG("File '" SYSFS_RESCTRL_PATH
+                  "/info/L3_MON/max_threshold_occupancy' does not exist");
+    } else if (rv < 0) {
+        goto cleanup;
+    }
+
+    rv = virFileReadValueString(&featurestr,
+                                SYSFS_RESCTRL_PATH
+                                "/info/L3_MON/mon_features");
+    if (rv == -2)
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Cannot get mon_features from resctrl"));
+    if (rv < 0)
+        goto cleanup;
+
+    if (!*featurestr) {
+        /* If no feature found in "/info/L3_MON/mon_features",
+         * some error happens */
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Got empty feature list from resctrl"));
+        goto cleanup;
+    }
+
+    features = virStringSplitCount(featurestr, "\n", 0, &nfeatures);
+    VIR_DEBUG("Resctrl supported %zd monitoring features", nfeatures);
+
+    info_monitor->nfeatures = nfeatures;
+    VIR_STEAL_PTR(info_monitor->features, features);
+    VIR_STEAL_PTR(resctrl->monitor_info, info_monitor);
+
+    ret = 0;
+ cleanup:
+    VIR_FREE(featurestr);
+    virStringListFree(features);
+    VIR_FREE(info_monitor);
+    return ret;
+}
+
+
+static int
+virResctrlGetInfo(virResctrlInfoPtr resctrl)
+{
+    DIR *dirp = NULL;
+    int ret = -1;
+
+    ret = virDirOpenIfExists(&dirp, SYSFS_RESCTRL_PATH "/info");
+    if (ret <= 0)
+        goto cleanup;
+
+    ret = virResctrlGetMemoryBandwidthInfo(resctrl);
+    if (ret < 0)
+        goto cleanup;
+
+    ret = virResctrlGetCacheInfo(resctrl, dirp);
+    if (ret < 0)
+        goto cleanup;
+
+    ret = virResctrlGetMonitorInfo(resctrl);
+    if (ret < 0)
+        goto cleanup;
+
+    ret = 0;
+ cleanup:
+    VIR_DIR_CLOSE(dirp);
+    return ret;
+}
+
+
+virResctrlInfoPtr
+virResctrlInfoNew(void)
+{
+    virResctrlInfoPtr ret = NULL;
+
+    if (virResctrlInitialize() < 0)
+        return NULL;
+
+    ret = virObjectNew(virResctrlInfoClass);
+    if (!ret)
+        return NULL;
+
+    if (virResctrlGetInfo(ret) < 0) {
+        virObjectUnref(ret);
+        return NULL;
+    }
+
+    return ret;
+}
+
+
+static bool
+virResctrlInfoIsEmpty(virResctrlInfoPtr resctrl)
+{
+    size_t i = 0;
+    size_t j = 0;
+
+    if (!resctrl)
+        return true;
+
+    if (resctrl->membw_info)
+        return false;
+
+    if (resctrl->monitor_info)
+        return false;
+
+    for (i = 0; i < resctrl->nlevels; i++) {
+        virResctrlInfoPerLevelPtr i_level = resctrl->levels[i];
+
+        if (!i_level)
+            continue;
+
+        for (j = 0; j < VIR_CACHE_TYPE_LAST; j++) {
+            if (i_level->types[j])
+                return false;
+        }
+    }
+
+    return true;
+}
+
+
+int
+virResctrlInfoGetMemoryBandwidth(virResctrlInfoPtr resctrl,
+                                 unsigned int level,
+                                 virResctrlInfoMemBWPerNodePtr control)
+{
+    virResctrlInfoMemBWPtr membw_info = resctrl->membw_info;
+
+    if (!membw_info)
+        return 0;
+
+    if (membw_info->last_level_cache != level)
+        return 0;
+
+    control->granularity = membw_info->bandwidth_granularity;
+    control->min = membw_info->min_bandwidth;
+    control->max_allocation = membw_info->max_allocation;
+    return 1;
+}
 
 
 int
@@ -539,6 +875,20 @@ virResctrlInfoGetCache(virResctrlInfoPtr resctrl,
 
     if (virResctrlInfoIsEmpty(resctrl))
         return 0;
+
+    /* Let's take the opportunity to update the number of last level
+     * cache. This number of memory bandwidth controller is same with
+     * last level cache */
+    if (resctrl->membw_info) {
+        virResctrlInfoMemBWPtr membw_info = resctrl->membw_info;
+
+        if (level > membw_info->last_level_cache) {
+            membw_info->last_level_cache = level;
+            membw_info->max_id = 0;
+        } else if (membw_info->last_level_cache == level) {
+            membw_info->max_id++;
+        }
+    }
 
     if (level >= resctrl->nlevels)
         return 0;
@@ -564,7 +914,7 @@ virResctrlInfoGetCache(virResctrlInfoPtr resctrl,
                 virReportError(VIR_ERR_INTERNAL_ERROR,
                                _("level %u cache size %llu does not match "
                                  "expected size %llu"),
-                                 level, i_type->size, size);
+                               level, i_type->size, size);
                 goto error;
             }
             i_type->max_cache_id++;
@@ -589,19 +939,125 @@ virResctrlInfoGetCache(virResctrlInfoPtr resctrl,
 }
 
 
-/* Alloc-related functions */
+/* virResctrlInfoGetMonitorPrefix
+ *
+ * @resctrl: Pointer to virResctrlInfo
+ * @prefix: Monitor prefix name for monitor looking for.
+ * @monitor: Returns the capability information for target monitor if the
+ * monitor with @prefex is supported by host.
+ *
+ * Return monitor capability information for @prefix through @monitor.
+ * If monitor with @prefix is not supported in system, @monitor will be
+ * cleared to NULL.
+ *
+ * Returns 0 if @monitor is created or monitor type with @prefix is not
+ * supported by host, -1 on failure with error message set.
+ */
+int
+virResctrlInfoGetMonitorPrefix(virResctrlInfoPtr resctrl,
+                               const char *prefix,
+                               virResctrlInfoMonPtr *monitor)
+{
+    size_t i = 0;
+    virResctrlInfoMongrpPtr mongrp_info = NULL;
+    virResctrlInfoMonPtr mon = NULL;
+    int ret = -1;
+
+    if (!prefix) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Empty prefix name for resctrl monitor"));
+        return -1;
+    }
+
+    if (virResctrlInfoIsEmpty(resctrl))
+        return 0;
+
+    mongrp_info = resctrl->monitor_info;
+
+    if (!mongrp_info) {
+        VIR_INFO("Monitor is not supported in host");
+        return 0;
+    }
+
+    for (i = 0; i < VIR_RESCTRL_MONITOR_TYPE_LAST; i++) {
+        if (STREQ(prefix, virResctrlMonitorPrefixTypeToString(i))) {
+            if (VIR_ALLOC(mon) < 0)
+                goto cleanup;
+            mon->type = i;
+            break;
+        }
+    }
+
+    if (!mon) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Bad prefix name '%s' for resctrl monitor"),
+                       prefix);
+        return -1;
+    }
+
+    mon->max_monitor = mongrp_info->max_monitor;
+
+    if (mon->type == VIR_RESCTRL_MONITOR_TYPE_CACHE) {
+        mon->cache_reuse_threshold =  mongrp_info->cache_reuse_threshold;
+        mon->cache_level = mongrp_info->cache_level;
+    }
+
+    for (i = 0; i < mongrp_info->nfeatures; i++) {
+        if (STRPREFIX(mongrp_info->features[i], prefix)) {
+            if (virStringListAdd(&mon->features,
+                                 mongrp_info->features[i]) < 0)
+                goto cleanup;
+            mon->nfeatures++;
+        }
+    }
+
+    ret = 0;
+
+    /* In case *monitor is pointed to some monitor, clean it. */
+    virResctrlInfoMonFree(*monitor);
+
+    if (mon->nfeatures == 0) {
+        /* No feature found for current monitor, means host does not support
+         * monitor type with @prefix name.
+         * Telling caller this monitor is supported by hardware specification,
+         * but not supported by this host. */
+        VIR_INFO("No resctrl monitor features using prefix '%s' found", prefix);
+        goto cleanup;
+    }
+
+    VIR_STEAL_PTR(*monitor, mon);
+ cleanup:
+    virResctrlInfoMonFree(mon);
+    return ret;
+}
+
+
+/* virResctrlAlloc-related definitions */
+virResctrlAllocPtr
+virResctrlAllocNew(void)
+{
+    if (virResctrlInitialize() < 0)
+        return NULL;
+
+    return virObjectNew(virResctrlAllocClass);
+}
+
+
 bool
-virResctrlAllocIsEmpty(virResctrlAllocPtr resctrl)
+virResctrlAllocIsEmpty(virResctrlAllocPtr alloc)
 {
     size_t i = 0;
     size_t j = 0;
     size_t k = 0;
 
-    if (!resctrl)
+    if (!alloc)
         return true;
 
-    for (i = 0; i < resctrl->nlevels; i++) {
-        virResctrlAllocPerLevelPtr a_level = resctrl->levels[i];
+    if (alloc->mem_bw)
+        return false;
+
+    for (i = 0; i < alloc->nlevels; i++) {
+        virResctrlAllocPerLevelPtr a_level = alloc->levels[i];
 
         if (!a_level)
             continue;
@@ -629,30 +1085,30 @@ virResctrlAllocIsEmpty(virResctrlAllocPtr resctrl)
 
 
 static virResctrlAllocPerTypePtr
-virResctrlAllocGetType(virResctrlAllocPtr resctrl,
+virResctrlAllocGetType(virResctrlAllocPtr alloc,
                        unsigned int level,
                        virCacheType type)
 {
     virResctrlAllocPerLevelPtr a_level = NULL;
 
-    if (resctrl->nlevels <= level &&
-        VIR_EXPAND_N(resctrl->levels, resctrl->nlevels, level - resctrl->nlevels + 1) < 0)
+    if (alloc->nlevels <= level &&
+        VIR_EXPAND_N(alloc->levels, alloc->nlevels, level - alloc->nlevels + 1) < 0)
         return NULL;
 
-    if (!resctrl->levels[level]) {
+    if (!alloc->levels[level]) {
         virResctrlAllocPerTypePtr *types = NULL;
 
         if (VIR_ALLOC_N(types, VIR_CACHE_TYPE_LAST) < 0)
             return NULL;
 
-        if (VIR_ALLOC(resctrl->levels[level]) < 0) {
+        if (VIR_ALLOC(alloc->levels[level]) < 0) {
             VIR_FREE(types);
             return NULL;
         }
-        resctrl->levels[level]->types = types;
+        alloc->levels[level]->types = types;
     }
 
-    a_level = resctrl->levels[level];
+    a_level = alloc->levels[level];
 
     if (!a_level->types[type] && VIR_ALLOC(a_level->types[type]) < 0)
         return NULL;
@@ -662,13 +1118,13 @@ virResctrlAllocGetType(virResctrlAllocPtr resctrl,
 
 
 static int
-virResctrlAllocUpdateMask(virResctrlAllocPtr resctrl,
+virResctrlAllocUpdateMask(virResctrlAllocPtr alloc,
                           unsigned int level,
                           virCacheType type,
                           unsigned int cache,
                           virBitmapPtr mask)
 {
-    virResctrlAllocPerTypePtr a_type = virResctrlAllocGetType(resctrl, level, type);
+    virResctrlAllocPerTypePtr a_type = virResctrlAllocGetType(alloc, level, type);
 
     if (!a_type)
         return -1;
@@ -690,13 +1146,13 @@ virResctrlAllocUpdateMask(virResctrlAllocPtr resctrl,
 
 
 static int
-virResctrlAllocUpdateSize(virResctrlAllocPtr resctrl,
+virResctrlAllocUpdateSize(virResctrlAllocPtr alloc,
                           unsigned int level,
                           virCacheType type,
                           unsigned int cache,
                           unsigned long long size)
 {
-    virResctrlAllocPerTypePtr a_type = virResctrlAllocGetType(resctrl, level, type);
+    virResctrlAllocPerTypePtr a_type = virResctrlAllocGetType(alloc, level, type);
 
     if (!a_type)
         return -1;
@@ -774,13 +1230,13 @@ virResctrlAllocCheckCollision(virResctrlAllocPtr alloc,
 
 
 int
-virResctrlAllocSetSize(virResctrlAllocPtr resctrl,
-                       unsigned int level,
-                       virCacheType type,
-                       unsigned int cache,
-                       unsigned long long size)
+virResctrlAllocSetCacheSize(virResctrlAllocPtr alloc,
+                            unsigned int level,
+                            virCacheType type,
+                            unsigned int cache,
+                            unsigned long long size)
 {
-    if (virResctrlAllocCheckCollision(resctrl, level, type, cache)) {
+    if (virResctrlAllocCheckCollision(alloc, level, type, cache)) {
         virReportError(VIR_ERR_XML_ERROR,
                        _("Colliding cache allocations for cache "
                          "level '%u' id '%u', type '%s'"),
@@ -788,25 +1244,25 @@ virResctrlAllocSetSize(virResctrlAllocPtr resctrl,
         return -1;
     }
 
-    return virResctrlAllocUpdateSize(resctrl, level, type, cache, size);
+    return virResctrlAllocUpdateSize(alloc, level, type, cache, size);
 }
 
 
 int
-virResctrlAllocForeachSize(virResctrlAllocPtr resctrl,
-                           virResctrlAllocForeachSizeCallback cb,
-                           void *opaque)
+virResctrlAllocForeachCache(virResctrlAllocPtr alloc,
+                            virResctrlAllocForeachCacheCallback cb,
+                            void *opaque)
 {
     int ret = 0;
     unsigned int level = 0;
     unsigned int type = 0;
     unsigned int cache = 0;
 
-    if (!resctrl)
+    if (!alloc)
         return 0;
 
-    for (level = 0; level < resctrl->nlevels; level++) {
-        virResctrlAllocPerLevelPtr a_level = resctrl->levels[level];
+    for (level = 0; level < alloc->nlevels; level++) {
+        virResctrlAllocPerLevelPtr a_level = alloc->levels[level];
 
         if (!a_level)
             continue;
@@ -834,17 +1290,113 @@ virResctrlAllocForeachSize(virResctrlAllocPtr resctrl,
 }
 
 
+/* virResctrlAllocSetMemoryBandwidth
+ * @alloc: Pointer to an active allocation
+ * @id: node id of MBA to be set
+ * @memory_bandwidth: new memory bandwidth value
+ *
+ * Set the @memory_bandwidth for the node @id entry in the @alloc.
+ *
+ * Returns 0 on success, -1 on failure with error message set.
+ */
+int
+virResctrlAllocSetMemoryBandwidth(virResctrlAllocPtr alloc,
+                                  unsigned int id,
+                                  unsigned int memory_bandwidth)
+{
+    virResctrlAllocMemBWPtr mem_bw = alloc->mem_bw;
+
+    if (memory_bandwidth > 100) {
+        virReportError(VIR_ERR_XML_ERROR, "%s",
+                       _("Memory Bandwidth value exceeding 100 is invalid."));
+        return -1;
+    }
+
+    if (!mem_bw) {
+        if (VIR_ALLOC(mem_bw) < 0)
+            return -1;
+        alloc->mem_bw = mem_bw;
+    }
+
+    if (mem_bw->nbandwidths <= id &&
+        VIR_EXPAND_N(mem_bw->bandwidths, mem_bw->nbandwidths,
+                     id - mem_bw->nbandwidths + 1) < 0)
+        return -1;
+
+    if (mem_bw->bandwidths[id]) {
+        virReportError(VIR_ERR_XML_ERROR,
+                       _("Memory Bandwidth already defined for node %u"),
+                       id);
+        return -1;
+    }
+
+    if (VIR_ALLOC(mem_bw->bandwidths[id]) < 0)
+        return -1;
+
+    *(mem_bw->bandwidths[id]) = memory_bandwidth;
+    return 0;
+}
+
+
+/* virResctrlAllocForeachMemory
+ * @alloc: Pointer to an active allocation
+ * @cb: Callback function
+ * @opaque: Opaque data to be passed to @cb
+ *
+ * If available, traverse the defined memory bandwidth allocations and
+ * call the @cb function.
+ *
+ * Returns 0 on success, -1 and immediate failure if the @cb has any failure.
+ */
+int
+virResctrlAllocForeachMemory(virResctrlAllocPtr alloc,
+                             virResctrlAllocForeachMemoryCallback cb,
+                             void *opaque)
+{
+    size_t i = 0;
+    virResctrlAllocMemBWPtr mem_bw;
+
+    if (!alloc || !alloc->mem_bw)
+        return 0;
+
+    mem_bw = alloc->mem_bw;
+    for (i = 0; i < mem_bw->nbandwidths; i++) {
+        if (mem_bw->bandwidths[i]) {
+            if (cb(i, *mem_bw->bandwidths[i], opaque) < 0)
+                return -1;
+        }
+    }
+
+    return 0;
+}
+
+
+static int
+virResctrlSetID(char **resctrlid,
+                const char *id)
+{
+    if (!id) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("New resctrl 'id' cannot be NULL"));
+        return -1;
+    }
+
+    if (*resctrlid) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Attempt to overwrite resctrlid='%s' with id='%s'"),
+                       *resctrlid, id);
+        return -1;
+    }
+
+    return VIR_STRDUP(*resctrlid, id);
+}
+
+
 int
 virResctrlAllocSetID(virResctrlAllocPtr alloc,
                      const char *id)
 {
-    if (!id) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Resctrl allocation 'id' cannot be NULL"));
-        return -1;
-    }
-
-    return VIR_STRDUP(alloc->id, id);
+    return virResctrlSetID(&alloc->id, id);
 }
 
 
@@ -855,19 +1407,148 @@ virResctrlAllocGetID(virResctrlAllocPtr alloc)
 }
 
 
-char *
-virResctrlAllocFormat(virResctrlAllocPtr resctrl)
+/* Format the Memory Bandwidth Allocation line that will be found in
+ * the schemata files. The line should be start with "MB:" and be
+ * followed by "id=value" pairs separated by a semi-colon such as:
+ *
+ *     MB:0=100;1=100
+ *
+ * which indicates node id 0 has 100 percent bandwith and node id 1
+ * has 100 percent bandwidth. A trailing semi-colon is not formatted.
+ */
+static int
+virResctrlAllocMemoryBandwidthFormat(virResctrlAllocPtr alloc,
+                                     virBufferPtr buf)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    size_t i;
+
+    if (!alloc->mem_bw)
+        return 0;
+
+    virBufferAddLit(buf, "MB:");
+
+    for (i = 0; i < alloc->mem_bw->nbandwidths; i++) {
+        if (alloc->mem_bw->bandwidths[i]) {
+            virBufferAsprintf(buf, "%zd=%u;", i,
+                              *(alloc->mem_bw->bandwidths[i]));
+        }
+    }
+
+    virBufferTrim(buf, ";", 1);
+    virBufferAddChar(buf, '\n');
+    return virBufferCheckError(buf);
+}
+
+
+static int
+virResctrlAllocParseProcessMemoryBandwidth(virResctrlInfoPtr resctrl,
+                                           virResctrlAllocPtr alloc,
+                                           char *mem_bw)
+{
+    unsigned int bandwidth;
+    unsigned int id;
+    char *tmp = NULL;
+
+    tmp = strchr(mem_bw, '=');
+    if (!tmp)
+        return 0;
+    *tmp = '\0';
+    tmp++;
+
+    if (virStrToLong_uip(mem_bw, NULL, 10, &id) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Invalid node id %u "), id);
+        return -1;
+    }
+    if (virStrToLong_uip(tmp, NULL, 10, &bandwidth) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Invalid bandwidth %u"), bandwidth);
+        return -1;
+    }
+    if (bandwidth < resctrl->membw_info->min_bandwidth ||
+        id > resctrl->membw_info->max_id) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Missing or inconsistent resctrl info for "
+                         "memory bandwidth node '%u'"), id);
+        return -1;
+    }
+    if (alloc->mem_bw->nbandwidths <= id &&
+        VIR_EXPAND_N(alloc->mem_bw->bandwidths, alloc->mem_bw->nbandwidths,
+                     id - alloc->mem_bw->nbandwidths + 1) < 0) {
+        return -1;
+    }
+    if (!alloc->mem_bw->bandwidths[id]) {
+        if (VIR_ALLOC(alloc->mem_bw->bandwidths[id]) < 0)
+            return -1;
+    }
+
+    *(alloc->mem_bw->bandwidths[id]) = bandwidth;
+    return 0;
+}
+
+
+/* Parse a schemata formatted MB: entry. Format details are described in
+ * virResctrlAllocMemoryBandwidthFormat.
+ */
+static int
+virResctrlAllocParseMemoryBandwidthLine(virResctrlInfoPtr resctrl,
+                                        virResctrlAllocPtr alloc,
+                                        char *line)
+{
+    char **mbs = NULL;
+    char *tmp = NULL;
+    size_t nmbs = 0;
+    size_t i;
+    int ret = -1;
+
+    /* For no reason there can be spaces */
+    virSkipSpaces((const char **) &line);
+
+    if (STRNEQLEN(line, "MB", 2))
+        return 0;
+
+    if (!resctrl || !resctrl->membw_info ||
+        !resctrl->membw_info->min_bandwidth ||
+        !resctrl->membw_info->bandwidth_granularity) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Missing or inconsistent resctrl info for "
+                         "memory bandwidth allocation"));
+        return -1;
+    }
+
+    if (!alloc->mem_bw) {
+        if (VIR_ALLOC(alloc->mem_bw) < 0)
+            return -1;
+    }
+
+    tmp = strchr(line, ':');
+    if (!tmp)
+        return 0;
+    tmp++;
+
+    mbs = virStringSplitCount(tmp, ";", 0, &nmbs);
+    for (i = 0; i < nmbs; i++) {
+        if (virResctrlAllocParseProcessMemoryBandwidth(resctrl, alloc, mbs[i]) < 0)
+            goto cleanup;
+    }
+
+    ret = 0;
+ cleanup:
+    virStringListFree(mbs);
+    return ret;
+}
+
+
+static int
+virResctrlAllocFormatCache(virResctrlAllocPtr alloc,
+                           virBufferPtr buf)
+{
     unsigned int level = 0;
     unsigned int type = 0;
     unsigned int cache = 0;
 
-    if (!resctrl)
-        return NULL;
-
-    for (level = 0; level < resctrl->nlevels; level++) {
-        virResctrlAllocPerLevelPtr a_level = resctrl->levels[level];
+    for (level = 0; level < alloc->nlevels; level++) {
+        virResctrlAllocPerLevelPtr a_level = alloc->levels[level];
 
         if (!a_level)
             continue;
@@ -878,7 +1559,7 @@ virResctrlAllocFormat(virResctrlAllocPtr resctrl)
             if (!a_type)
                 continue;
 
-            virBufferAsprintf(&buf, "L%u%s:", level, virResctrlTypeToString(type));
+            virBufferAsprintf(buf, "L%u%s:", level, virResctrlTypeToString(type));
 
             for (cache = 0; cache < a_type->nmasks; cache++) {
                 virBitmapPtr mask = a_type->masks[cache];
@@ -888,21 +1569,40 @@ virResctrlAllocFormat(virResctrlAllocPtr resctrl)
                     continue;
 
                 mask_str = virBitmapToString(mask, false, true);
-                if (!mask_str) {
-                    virBufferFreeAndReset(&buf);
-                    return NULL;
-                }
+                if (!mask_str)
+                    return -1;
 
-                virBufferAsprintf(&buf, "%u=%s;", cache, mask_str);
+                virBufferAsprintf(buf, "%u=%s;", cache, mask_str);
                 VIR_FREE(mask_str);
             }
 
-            virBufferTrim(&buf, ";", 1);
-            virBufferAddChar(&buf, '\n');
+            virBufferTrim(buf, ";", 1);
+            virBufferAddChar(buf, '\n');
         }
     }
 
-    virBufferCheckError(&buf);
+    return virBufferCheckError(buf);
+}
+
+
+char *
+virResctrlAllocFormat(virResctrlAllocPtr alloc)
+{
+    virBuffer buf = VIR_BUFFER_INITIALIZER;
+
+    if (!alloc)
+        return NULL;
+
+    if (virResctrlAllocFormatCache(alloc, &buf) < 0) {
+        virBufferFreeAndReset(&buf);
+        return NULL;
+    }
+
+    if (virResctrlAllocMemoryBandwidthFormat(alloc, &buf) < 0) {
+        virBufferFreeAndReset(&buf);
+        return NULL;
+    }
+
     return virBufferContentAndReset(&buf);
 }
 
@@ -941,7 +1641,7 @@ virResctrlAllocParseProcessCache(virResctrlInfoPtr resctrl,
         !resctrl->levels[level]->types[type]) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Missing or inconsistent resctrl info for "
-                         "level '%ud' type '%s'"),
+                         "level '%u' type '%s'"),
                        level, virCacheTypeToString(type));
         goto cleanup;
     }
@@ -959,9 +1659,9 @@ virResctrlAllocParseProcessCache(virResctrlInfoPtr resctrl,
 
 
 static int
-virResctrlAllocParseProcessLine(virResctrlInfoPtr resctrl,
-                                virResctrlAllocPtr alloc,
-                                char *line)
+virResctrlAllocParseCacheLine(virResctrlInfoPtr resctrl,
+                              virResctrlAllocPtr alloc,
+                              char *line)
 {
     char **caches = NULL;
     char *tmp = NULL;
@@ -1029,8 +1729,11 @@ virResctrlAllocParse(virResctrlInfoPtr resctrl,
 
     lines = virStringSplitCount(schemata, "\n", 0, &nlines);
     for (i = 0; i < nlines; i++) {
-        if (virResctrlAllocParseProcessLine(resctrl, alloc, lines[i]) < 0)
+        if (virResctrlAllocParseCacheLine(resctrl, alloc, lines[i]) < 0)
             goto cleanup;
+        if (virResctrlAllocParseMemoryBandwidthLine(resctrl, alloc, lines[i]) < 0)
+            goto cleanup;
+
     }
 
     ret = 0;
@@ -1047,9 +1750,8 @@ virResctrlAllocGetGroup(virResctrlInfoPtr resctrl,
 {
     char *schemata = NULL;
     int rv = virFileReadValueString(&schemata,
-                                     SYSFS_RESCTRL_PATH
-                                     "/%s/schemata",
-                                     groupname);
+                                    SYSFS_RESCTRL_PATH "/%s/schemata",
+                                    groupname);
 
     *alloc = NULL;
 
@@ -1088,8 +1790,6 @@ virResctrlAllocGetDefault(virResctrlInfoPtr resctrl)
     return ret;
 }
 
-
-#ifdef __linux__
 
 static void
 virResctrlAllocSubtractPerType(virResctrlAllocPerTypePtr dst,
@@ -1165,6 +1865,22 @@ virResctrlAllocNewFromInfo(virResctrlInfoPtr info)
         }
     }
 
+    /* set default free memory bandwidth to 100%*/
+    if (info->membw_info) {
+        if (VIR_ALLOC(ret->mem_bw) < 0)
+            goto error;
+
+        if (VIR_EXPAND_N(ret->mem_bw->bandwidths, ret->mem_bw->nbandwidths,
+                         info->membw_info->max_id + 1) < 0)
+            goto error;
+
+        for (i = 0; i < ret->mem_bw->nbandwidths; i++) {
+            if (VIR_ALLOC(ret->mem_bw->bandwidths[i]) < 0)
+                goto error;
+            *(ret->mem_bw->bandwidths[i]) = 100;
+        }
+    }
+
  cleanup:
     virBitmapFree(mask);
     return ret;
@@ -1183,6 +1899,10 @@ virResctrlAllocNewFromInfo(virResctrlInfoPtr info)
  * being those that are not mentioned in any other allocation.  It is used for
  * two things, a) calculating the masks when creating allocations and b) from
  * tests.
+ *
+ * MBA (Memory Bandwidth Allocation) is not taken into account as it is a
+ * limiting setting, not an allocating one.  The way it works is also vastly
+ * different from CAT.
  */
 virResctrlAllocPtr
 virResctrlAllocGetUnused(virResctrlInfoPtr resctrl)
@@ -1245,18 +1965,6 @@ virResctrlAllocGetUnused(virResctrlInfoPtr resctrl)
     ret = NULL;
     goto cleanup;
 }
-
-#else /* ! __linux__ */
-
-virResctrlAllocPtr
-virResctrlAllocGetUnused(virResctrlInfoPtr resctrl ATTRIBUTE_UNUSED)
-{
-    virReportSystemError(ENOSYS, "%s",
-                         _("Cache tune not supported on this platform"));
-    return NULL;
-}
-
-#endif /* ! __linux__ */
 
 
 /*
@@ -1391,6 +2099,90 @@ virResctrlAllocFindUnused(virResctrlAllocPtr alloc,
 
 
 static int
+virResctrlAllocMemoryBandwidth(virResctrlInfoPtr resctrl,
+                               virResctrlAllocPtr alloc)
+{
+    size_t i;
+    virResctrlAllocMemBWPtr mem_bw_alloc = alloc->mem_bw;
+    virResctrlInfoMemBWPtr mem_bw_info = resctrl->membw_info;
+
+    if (!mem_bw_alloc)
+        return 0;
+
+    if (!mem_bw_info) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                       _("RDT Memory Bandwidth allocation unsupported"));
+        return -1;
+    }
+
+    for (i = 0; i < mem_bw_alloc->nbandwidths; i++) {
+        if (!mem_bw_alloc->bandwidths[i])
+            continue;
+
+        if (*(mem_bw_alloc->bandwidths[i]) % mem_bw_info->bandwidth_granularity) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                           _("Memory Bandwidth allocation of size "
+                             "%u is not divisible by granularity %u"),
+                           *(mem_bw_alloc->bandwidths[i]),
+                           mem_bw_info->bandwidth_granularity);
+            return -1;
+        }
+        if (*(mem_bw_alloc->bandwidths[i]) < mem_bw_info->min_bandwidth) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                           _("Memory Bandwidth allocation of size "
+                             "%u is smaller than the minimum "
+                             "allowed allocation %u"),
+                           *(mem_bw_alloc->bandwidths[i]),
+                           mem_bw_info->min_bandwidth);
+            return -1;
+        }
+        if (i > mem_bw_info->max_id) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                           _("bandwidth controller id %zd does not "
+                             "exist, max controller id %u"),
+                           i, mem_bw_info->max_id);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+
+static int
+virResctrlAllocCopyMemBW(virResctrlAllocPtr dst,
+                         virResctrlAllocPtr src)
+{
+    size_t i = 0;
+    virResctrlAllocMemBWPtr dst_bw = NULL;
+    virResctrlAllocMemBWPtr src_bw = src->mem_bw;
+
+    if (!src->mem_bw)
+        return 0;
+
+    if (!dst->mem_bw &&
+        VIR_ALLOC(dst->mem_bw) < 0)
+        return -1;
+
+    dst_bw = dst->mem_bw;
+
+    if (src_bw->nbandwidths > dst_bw->nbandwidths &&
+        VIR_EXPAND_N(dst_bw->bandwidths, dst_bw->nbandwidths,
+                     src_bw->nbandwidths - dst_bw->nbandwidths) < 0)
+        return -1;
+
+    for (i = 0; i < src_bw->nbandwidths; i++) {
+        if (dst_bw->bandwidths[i])
+            continue;
+        if (VIR_ALLOC(dst_bw->bandwidths[i]) < 0)
+            return -1;
+        *dst_bw->bandwidths[i] = *src_bw->bandwidths[i];
+    }
+
+    return 0;
+}
+
+
+static int
 virResctrlAllocCopyMasks(virResctrlAllocPtr dst,
                          virResctrlAllocPtr src)
 {
@@ -1429,14 +2221,14 @@ virResctrlAllocCopyMasks(virResctrlAllocPtr dst,
 
 
 /*
- * This function is called when creating an allocation in the system.  What it
- * does is that it gets all the unused bits using virResctrlAllocGetUnused() and
- * then tries to find a proper space for every requested allocation effectively
- * transforming `sizes` into `masks`.
+ * This function is called when creating an allocation in the system.
+ * What it does is that it gets all the unused resources using
+ * virResctrlAllocGetUnused and then tries to find a proper space for
+ * every requested allocation effectively transforming `sizes` into `masks`.
  */
 static int
-virResctrlAllocMasksAssign(virResctrlInfoPtr resctrl,
-                           virResctrlAllocPtr alloc)
+virResctrlAllocAssign(virResctrlInfoPtr resctrl,
+                      virResctrlAllocPtr alloc)
 {
     int ret = -1;
     unsigned int level = 0;
@@ -1451,7 +2243,13 @@ virResctrlAllocMasksAssign(virResctrlInfoPtr resctrl,
     if (!alloc_default)
         goto cleanup;
 
+    if (virResctrlAllocMemoryBandwidth(resctrl, alloc) < 0)
+        goto cleanup;
+
     if (virResctrlAllocCopyMasks(alloc, alloc_default) < 0)
+        goto cleanup;
+
+    if (virResctrlAllocCopyMemBW(alloc, alloc_default) < 0)
         goto cleanup;
 
     for (level = 0; level < alloc->nlevels; level++) {
@@ -1506,20 +2304,71 @@ virResctrlAllocMasksAssign(virResctrlInfoPtr resctrl,
 }
 
 
+static char *
+virResctrlDeterminePath(const char *parentpath,
+                        const char *prefix,
+                        const char *id)
+{
+    char *path = NULL;
+
+    if (!id) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Resctrl ID must be set before determining resctrl "
+                         "parentpath='%s' prefix='%s'"), parentpath, prefix);
+        return NULL;
+    }
+
+    if (virAsprintf(&path, "%s/%s-%s", parentpath, prefix, id) < 0)
+        return NULL;
+
+    return path;
+}
+
+
 int
 virResctrlAllocDeterminePath(virResctrlAllocPtr alloc,
                              const char *machinename)
 {
-    if (!alloc->id) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Resctrl Allocation ID must be set before creation"));
+    if (alloc->path) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Resctrl allocation path is already set to '%s'"),
+                       alloc->path);
         return -1;
     }
 
-    if (!alloc->path &&
-        virAsprintf(&alloc->path, "%s/%s-%s",
-                    SYSFS_RESCTRL_PATH, machinename, alloc->id) < 0)
+    /* If the allocation is empty, then the path will be SYSFS_RESCTRL_PATH */
+    if (virResctrlAllocIsEmpty(alloc)) {
+        if (VIR_STRDUP(alloc->path, SYSFS_RESCTRL_PATH) < 0)
+            return -1;
+
+        return 0;
+    }
+
+    alloc->path = virResctrlDeterminePath(SYSFS_RESCTRL_PATH,
+                                          machinename, alloc->id);
+
+    if (!alloc->path)
         return -1;
+
+    return 0;
+}
+
+
+/* This function creates a resctrl directory in resource control file system,
+ * and the directory path is specified by @path. */
+static int
+virResctrlCreateGroupPath(const char *path)
+{
+    /* Directory exists, return */
+    if (virFileExists(path))
+        return 0;
+
+    if (virFileMakePath(path) < 0) {
+        virReportSystemError(errno,
+                             _("Cannot create resctrl directory '%s'"),
+                             path);
+        return -1;
+    }
 
     return 0;
 }
@@ -1549,18 +2398,18 @@ virResctrlAllocCreate(virResctrlInfoPtr resctrl,
     if (virResctrlAllocDeterminePath(alloc, machinename) < 0)
         return -1;
 
-    if (virFileExists(alloc->path)) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Path '%s' for resctrl allocation exists"),
-                       alloc->path);
-        goto cleanup;
-    }
+    /* If using the system/default path for the allocation, then we're done */
+    if (STREQ(alloc->path, SYSFS_RESCTRL_PATH))
+        return 0;
 
     lockfd = virResctrlLockWrite();
     if (lockfd < 0)
         goto cleanup;
 
-    if (virResctrlAllocMasksAssign(resctrl, alloc) < 0)
+    if (virResctrlAllocAssign(resctrl, alloc) < 0)
+        goto cleanup;
+
+    if (virResctrlCreateGroupPath(alloc->path) < 0)
         goto cleanup;
 
     alloc_str = virResctrlAllocFormat(alloc);
@@ -1569,13 +2418,6 @@ virResctrlAllocCreate(virResctrlInfoPtr resctrl,
 
     if (virAsprintf(&schemata_path, "%s/schemata", alloc->path) < 0)
         goto cleanup;
-
-    if (virFileMakePath(alloc->path) < 0) {
-        virReportSystemError(errno,
-                             _("Cannot create resctrl directory '%s'"),
-                             alloc->path);
-        goto cleanup;
-    }
 
     VIR_DEBUG("Writing resctrl schemata '%s' into '%s'", alloc_str, schemata_path);
     if (virFileWriteStr(schemata_path, alloc_str, 0) < 0) {
@@ -1595,21 +2437,21 @@ virResctrlAllocCreate(virResctrlInfoPtr resctrl,
 }
 
 
-int
-virResctrlAllocAddPID(virResctrlAllocPtr alloc,
-                      pid_t pid)
+static int
+virResctrlAddPID(const char *path,
+                 pid_t pid)
 {
     char *tasks = NULL;
     char *pidstr = NULL;
     int ret = 0;
 
-    if (!alloc->path) {
+    if (!path) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Cannot add pid to non-existing resctrl allocation"));
+                       _("Cannot add pid to non-existing resctrl group"));
         return -1;
     }
 
-    if (virAsprintf(&tasks, "%s/tasks", alloc->path) < 0)
+    if (virAsprintf(&tasks, "%s/tasks", path) < 0)
         return -1;
 
     if (virAsprintf(&pidstr, "%lld", (long long int) pid) < 0)
@@ -1631,11 +2473,28 @@ virResctrlAllocAddPID(virResctrlAllocPtr alloc,
 
 
 int
+virResctrlAllocAddPID(virResctrlAllocPtr alloc,
+                      pid_t pid)
+{
+    /* If the allocation is empty, then it is impossible to add a PID to
+     * allocation due to lacking of its 'tasks' file so just return */
+    if (virResctrlAllocIsEmpty(alloc))
+        return 0;
+
+    return virResctrlAddPID(alloc->path, pid);
+}
+
+
+int
 virResctrlAllocRemove(virResctrlAllocPtr alloc)
 {
     int ret = 0;
 
     if (!alloc->path)
+        return 0;
+
+    /* Do not destroy if path is the system/default path for the allocation */
+    if (STREQ(alloc->path, SYSFS_RESCTRL_PATH))
         return 0;
 
     VIR_DEBUG("Removing resctrl allocation %s", alloc->path);
@@ -1645,4 +2504,306 @@ virResctrlAllocRemove(virResctrlAllocPtr alloc)
     }
 
     return ret;
+}
+
+
+/* virResctrlMonitor-related definitions */
+
+virResctrlMonitorPtr
+virResctrlMonitorNew(void)
+{
+    if (virResctrlInitialize() < 0)
+        return NULL;
+
+    return virObjectNew(virResctrlMonitorClass);
+}
+
+
+/*
+ * virResctrlMonitorDeterminePath
+ *
+ * @monitor: Pointer to a resctrl monitor
+ * @machinename: Name string of the VM
+ *
+ * Determines the directory path that the underlying resctrl group will be
+ * created with.
+ *
+ * A monitor represents a directory under resource control file system,
+ * its directory path could be the same path as @monitor->alloc, could be a
+ * path of directory under 'mon_groups' of @monitor->alloc, or a path of
+ * directory under '/sys/fs/resctrl/mon_groups' if @monitor->alloc is NULL.
+ *
+ * Returns 0 on success, -1 on error.
+ */
+int
+virResctrlMonitorDeterminePath(virResctrlMonitorPtr monitor,
+                               const char *machinename)
+{
+    VIR_AUTOFREE(char *) parentpath = NULL;
+
+    if (!monitor) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Invalid resctrl monitor"));
+        return -1;
+    }
+
+    if (!monitor->alloc) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Missing resctrl monitor alloc"));
+        return -1;
+    }
+
+    if (monitor->path) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Resctrl monitor path is already set to '%s'"),
+                       monitor->path);
+        return -1;
+    }
+
+    if (STREQ_NULLABLE(monitor->id, monitor->alloc->id)) {
+        if (VIR_STRDUP(monitor->path, monitor->alloc->path) < 0)
+            return -1;
+        return 0;
+    }
+
+    if (virAsprintf(&parentpath, "%s/mon_groups", monitor->alloc->path) < 0)
+        return -1;
+
+    monitor->path = virResctrlDeterminePath(parentpath, machinename,
+                                            monitor->id);
+    if (!monitor->path)
+        return -1;
+
+    return 0;
+}
+
+
+int
+virResctrlMonitorAddPID(virResctrlMonitorPtr monitor,
+                        pid_t pid)
+{
+    return virResctrlAddPID(monitor->path, pid);
+}
+
+
+int
+virResctrlMonitorCreate(virResctrlMonitorPtr monitor,
+                        const char *machinename)
+{
+    int lockfd = -1;
+    int ret = -1;
+
+    if (!monitor)
+        return 0;
+
+    if (virResctrlMonitorDeterminePath(monitor, machinename) < 0)
+        return -1;
+
+    lockfd = virResctrlLockWrite();
+    if (lockfd < 0)
+        return -1;
+
+    ret = virResctrlCreateGroupPath(monitor->path);
+
+    virResctrlUnlock(lockfd);
+    return ret;
+}
+
+
+int
+virResctrlMonitorSetID(virResctrlMonitorPtr monitor,
+                       const char *id)
+
+{
+    return virResctrlSetID(&monitor->id, id);
+}
+
+
+const char *
+virResctrlMonitorGetID(virResctrlMonitorPtr monitor)
+{
+    return monitor->id;
+}
+
+
+void
+virResctrlMonitorSetAlloc(virResctrlMonitorPtr monitor,
+                          virResctrlAllocPtr alloc)
+{
+    monitor->alloc = virObjectRef(alloc);
+}
+
+
+int
+virResctrlMonitorRemove(virResctrlMonitorPtr monitor)
+{
+    int ret = 0;
+
+    if (!monitor->path)
+        return 0;
+
+    if (STREQ(monitor->path, monitor->alloc->path))
+        return 0;
+
+    VIR_DEBUG("Removing resctrl monitor path=%s", monitor->path);
+    if (rmdir(monitor->path) != 0 && errno != ENOENT) {
+        ret = -errno;
+        VIR_ERROR(_("Unable to remove %s (%d)"), monitor->path, errno);
+    }
+
+    return ret;
+}
+
+
+static int
+virResctrlMonitorStatsSorter(const void *a,
+                             const void *b)
+{
+    return (*(virResctrlMonitorStatsPtr *)a)->id
+        - (*(virResctrlMonitorStatsPtr *)b)->id;
+}
+
+
+/*
+ * virResctrlMonitorGetStats
+ *
+ * @monitor: The monitor that the statistic data will be retrieved from.
+ * @resource: The name for resource name. 'llc_occupancy' for cache resource.
+ * "mbm_total_bytes" and "mbm_local_bytes" for memory bandwidth resource.
+ * @stats: Pointer of of virResctrlMonitorStatsPtr array for holding cache or
+ * memory bandwidth usage data.
+ * @nstats: A size_t pointer to hold the returned array length of @stats
+ *
+ * Get cache or memory bandwidth utilization information.
+ *
+ * Returns 0 on success, -1 on error.
+ */
+static int
+virResctrlMonitorGetStats(virResctrlMonitorPtr monitor,
+                          const char *resource,
+                          virResctrlMonitorStatsPtr **stats,
+                          size_t *nstats)
+{
+    int rv = -1;
+    int ret = -1;
+    DIR *dirp = NULL;
+    char *datapath = NULL;
+    char *filepath = NULL;
+    struct dirent *ent = NULL;
+    virResctrlMonitorStatsPtr stat = NULL;
+
+    if (!monitor) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Invalid resctrl monitor"));
+        return -1;
+    }
+
+    if (virAsprintf(&datapath, "%s/mon_data", monitor->path) < 0)
+        return -1;
+
+    if (virDirOpen(&dirp, datapath) < 0)
+        goto cleanup;
+
+    *nstats = 0;
+    while (virDirRead(dirp, &ent, datapath) > 0) {
+        char *node_id = NULL;
+
+        VIR_FREE(filepath);
+
+        /* Looking for directory that contains resource utilization
+         * information file. The directory name is arranged in format
+         * "mon_<node_name>_<node_id>". For example, "mon_L3_00" and
+         * "mon_L3_01" are two target directories for a two nodes system
+         * with resource utilization data file for each node respectively.
+         */
+        if (virAsprintf(&filepath, "%s/%s", datapath, ent->d_name) < 0)
+            goto cleanup;
+
+        if (!virFileIsDir(filepath))
+            continue;
+
+        /* Looking for directory has a prefix 'mon_L' */
+        if (!(node_id = STRSKIP(ent->d_name, "mon_L")))
+            continue;
+
+        /* Looking for directory has another '_' */
+        node_id = strchr(node_id, '_');
+        if (!node_id)
+            continue;
+
+        /* Skip the character '_' */
+        if (!(node_id = STRSKIP(node_id, "_")))
+            continue;
+
+        if (VIR_ALLOC(stat) < 0)
+            goto cleanup;
+
+        /* The node ID number should be here, parsing it. */
+        if (virStrToLong_uip(node_id, NULL, 0, &stat->id) < 0)
+            goto cleanup;
+
+        rv = virFileReadValueUint(&stat->val, "%s/%s/%s", datapath,
+                                  ent->d_name, resource);
+        if (rv == -2) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("File '%s/%s/%s' does not exist."),
+                           datapath, ent->d_name, resource);
+        }
+        if (rv < 0)
+            goto cleanup;
+
+        if (VIR_APPEND_ELEMENT(*stats, *nstats, stat) < 0)
+            goto cleanup;
+    }
+
+    /* Sort in id's ascending order */
+    if (*nstats)
+        qsort(*stats, *nstats, sizeof(**stats), virResctrlMonitorStatsSorter);
+
+    ret = 0;
+ cleanup:
+    VIR_FREE(datapath);
+    VIR_FREE(filepath);
+    VIR_FREE(stat);
+    VIR_DIR_CLOSE(dirp);
+    return ret;
+}
+
+
+void
+virResctrlMonitorFreeStats(virResctrlMonitorStatsPtr *stats,
+                           size_t nstats)
+{
+    size_t i = 0;
+
+    if (!stats)
+        return;
+
+    for (i = 0; i < nstats; i++)
+        VIR_FREE(stats[i]);
+
+    VIR_FREE(stats);
+}
+
+
+/*
+ * virResctrlMonitorGetCacheOccupancy
+ *
+ * @monitor: The monitor that the statistic data will be retrieved from.
+ * @stats: Array of virResctrlMonitorStatsPtr for receiving cache occupancy
+ * data. Caller is responsible to free this array.
+ * @nstats: A size_t pointer to hold the returned array length of @caches
+ *
+ * Get cache or memory bandwidth utilization information.
+ *
+ * Returns 0 on success, -1 on error.
+ */
+
+int
+virResctrlMonitorGetCacheOccupancy(virResctrlMonitorPtr monitor,
+                                   virResctrlMonitorStatsPtr **stats,
+                                   size_t *nstats)
+{
+    return virResctrlMonitorGetStats(monitor, "llc_occupancy",
+                                     stats, nstats);
 }

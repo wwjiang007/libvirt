@@ -22,16 +22,15 @@
  *
  */
 
+#ifndef LIBVIRT_VIRFILE_H
+# define LIBVIRT_VIRFILE_H
 
-#ifndef __VIR_FILE_H_
-# define __VIR_FILE_H_
-
-# include <stdio.h>
 # include <dirent.h>
 
 # include "internal.h"
 # include "virbitmap.h"
 # include "virstoragefile.h"
+# include "virautoclean.h"
 
 typedef enum {
     VIR_FILE_CLOSE_PRESERVE_ERRNO = 1 << 0,
@@ -53,6 +52,11 @@ int virFileClose(int *fdptr, virFileCloseFlags flags)
 int virFileFclose(FILE **file, bool preserve_errno) ATTRIBUTE_RETURN_CHECK;
 FILE *virFileFdopen(int *fdptr, const char *mode) ATTRIBUTE_RETURN_CHECK;
 
+static inline void virForceCloseHelper(int *fd)
+{
+    ignore_value(virFileClose(fd, VIR_FILE_CLOSE_PRESERVE_ERRNO));
+}
+
 /* For use on normal paths; caller must check return value,
    and failure sets errno per close. */
 # define VIR_CLOSE(FD) virFileClose(&(FD), 0)
@@ -63,8 +67,7 @@ FILE *virFileFdopen(int *fdptr, const char *mode) ATTRIBUTE_RETURN_CHECK;
 
 /* For use on cleanup paths; errno is unaffected by close,
    and no return value to worry about. */
-# define VIR_FORCE_CLOSE(FD) \
-    ignore_value(virFileClose(&(FD), VIR_FILE_CLOSE_PRESERVE_ERRNO))
+# define VIR_FORCE_CLOSE(FD) virForceCloseHelper(&(FD))
 # define VIR_FORCE_FCLOSE(FILE) ignore_value(virFileFclose(&(FILE), true))
 
 /* Similar VIR_FORCE_CLOSE() but ignores EBADF errors since they are expected
@@ -78,6 +81,16 @@ FILE *virFileFdopen(int *fdptr, const char *mode) ATTRIBUTE_RETURN_CHECK;
     ignore_value(virFileClose(&(FD), \
                  VIR_FILE_CLOSE_PRESERVE_ERRNO | \
                  VIR_FILE_CLOSE_DONT_LOG))
+
+/**
+ * VIR_AUTOCLOSE:
+ *
+ * Macro to automatically force close the fd by calling virForceCloseHelper
+ * when the fd goes out of scope. It's used to eliminate VIR_FORCE_CLOSE
+ * in cleanup sections.
+ */
+# define VIR_AUTOCLOSE __attribute__((cleanup(virForceCloseHelper))) int
+
 
 /* Opaque type for managing a wrapper around a fd.  */
 struct _virFileWrapperFd;
@@ -101,8 +114,12 @@ int virFileWrapperFdClose(virFileWrapperFdPtr dfd);
 
 void virFileWrapperFdFree(virFileWrapperFdPtr dfd);
 
-int virFileLock(int fd, bool shared, off_t start, off_t len, bool waitForLock);
-int virFileUnlock(int fd, off_t start, off_t len);
+int virFileLock(int fd, bool shared, off_t start, off_t len, bool waitForLock)
+    ATTRIBUTE_NOINLINE;
+int virFileUnlock(int fd, off_t start, off_t len)
+    ATTRIBUTE_NOINLINE;
+
+int virFileFlock(int fd, bool lock, bool shared);
 
 typedef int (*virFileRewriteFunc)(int fd, const void *opaque);
 int virFileRewrite(const char *path,
@@ -145,16 +162,6 @@ int virFileReadBufQuiet(const char *file, char *buf, int len)
 int virFileWriteStr(const char *path, const char *str, mode_t mode)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
 
-int virFileMatchesNameSuffix(const char *file,
-                             const char *name,
-                             const char *suffix);
-
-int virFileHasSuffix(const char *str,
-                     const char *suffix);
-
-int virFileStripSuffix(char *str,
-                       const char *suffix) ATTRIBUTE_RETURN_CHECK;
-
 int virFileLinkPointsTo(const char *checkLink,
                         const char *checkDest)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
@@ -194,6 +201,7 @@ off_t virFileLength(const char *path, int fd) ATTRIBUTE_NONNULL(1);
 bool virFileIsDir (const char *file) ATTRIBUTE_NONNULL(1);
 bool virFileExists(const char *file) ATTRIBUTE_NONNULL(1) ATTRIBUTE_NOINLINE;
 bool virFileIsExecutable(const char *file) ATTRIBUTE_NONNULL(1);
+bool virFileIsRegular(const char *file) ATTRIBUTE_NONNULL(1);
 
 enum {
     VIR_FILE_SHFS_NFS = (1 << 0),
@@ -202,11 +210,15 @@ enum {
     VIR_FILE_SHFS_AFS = (1 << 3),
     VIR_FILE_SHFS_SMB = (1 << 4),
     VIR_FILE_SHFS_CIFS = (1 << 5),
+    VIR_FILE_SHFS_CEPH = (1 << 6),
+    VIR_FILE_SHFS_GPFS = (1 << 7),
 };
 
 int virFileIsSharedFSType(const char *path, int fstypes) ATTRIBUTE_NONNULL(1);
 int virFileIsSharedFS(const char *path) ATTRIBUTE_NONNULL(1);
 int virFileIsMountPoint(const char *file) ATTRIBUTE_NONNULL(1);
+int virFileIsCDROM(const char *path)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
 
 int virFileGetMountSubtree(const char *mtabpath,
                            const char *prefix,
@@ -218,6 +230,7 @@ int virFileGetMountReverseSubtree(const char *mtabpath,
                                   size_t *nmountsret) ATTRIBUTE_RETURN_CHECK;
 
 char *virFileSanitizePath(const char *path);
+char *virFileCanonicalizePath(const char *path) ATTRIBUTE_NOINLINE;
 
 enum {
     VIR_FILE_OPEN_NONE        = 0,
@@ -234,6 +247,9 @@ int virFileOpenAs(const char *path, int openflags, mode_t mode,
                   unsigned int flags)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
 int virFileRemove(const char *path, uid_t uid, gid_t gid);
+
+int virFileChownFiles(const char *name, uid_t uid, gid_t gid)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
 
 enum {
     VIR_DIR_CREATE_NONE        = 0,
@@ -318,6 +334,9 @@ int virFileGetHugepageSize(const char *path,
 int virFileFindHugeTLBFS(virHugeTLBFSPtr *ret_fs,
                          size_t *ret_nfs);
 
+virHugeTLBFSPtr virFileGetDefaultHugepage(virHugeTLBFSPtr fs,
+                                          size_t nfs);
+
 int virFileSetupDev(const char *path,
                     const char *mount_options);
 
@@ -358,4 +377,20 @@ int virFileInData(int fd,
                   int *inData,
                   long long *length);
 
-#endif /* __VIR_FILE_H */
+VIR_DEFINE_AUTOPTR_FUNC(virFileWrapperFd, virFileWrapperFdFree);
+
+int virFileGetXAttr(const char *path,
+                    const char *name,
+                    char **value)
+    ATTRIBUTE_NOINLINE;
+
+int virFileSetXAttr(const char *path,
+                    const char *name,
+                    const char *value)
+    ATTRIBUTE_NOINLINE;
+
+int virFileRemoveXAttr(const char *path,
+                       const char *name)
+    ATTRIBUTE_NOINLINE;
+
+#endif /* LIBVIRT_VIRFILE_H */

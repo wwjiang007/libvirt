@@ -2,7 +2,6 @@
  * libvirt-domain.h
  * Summary: APIs for management of domains
  * Description: Provides APIs for the management of domains
- * Author: Daniel Veillard <veillard@redhat.com>
  *
  * Copyright (C) 2006-2015 Red Hat, Inc.
  *
@@ -21,8 +20,8 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_LIBVIRT_DOMAIN_H__
-# define __VIR_LIBVIRT_DOMAIN_H__
+#ifndef LIBVIRT_DOMAIN_H
+# define LIBVIRT_DOMAIN_H
 
 # ifndef __VIR_LIBVIRT_H_INCLUDES__
 #  error "Don't include this file directly, only use libvirt/libvirt.h"
@@ -145,6 +144,8 @@ typedef enum {
     VIR_DOMAIN_SHUTOFF_FAILED = 6,      /* domain failed to start */
     VIR_DOMAIN_SHUTOFF_FROM_SNAPSHOT = 7, /* restored from a snapshot which was
                                            * taken while domain was shutoff */
+    VIR_DOMAIN_SHUTOFF_DAEMON = 8,      /* daemon decides to kill domain
+                                           during reconnection processing */
 # ifdef VIR_ENUM_SENTINELS
     VIR_DOMAIN_SHUTOFF_LAST
 # endif
@@ -629,10 +630,17 @@ typedef enum {
     VIR_DOMAIN_MEMORY_STAT_LAST_UPDATE     = 9,
 
     /*
+     * The amount of memory, that can be quickly reclaimed without
+     * additional I/O (in kB). Typically these pages are used for caching files
+     * from disk.
+     */
+    VIR_DOMAIN_MEMORY_STAT_DISK_CACHES     = 10,
+
+    /*
      * The number of statistics supported by this version of the interface.
      * To add new statistics, add them to the enum and increase this value.
      */
-    VIR_DOMAIN_MEMORY_STAT_NR              = 10,
+    VIR_DOMAIN_MEMORY_STAT_NR              = 11,
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_DOMAIN_MEMORY_STAT_LAST = VIR_DOMAIN_MEMORY_STAT_NR
@@ -823,6 +831,12 @@ typedef enum {
      */
     VIR_MIGRATE_TLS               = (1 << 16),
 
+    /* Send memory pages to the destination host through several network
+     * connections. See VIR_MIGRATE_PARAM_PARALLEL_* parameters for
+     * configuring the parallel migration.
+     */
+    VIR_MIGRATE_PARALLEL          = (1 << 17),
+
 } virDomainMigrateFlags;
 
 
@@ -837,7 +851,7 @@ typedef enum {
  * the destination host has multiple interfaces and a specific interface is
  * required to transmit migration data.
  *
- * This filed may not be used when VIR_MIGRATE_TUNNELLED flag is set.
+ * This field may not be used when VIR_MIGRATE_TUNNELLED flag is set.
  */
 # define VIR_MIGRATE_PARAM_URI               "migrate_uri"
 
@@ -894,6 +908,15 @@ typedef enum {
  * feature and will return an error if this field is used and is not 0.
  */
 # define VIR_MIGRATE_PARAM_BANDWIDTH         "bandwidth"
+
+/**
+ * VIR_MIGRATE_PARAM_BANDWIDTH_POSTCOPY:
+ *
+ * virDomainMigrate* params field: the maximum bandwidth (in MiB/s) that will
+ * be used for post-copy phase of a migration as VIR_TYPED_PARAM_ULLONG. If set
+ * to 0 or omitted, post-copy migration speed will not be limited.
+ */
+# define VIR_MIGRATE_PARAM_BANDWIDTH_POSTCOPY "bandwidth.postcopy"
 
 /**
  * VIR_MIGRATE_PARAM_GRAPHICS_URI:
@@ -1008,6 +1031,14 @@ typedef enum {
  */
 # define VIR_MIGRATE_PARAM_AUTO_CONVERGE_INCREMENT  "auto_converge.increment"
 
+/**
+ * VIR_MIGRATE_PARAM_PARALLEL_CONNECTIONS:
+ *
+ * virDomainMigrate* params field: number of connections used during parallel
+ * migration. As VIR_TYPED_PARAM_INT.
+ */
+# define VIR_MIGRATE_PARAM_PARALLEL_CONNECTIONS     "parallel.connections"
+
 /* Domain migration. */
 virDomainPtr virDomainMigrate (virDomainPtr domain, virConnectPtr dconn,
                                unsigned long flags, const char *dname,
@@ -1053,6 +1084,12 @@ int virDomainMigrateGetCompressionCache(virDomainPtr domain,
 int virDomainMigrateSetCompressionCache(virDomainPtr domain,
                                         unsigned long long cacheSize,
                                         unsigned int flags);
+
+/* Domain migration speed flags. */
+typedef enum {
+    /* Set or get maximum speed of post-copy migration. */
+    VIR_DOMAIN_MIGRATE_MAX_SPEED_POSTCOPY = (1 << 0),
+} virDomainMigrateMaxSpeedFlags;
 
 int virDomainMigrateSetMaxSpeed(virDomainPtr domain,
                                 unsigned long bandwidth,
@@ -1196,6 +1233,7 @@ int                     virDomainRestoreFlags   (virConnectPtr conn,
                                                  const char *dxml,
                                                  unsigned int flags);
 
+/* See below for virDomainSaveImageXMLFlags */
 char *          virDomainSaveImageGetXMLDesc    (virConnectPtr conn,
                                                  const char *file,
                                                  unsigned int flags);
@@ -1547,6 +1585,10 @@ typedef enum {
     VIR_DOMAIN_XML_UPDATE_CPU   = (1 << 2), /* update guest CPU requirements according to host CPU */
     VIR_DOMAIN_XML_MIGRATABLE   = (1 << 3), /* dump XML suitable for migration */
 } virDomainXMLFlags;
+
+typedef enum {
+    VIR_DOMAIN_SAVE_IMAGE_XML_SECURE         = VIR_DOMAIN_XML_SECURE, /* dump security sensitive information too */
+} virDomainSaveImageXMLFlags;
 
 char *                  virDomainGetXMLDesc     (virDomainPtr domain,
                                                  unsigned int flags);
@@ -1904,6 +1946,50 @@ int                  virDomainDelIOThread(virDomainPtr domain,
                                           unsigned int iothread_id,
                                           unsigned int flags);
 
+/* IOThread set parameters */
+
+/**
+ * VIR_DOMAIN_IOTHREAD_POLL_MAX_NS:
+ *
+ * The maximum polling time that can be used by polling algorithm in ns.
+ * The polling time starts at 0 (zero) and is the time spent by the guest
+ * to process IOThread data before returning the CPU to the host. The
+ * polling time will be dynamically modified over time based on the
+ * poll_grow and poll_shrink parameters provided. A value set too large
+ * will cause more CPU time to be allocated the guest. A value set too
+ * small will not provide enough cycles for the guest to process data.
+ * The polling interval is not available for statistical purposes.
+ */
+# define VIR_DOMAIN_IOTHREAD_POLL_MAX_NS "poll_max_ns"
+
+/**
+ * VIR_DOMAIN_IOTHREAD_POLL_GROW:
+ *
+ * This provides a value for the dynamic polling adjustment algorithm to
+ * use to grow its polling interval up to the poll_max_ns value. A value
+ * of 0 (zero) allows the hypervisor to choose its own value. The algorithm
+ * to use for adjustment is hypervisor specific.
+ */
+# define VIR_DOMAIN_IOTHREAD_POLL_GROW "poll_grow"
+
+/**
+ * VIR_DOMAIN_IOTHREAD_POLL_SHRINK:
+ *
+ * This provides a value for the dynamic polling adjustment algorithm to
+ * use to shrink its polling interval when the polling interval exceeds
+ * the poll_max_ns value. A value of 0 (zero) allows the hypervisor to
+ * choose its own value. The algorithm to use for adjustment is hypervisor
+ * specific.
+ */
+# define VIR_DOMAIN_IOTHREAD_POLL_SHRINK "poll_shrink"
+
+int                  virDomainSetIOThreadParams(virDomainPtr domain,
+                                                unsigned int iothread_id,
+                                                virTypedParameterPtr params,
+                                                int nparams,
+                                                unsigned int flags);
+
+
 /**
  * VIR_USE_CPU:
  * @cpumap: pointer to a bit map of real CPUs (in 8-bit bytes) (IN/OUT)
@@ -2022,6 +2108,9 @@ int virDomainDetachDeviceFlags(virDomainPtr domain,
 int virDomainUpdateDeviceFlags(virDomainPtr domain,
                                const char *xml, unsigned int flags);
 
+int virDomainDetachDeviceAlias(virDomainPtr domain,
+                               const char *alias, unsigned int flags);
+
 typedef struct _virDomainStatsRecord virDomainStatsRecord;
 typedef virDomainStatsRecord *virDomainStatsRecordPtr;
 struct _virDomainStatsRecord {
@@ -2038,6 +2127,7 @@ typedef enum {
     VIR_DOMAIN_STATS_INTERFACE = (1 << 4), /* return domain interfaces info */
     VIR_DOMAIN_STATS_BLOCK = (1 << 5), /* return domain block info */
     VIR_DOMAIN_STATS_PERF = (1 << 6), /* return domain perf event info */
+    VIR_DOMAIN_STATS_IOTHREAD = (1 << 7), /* return iothread poll info */
 } virDomainStatsTypes;
 
 typedef enum {
@@ -2052,6 +2142,8 @@ typedef enum {
     VIR_CONNECT_GET_ALL_DOMAINS_STATS_SHUTOFF = VIR_CONNECT_LIST_DOMAINS_SHUTOFF,
     VIR_CONNECT_GET_ALL_DOMAINS_STATS_OTHER = VIR_CONNECT_LIST_DOMAINS_OTHER,
 
+    VIR_CONNECT_GET_ALL_DOMAINS_STATS_NOWAIT = 1 << 29, /* report statistics that can be obtained
+                                                           immediately without any blocking */
     VIR_CONNECT_GET_ALL_DOMAINS_STATS_BACKING = 1 << 30, /* include backing chain for block stats */
     VIR_CONNECT_GET_ALL_DOMAINS_STATS_ENFORCE_STATS = 1U << 31, /* enforce requested stats */
 } virConnectGetAllDomainStatsFlags;
@@ -2317,7 +2409,8 @@ int virDomainSetPerfEvents(virDomainPtr dom,
  * Describes various possible block jobs.
  */
 typedef enum {
-    VIR_DOMAIN_BLOCK_JOB_TYPE_UNKNOWN = 0, /* Placeholder */
+    /* Placeholder */
+    VIR_DOMAIN_BLOCK_JOB_TYPE_UNKNOWN = 0,
 
     /* Block Pull (virDomainBlockPull, or virDomainBlockRebase without
      * flags), job ends on completion */
@@ -3363,6 +3456,16 @@ typedef enum {
  * since the last iteration.
  */
 # define VIR_DOMAIN_JOB_MEMORY_ITERATION         "memory_iteration"
+
+/**
+ * VIR_DOMAIN_JOB_MEMORY_POSTCOPY_REQS:
+ *
+ * virDomainGetJobStats field: number page requests received from the
+ * destination host during post-copy migration, as VIR_TYPED_PARAM_ULLONG.
+ * This counter is incremented whenever the migrated domain tries to access
+ * a memory page which has not been transferred from the source host yet.
+ */
+# define VIR_DOMAIN_JOB_MEMORY_POSTCOPY_REQS     "memory_postcopy_requests"
 
 /**
  * VIR_DOMAIN_JOB_DISK_TOTAL:
@@ -4764,4 +4867,21 @@ int virDomainSetLifecycleAction(virDomainPtr domain,
                                 unsigned int action,
                                 unsigned int flags);
 
-#endif /* __VIR_LIBVIRT_DOMAIN_H__ */
+/**
+ * Launch Security API
+ */
+
+/**
+ * VIR_DOMAIN_LAUNCH_SECURITY_SEV_MEASUREMENT:
+ *
+ * Macro represents the launch measurement of the SEV guest,
+ * as VIR_TYPED_PARAM_STRING.
+ */
+# define VIR_DOMAIN_LAUNCH_SECURITY_SEV_MEASUREMENT "sev-measurement"
+
+int virDomainGetLaunchSecurityInfo(virDomainPtr domain,
+                                   virTypedParameterPtr *params,
+                                   int *nparams,
+                                   unsigned int flags);
+
+#endif /* LIBVIRT_DOMAIN_H */

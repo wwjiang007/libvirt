@@ -16,8 +16,8 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_STORAGE_BACKEND_H__
-# define __VIR_STORAGE_BACKEND_H__
+#ifndef LIBVIRT_STORAGE_BACKEND_H
+# define LIBVIRT_STORAGE_BACKEND_H
 
 # include <sys/stat.h>
 
@@ -64,18 +64,30 @@ typedef int (*virStorageBackendVolumeResize)(virStoragePoolObjPtr pool,
                                              virStorageVolDefPtr vol,
                                              unsigned long long capacity,
                                              unsigned int flags);
+
+/* Upon entering this callback passed @obj is unlocked. However,
+ * the pool's asyncjobs counter has been incremented and volume's
+ * in_use has been adjusted to ensure singular usage. */
 typedef int (*virStorageBackendVolumeDownload)(virStoragePoolObjPtr obj,
                                                virStorageVolDefPtr vol,
                                                virStreamPtr stream,
                                                unsigned long long offset,
                                                unsigned long long length,
                                                unsigned int flags);
+
+/* Upon entering this callback passed @obj is unlocked. However,
+ * the pool's asyncjobs counter has been incremented and volume's
+ * in_use has been adjusted to ensure singular usage. */
 typedef int (*virStorageBackendVolumeUpload)(virStoragePoolObjPtr obj,
                                              virStorageVolDefPtr vol,
                                              virStreamPtr stream,
                                              unsigned long long offset,
                                              unsigned long long len,
                                              unsigned int flags);
+
+/* Upon entering this callback passed @obj is unlocked. However,
+ * the pool's asyncjobs counter has been incremented and volume's
+ * in_use has been adjusted to ensure singular usage. */
 typedef int (*virStorageBackendVolumeWipe)(virStoragePoolObjPtr pool,
                                            virStorageVolDefPtr vol,
                                            unsigned int algorithm,
@@ -114,4 +126,7 @@ int virStorageBackendDriversRegister(bool allmodules);
 
 int virStorageBackendRegister(virStorageBackendPtr backend);
 
-#endif /* __VIR_STORAGE_BACKEND_H__ */
+virCapsPtr
+virStorageBackendGetCapabilities(void);
+
+#endif /* LIBVIRT_STORAGE_BACKEND_H */

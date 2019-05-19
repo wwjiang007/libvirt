@@ -18,8 +18,6 @@
 
 #include <config.h>
 
-#include <string.h>
-#include <stdio.h>
 #include <regex.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -36,6 +34,11 @@
 # ifndef FS_NOCOW_FL
 #  define FS_NOCOW_FL                     0x00800000 /* Do not cow file */
 # endif
+# define default_mount_opts "nodev,nosuid,noexec"
+#elif defined(__FreeBSD__)
+# define default_mount_opts "nosuid,noexec"
+#else
+# define default_mount_opts ""
 #endif
 
 #if WITH_BLKID
@@ -46,8 +49,14 @@
 # include <selinux/selinux.h>
 #endif
 
-#if HAVE_LINUX_BTRFS_H
+#ifdef FICLONE
+# define REFLINK_IOC_CLONE FICLONE
+#elif HAVE_LINUX_BTRFS_H
 # include <linux/btrfs.h>
+# define REFLINK_IOC_CLONE BTRFS_IOC_CLONE
+#elif HAVE_XFS_XFS_H
+# include <xfs/xfs.h>
+# define REFLINK_IOC_CLONE XFS_IOC_CLONE
 #endif
 
 #include "datatypes.h"
@@ -73,6 +82,22 @@
 
 VIR_LOG_INIT("storage.storage_util");
 
+
+/* virStorageBackendNamespaceInit:
+ * @poolType: virStoragePoolType
+ * @xmlns: Storage Pool specific namespace callback methods
+ *
+ * To be called during storage backend registration to configure the
+ * Storage Pool XML Namespace based on the backend's needs.
+ */
+int
+virStorageBackendNamespaceInit(int poolType,
+                               virStoragePoolXMLNamespacePtr xmlns)
+{
+    return virStoragePoolOptionsPoolTypeSetXMLNamespace(poolType, xmlns);
+}
+
+
 #define READ_BLOCK_SIZE_DEFAULT  (1024 * 1024)
 #define WRITE_BLOCK_SIZE_DEFAULT (4 * 1024)
 
@@ -80,21 +105,22 @@ VIR_LOG_INIT("storage.storage_util");
  * Perform the O(1) btrfs clone operation, if possible.
  * Upon success, return 0.  Otherwise, return -1 and set errno.
  */
-#if HAVE_LINUX_BTRFS_H
+#ifdef REFLINK_IOC_CLONE
 static inline int
-btrfsCloneFile(int dest_fd, int src_fd)
+reflinkCloneFile(int dest_fd, int src_fd)
 {
-    return ioctl(dest_fd, BTRFS_IOC_CLONE, src_fd);
+    return ioctl(dest_fd, REFLINK_IOC_CLONE, src_fd);
 }
 #else
 static inline int
-btrfsCloneFile(int dest_fd ATTRIBUTE_UNUSED,
-               int src_fd ATTRIBUTE_UNUSED)
+reflinkCloneFile(int dest_fd ATTRIBUTE_UNUSED,
+                 int src_fd ATTRIBUTE_UNUSED)
 {
     errno = ENOTSUP;
     return -1;
 }
 #endif
+
 
 static int ATTRIBUTE_NONNULL(2)
 virStorageBackendCopyToFD(virStorageVolDefPtr vol,
@@ -104,22 +130,22 @@ virStorageBackendCopyToFD(virStorageVolDefPtr vol,
                           bool want_sparse,
                           bool reflink_copy)
 {
-    int inputfd = -1;
     int amtread = -1;
     int ret = 0;
     size_t rbytes = READ_BLOCK_SIZE_DEFAULT;
     int wbytes = 0;
     int interval;
-    char *zerobuf = NULL;
-    char *buf = NULL;
     struct stat st;
+    VIR_AUTOFREE(char *) zerobuf = NULL;
+    VIR_AUTOFREE(char *) buf = NULL;
+    VIR_AUTOCLOSE inputfd = -1;
 
     if ((inputfd = open(inputvol->target.path, O_RDONLY)) < 0) {
         ret = -errno;
         virReportSystemError(errno,
                              _("could not open input path '%s'"),
                              inputvol->target.path);
-        goto cleanup;
+        return ret;
     }
 
 #ifdef __linux__
@@ -131,26 +157,22 @@ virStorageBackendCopyToFD(virStorageVolDefPtr vol,
     if (wbytes < WRITE_BLOCK_SIZE_DEFAULT)
         wbytes = WRITE_BLOCK_SIZE_DEFAULT;
 
-    if (VIR_ALLOC_N(zerobuf, wbytes) < 0) {
-        ret = -errno;
-        goto cleanup;
-    }
+    if (VIR_ALLOC_N(zerobuf, wbytes) < 0)
+        return -errno;
 
-    if (VIR_ALLOC_N(buf, rbytes) < 0) {
-        ret = -errno;
-        goto cleanup;
-    }
+    if (VIR_ALLOC_N(buf, rbytes) < 0)
+        return -errno;
 
     if (reflink_copy) {
-        if (btrfsCloneFile(fd, inputfd) < 0) {
+        if (reflinkCloneFile(fd, inputfd) < 0) {
             ret = -errno;
             virReportSystemError(errno,
                                  _("failed to clone files from '%s'"),
                                  inputvol->target.path);
-            goto cleanup;
+            return ret;
         } else {
             VIR_DEBUG("btrfs clone finished.");
-            goto cleanup;
+            return 0;
         }
     }
 
@@ -165,7 +187,7 @@ virStorageBackendCopyToFD(virStorageVolDefPtr vol,
             virReportSystemError(errno,
                                  _("failed reading from file '%s'"),
                                  inputvol->target.path);
-            goto cleanup;
+            return ret;
         }
         *total -= amtread;
 
@@ -182,14 +204,14 @@ virStorageBackendCopyToFD(virStorageVolDefPtr vol,
                     virReportSystemError(errno,
                                          _("cannot extend file '%s'"),
                                          vol->target.path);
-                    goto cleanup;
+                    return ret;
                 }
             } else if (safewrite(fd, buf+offset, interval) < 0) {
                 ret = -errno;
                 virReportSystemError(errno,
                                      _("failed writing to file '%s'"),
                                      vol->target.path);
-                goto cleanup;
+                return ret;
 
             }
         } while ((amtleft -= interval) > 0);
@@ -199,26 +221,18 @@ virStorageBackendCopyToFD(virStorageVolDefPtr vol,
         ret = -errno;
         virReportSystemError(errno, _("cannot sync data to file '%s'"),
                              vol->target.path);
-        goto cleanup;
+        return ret;
     }
-
 
     if (VIR_CLOSE(inputfd) < 0) {
         ret = -errno;
         virReportSystemError(errno,
                              _("cannot close file '%s'"),
                              inputvol->target.path);
-        goto cleanup;
+        return ret;
     }
-    inputfd = -1;
 
- cleanup:
-    VIR_FORCE_CLOSE(inputfd);
-
-    VIR_FREE(zerobuf);
-    VIR_FREE(buf);
-
-    return ret;
+    return 0;
 }
 
 static int
@@ -227,14 +241,13 @@ storageBackendCreateBlockFrom(virStoragePoolObjPtr pool ATTRIBUTE_UNUSED,
                               virStorageVolDefPtr inputvol,
                               unsigned int flags)
 {
-    int fd = -1;
-    int ret = -1;
     unsigned long long remain;
     struct stat st;
     gid_t gid;
     uid_t uid;
     mode_t mode;
     bool reflink_copy = false;
+    VIR_AUTOCLOSE fd = -1;
 
     virCheckFlags(VIR_STORAGE_VOL_CREATE_PREALLOC_METADATA |
                   VIR_STORAGE_VOL_CREATE_REFLINK,
@@ -244,7 +257,7 @@ storageBackendCreateBlockFrom(virStoragePoolObjPtr pool ATTRIBUTE_UNUSED,
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                        _("metadata preallocation is not supported for block "
                          "volumes"));
-        goto cleanup;
+        return -1;
     }
 
     if (flags & VIR_STORAGE_VOL_CREATE_REFLINK)
@@ -254,7 +267,7 @@ storageBackendCreateBlockFrom(virStoragePoolObjPtr pool ATTRIBUTE_UNUSED,
         virReportSystemError(errno,
                              _("cannot create path '%s'"),
                              vol->target.path);
-        goto cleanup;
+        return -1;
     }
 
     remain = vol->target.capacity;
@@ -262,48 +275,43 @@ storageBackendCreateBlockFrom(virStoragePoolObjPtr pool ATTRIBUTE_UNUSED,
     if (inputvol) {
         if (virStorageBackendCopyToFD(vol, inputvol, fd, &remain,
                                       false, reflink_copy) < 0)
-            goto cleanup;
+            return -1;
     }
 
     if (fstat(fd, &st) == -1) {
         virReportSystemError(errno, _("stat of '%s' failed"),
                              vol->target.path);
-        goto cleanup;
+        return -1;
     }
     uid = (vol->target.perms->uid != st.st_uid) ? vol->target.perms->uid
-        : (uid_t) -1;
+        : (uid_t)-1;
     gid = (vol->target.perms->gid != st.st_gid) ? vol->target.perms->gid
-        : (gid_t) -1;
-    if (((uid != (uid_t) -1) || (gid != (gid_t) -1))
+        : (gid_t)-1;
+    if (((uid != (uid_t)-1) || (gid != (gid_t)-1))
         && (fchown(fd, uid, gid) < 0)) {
         virReportSystemError(errno,
                              _("cannot chown '%s' to (%u, %u)"),
-                             vol->target.path, (unsigned int) uid,
-                             (unsigned int) gid);
-        goto cleanup;
+                             vol->target.path, (unsigned int)uid,
+                             (unsigned int)gid);
+        return -1;
     }
 
-    mode = (vol->target.perms->mode == (mode_t) -1 ?
+    mode = (vol->target.perms->mode == (mode_t)-1 ?
             VIR_STORAGE_DEFAULT_VOL_PERM_MODE : vol->target.perms->mode);
     if (fchmod(fd, mode) < 0) {
         virReportSystemError(errno,
                              _("cannot set mode of '%s' to %04o"),
                              vol->target.path, mode);
-        goto cleanup;
+        return -1;
     }
     if (VIR_CLOSE(fd) < 0) {
         virReportSystemError(errno,
                              _("cannot close file '%s'"),
                              vol->target.path);
-        goto cleanup;
+        return -1;
     }
-    fd = -1;
 
-    ret = 0;
- cleanup:
-    VIR_FORCE_CLOSE(fd);
-
-    return ret;
+    return 0;
 }
 
 static int
@@ -396,11 +404,11 @@ storageBackendCreateRaw(virStoragePoolObjPtr pool,
 {
     virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
     int ret = -1;
-    int fd = -1;
     int operation_flags;
     bool reflink_copy = false;
     mode_t open_mode = VIR_STORAGE_DEFAULT_VOL_PERM_MODE;
     bool created = false;
+    VIR_AUTOCLOSE fd = -1;
 
     virCheckFlags(VIR_STORAGE_VOL_CREATE_PREALLOC_METADATA |
                   VIR_STORAGE_VOL_CREATE_REFLINK,
@@ -423,7 +431,7 @@ storageBackendCreateRaw(virStoragePoolObjPtr pool,
         reflink_copy = true;
 
 
-    if (vol->target.encryption != NULL) {
+    if (vol->target.encryption) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                        _("storage pool does not support encrypted volumes"));
         goto cleanup;
@@ -433,7 +441,7 @@ storageBackendCreateRaw(virStoragePoolObjPtr pool,
     if (def->type == VIR_STORAGE_POOL_NETFS)
         operation_flags |= VIR_FILE_OPEN_FORK;
 
-    if (vol->target.perms->mode != (mode_t) -1)
+    if (vol->target.perms->mode != (mode_t)-1)
         open_mode = vol->target.perms->mode;
 
     if ((fd = virFileOpenAs(vol->target.path,
@@ -478,113 +486,9 @@ storageBackendCreateRaw(virStoragePoolObjPtr pool,
         ignore_value(virFileRemove(vol->target.path,
                                    vol->target.perms->uid,
                                    vol->target.perms->gid));
-    VIR_FORCE_CLOSE(fd);
     return ret;
 }
 
-static int
-virStorageGenerateSecretUUID(virConnectPtr conn,
-                             unsigned char *uuid)
-{
-    unsigned attempt;
-
-    for (attempt = 0; attempt < 65536; attempt++) {
-        virSecretPtr tmp;
-        if (virUUIDGenerate(uuid) < 0) {
-            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                           _("unable to generate uuid"));
-            return -1;
-        }
-        tmp = virSecretLookupByUUID(conn, uuid);
-        if (tmp == NULL)
-            return 0;
-
-        virObjectUnref(tmp);
-    }
-
-    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                   _("too many conflicts when generating a uuid"));
-
-    return -1;
-}
-
-static int
-virStorageGenerateQcowEncryption(virStorageVolDefPtr vol)
-{
-    virSecretDefPtr def = NULL;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
-    virStorageEncryptionPtr enc;
-    virStorageEncryptionSecretPtr enc_secret = NULL;
-    virSecretPtr secret = NULL;
-    char *xml;
-    unsigned char value[VIR_STORAGE_QCOW_PASSPHRASE_SIZE];
-    int ret = -1;
-    virConnectPtr conn = NULL;
-
-    conn = virGetConnectSecret();
-    if (!conn)
-        return -1;
-
-    enc = vol->target.encryption;
-    if (enc->nsecrets != 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("secrets already defined"));
-        goto cleanup;
-    }
-
-    if (VIR_ALLOC(enc_secret) < 0 || VIR_REALLOC_N(enc->secrets, 1) < 0 ||
-        VIR_ALLOC(def) < 0)
-        goto cleanup;
-
-    def->isephemeral = false;
-    def->isprivate = false;
-    if (virStorageGenerateSecretUUID(conn, def->uuid) < 0)
-        goto cleanup;
-
-    def->usage_type = VIR_SECRET_USAGE_TYPE_VOLUME;
-    if (VIR_STRDUP(def->usage_id, vol->target.path) < 0)
-        goto cleanup;
-    xml = virSecretDefFormat(def);
-    virSecretDefFree(def);
-    def = NULL;
-    if (xml == NULL)
-        goto cleanup;
-
-    secret = virSecretDefineXML(conn, xml, 0);
-    if (secret == NULL) {
-        VIR_FREE(xml);
-        goto cleanup;
-    }
-    VIR_FREE(xml);
-
-    if (virStorageGenerateQcowPassphrase(value) < 0)
-        goto cleanup;
-
-    if (virSecretSetValue(secret, value, sizeof(value), 0) < 0)
-        goto cleanup;
-
-    enc_secret->type = VIR_STORAGE_ENCRYPTION_SECRET_TYPE_PASSPHRASE;
-    enc_secret->seclookupdef.type = VIR_SECRET_LOOKUP_TYPE_UUID;
-    memcpy(enc_secret->seclookupdef.u.uuid, secret->uuid, VIR_UUID_BUFLEN);
-    enc->format = VIR_STORAGE_ENCRYPTION_FORMAT_QCOW;
-    enc->secrets[0] = enc_secret; /* Space for secrets[0] allocated above */
-    enc_secret = NULL;
-    enc->nsecrets = 1;
-
-    ret = 0;
-
- cleanup:
-    if (secret != NULL) {
-        if (ret != 0)
-            virSecretUndefine(secret);
-        virObjectUnref(secret);
-    }
-    virObjectUnref(conn);
-    virBufferFreeAndReset(&buf);
-    virSecretDefFree(def);
-    VIR_FREE(enc_secret);
-    return ret;
-}
 
 static int
 virStorageBackendCreateExecCommand(virStoragePoolObjPtr pool,
@@ -595,7 +499,7 @@ virStorageBackendCreateExecCommand(virStoragePoolObjPtr pool,
     struct stat st;
     gid_t gid;
     uid_t uid;
-    mode_t mode = (vol->target.perms->mode == (mode_t) -1 ?
+    mode_t mode = (vol->target.perms->mode == (mode_t)-1 ?
                    VIR_STORAGE_DEFAULT_VOL_PERM_MODE :
                    vol->target.perms->mode);
     bool filecreated = false;
@@ -603,9 +507,9 @@ virStorageBackendCreateExecCommand(virStoragePoolObjPtr pool,
 
     if ((def->type == VIR_STORAGE_POOL_NETFS)
         && (((geteuid() == 0)
-             && (vol->target.perms->uid != (uid_t) -1)
+             && (vol->target.perms->uid != (uid_t)-1)
              && (vol->target.perms->uid != 0))
-            || ((vol->target.perms->gid != (gid_t) -1)
+            || ((vol->target.perms->gid != (gid_t)-1)
                 && (vol->target.perms->gid != getegid())))) {
 
         virCommandSetUID(cmd, vol->target.perms->uid);
@@ -622,7 +526,7 @@ virStorageBackendCreateExecCommand(virStoragePoolObjPtr pool,
                  * re-open the file and attempt to force the mode change.
                  */
                 if (mode != (st.st_mode & S_IRWXUGO)) {
-                    int fd = -1;
+                    VIR_AUTOCLOSE fd = -1;
                     int flags = VIR_FILE_OPEN_FORK | VIR_FILE_OPEN_FORCE_MODE;
 
                     if ((fd = virFileOpenAs(vol->target.path, O_RDWR, mode,
@@ -630,7 +534,6 @@ virStorageBackendCreateExecCommand(virStoragePoolObjPtr pool,
                                             vol->target.perms->gid,
                                             flags)) >= 0) {
                         /* Success - means we're good */
-                        VIR_FORCE_CLOSE(fd);
                         ret = 0;
                         goto cleanup;
                     }
@@ -656,15 +559,15 @@ virStorageBackendCreateExecCommand(virStoragePoolObjPtr pool,
     }
 
     uid = (vol->target.perms->uid != st.st_uid) ? vol->target.perms->uid
-        : (uid_t) -1;
+        : (uid_t)-1;
     gid = (vol->target.perms->gid != st.st_gid) ? vol->target.perms->gid
-        : (gid_t) -1;
-    if (((uid != (uid_t) -1) || (gid != (gid_t) -1))
+        : (gid_t)-1;
+    if (((uid != (uid_t)-1) || (gid != (gid_t)-1))
         && (chown(vol->target.path, uid, gid) < 0)) {
         virReportSystemError(errno,
                              _("cannot chown %s to (%u, %u)"),
-                             vol->target.path, (unsigned int) uid,
-                             (unsigned int) gid);
+                             vol->target.path, (unsigned int)uid,
+                             (unsigned int)gid);
         goto cleanup;
     }
 
@@ -694,9 +597,9 @@ storageBackendCreatePloop(virStoragePoolObjPtr pool ATTRIBUTE_UNUSED,
                           unsigned int flags)
 {
     int ret = -1;
-    virCommandPtr cmd = NULL;
-    char *create_tool = NULL;
     bool created = false;
+    VIR_AUTOPTR(virCommand) cmd = NULL;
+    VIR_AUTOFREE(char *) create_tool = NULL;
 
     virCheckFlags(0, -1);
 
@@ -707,7 +610,7 @@ storageBackendCreatePloop(virStoragePoolObjPtr pool ATTRIBUTE_UNUSED,
         return -1;
     }
 
-    if (vol->target.encryption != NULL) {
+    if (vol->target.encryption) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                        _("encrypted ploop volumes are not supported with "
                          "ploop init"));
@@ -730,7 +633,7 @@ storageBackendCreatePloop(virStoragePoolObjPtr pool ATTRIBUTE_UNUSED,
 
     if (!inputvol) {
         if ((virDirCreate(vol->target.path,
-                          (vol->target.perms->mode == (mode_t) -1 ?
+                          (vol->target.perms->mode == (mode_t)-1 ?
                            VIR_STORAGE_DEFAULT_VOL_PERM_MODE:
                            vol->target.perms->mode),
                           vol->target.perms->uid,
@@ -754,8 +657,6 @@ storageBackendCreatePloop(virStoragePoolObjPtr pool ATTRIBUTE_UNUSED,
     created = true;
     ret = virCommandRun(cmd, NULL);
  cleanup:
-    virCommandFree(cmd);
-    VIR_FREE(create_tool);
     if (ret < 0 && created)
         virFileDeleteTree(vol->target.path);
     return ret;
@@ -766,9 +667,8 @@ static int
 storagePloopResize(virStorageVolDefPtr vol,
                    unsigned long long capacity)
 {
-    int ret = -1;
-    virCommandPtr cmd = NULL;
-    char *resize_tool = NULL;
+    VIR_AUTOPTR(virCommand) cmd = NULL;
+    VIR_AUTOFREE(char *) resize_tool = NULL;
 
     resize_tool = virFindFileInPath("ploop");
     if (!resize_tool) {
@@ -781,67 +681,9 @@ storagePloopResize(virStorageVolDefPtr vol,
 
     virCommandAddArgFormat(cmd, "%s/DiskDescriptor.xml", vol->target.path);
 
-    ret = virCommandRun(cmd, NULL);
-    virCommandFree(cmd);
-    VIR_FREE(resize_tool);
-    return ret;
+    return virCommandRun(cmd, NULL);
 }
 
-/* Flag values shared w/ storagevolxml2argvtest.c.
- *
- * QEMU_IMG_BACKING_FORMAT_OPTIONS (added in qemu 0.11)
- * QEMU_IMG_BACKING_FORMAT_OPTIONS_COMPAT
- *    was made necessary due to 2.0 change to change the default
- *    qcow2 file format from 0.10 to 1.1.
- */
-enum {
-    QEMU_IMG_BACKING_FORMAT_OPTIONS = 0,
-    QEMU_IMG_BACKING_FORMAT_OPTIONS_COMPAT,
-};
-
-static bool
-virStorageBackendQemuImgSupportsCompat(const char *qemuimg)
-{
-    bool ret = false;
-    char *output;
-    virCommandPtr cmd = NULL;
-
-    cmd = virCommandNewArgList(qemuimg, "create", "-o", "?", "-f", "qcow2",
-                               "/dev/null", NULL);
-
-    virCommandAddEnvString(cmd, "LC_ALL=C");
-    virCommandSetOutputBuffer(cmd, &output);
-
-    if (virCommandRun(cmd, NULL) < 0)
-        goto cleanup;
-
-    if (strstr(output, "\ncompat "))
-        ret = true;
-
- cleanup:
-    virCommandFree(cmd);
-    VIR_FREE(output);
-    return ret;
-}
-
-
-static int
-virStorageBackendQEMUImgBackingFormat(const char *qemuimg)
-{
-    /* As of QEMU 0.11 the [-o options] support was added via qemu
-     * commit id '9ea2ea71', so we start with that base and figure
-     * out what else we have */
-    int ret = QEMU_IMG_BACKING_FORMAT_OPTIONS;
-
-    /* QEMU 2.0 changed to using a format that only QEMU 1.1 and newer
-     * understands. Since we still support QEMU 0.12 and newer, we need
-     * to be able to handle the previous format as can be set via a
-     * compat=0.10 option. */
-    if (virStorageBackendQemuImgSupportsCompat(qemuimg))
-        ret = QEMU_IMG_BACKING_FORMAT_OPTIONS_COMPAT;
-
-    return ret;
-}
 
 /* The _virStorageBackendQemuImgInfo separates the command line building from
  * the volume definition so that qemuDomainSnapshotCreateInactiveExternal can
@@ -849,6 +691,8 @@ virStorageBackendQEMUImgBackingFormat(const char *qemuimg)
  */
 struct _virStorageBackendQemuImgInfo {
     int format;
+    const char *type;
+    const char *inputType;
     const char *path;
     unsigned long long size_arg;
     unsigned long long allocation;
@@ -866,47 +710,46 @@ struct _virStorageBackendQemuImgInfo {
     int inputFormat;
 
     char *secretAlias;
-    const char *secretPath;
 };
 
 
 static int
-storageBackendCreateQemuImgOpts(virStorageEncryptionInfoDefPtr enc,
+storageBackendCreateQemuImgOpts(virStorageEncryptionInfoDefPtr encinfo,
                                 char **opts,
-                                struct _virStorageBackendQemuImgInfo info)
+                                struct _virStorageBackendQemuImgInfo *info)
 {
     virBuffer buf = VIR_BUFFER_INITIALIZER;
 
-    if (info.format == VIR_STORAGE_FILE_RAW && enc) {
-        virQEMUBuildLuksOpts(&buf, enc, info.secretAlias);
-    } else {
-        if (info.backingPath)
-            virBufferAsprintf(&buf, "backing_fmt=%s,",
-                              virStorageFileFormatTypeToString(info.backingFormat));
-        if (info.encryption)
-            virBufferAddLit(&buf, "encryption=on,");
-        if (info.preallocate) {
-            if (info.size_arg > info.allocation)
-                virBufferAddLit(&buf, "preallocation=metadata,");
-            else
-                virBufferAddLit(&buf, "preallocation=falloc,");
-        }
+    if (info->backingPath)
+        virBufferAsprintf(&buf, "backing_fmt=%s,",
+                          virStorageFileFormatTypeToString(info->backingFormat));
+
+    if (encinfo)
+        virQEMUBuildQemuImgKeySecretOpts(&buf, encinfo, info->secretAlias);
+
+    if (info->preallocate) {
+        if (info->size_arg > info->allocation)
+            virBufferAddLit(&buf, "preallocation=metadata,");
+        else
+            virBufferAddLit(&buf, "preallocation=falloc,");
     }
 
-    if (info.nocow)
+    if (info->nocow)
         virBufferAddLit(&buf, "nocow=on,");
 
-    if (info.compat)
-        virBufferAsprintf(&buf, "compat=%s,", info.compat);
+    if (info->compat)
+        virBufferAsprintf(&buf, "compat=%s,", info->compat);
+    else if (info->format == VIR_STORAGE_FILE_QCOW2)
+        virBufferAddLit(&buf, "compat=0.10,");
 
-    if (info.features && info.format == VIR_STORAGE_FILE_QCOW2) {
-        if (virBitmapIsBitSet(info.features,
+    if (info->features && info->format == VIR_STORAGE_FILE_QCOW2) {
+        if (virBitmapIsBitSet(info->features,
                               VIR_STORAGE_FILE_FEATURE_LAZY_REFCOUNTS)) {
-            if (STREQ_NULLABLE(info.compat, "0.10")) {
+            if (STREQ_NULLABLE(info->compat, "0.10")) {
                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                                _("lazy_refcounts not supported with compat"
                                  " level %s"),
-                               info.compat);
+                               info->compat);
                 goto error;
             }
             virBufferAddLit(&buf, "lazy_refcounts,");
@@ -929,7 +772,7 @@ storageBackendCreateQemuImgOpts(virStorageEncryptionInfoDefPtr enc,
 
 /* storageBackendCreateQemuImgCheckEncryption:
  * @format: format of file found
- * @conn: pointer to connection
+ * @type: TypeToString of format.type
  * @vol: pointer to volume def
  *
  * Ensure the proper setup for encryption.
@@ -943,25 +786,7 @@ storageBackendCreateQemuImgCheckEncryption(int format,
 {
     virStorageEncryptionPtr enc = vol->target.encryption;
 
-    if (format == VIR_STORAGE_FILE_QCOW || format == VIR_STORAGE_FILE_QCOW2) {
-        if (enc->format != VIR_STORAGE_ENCRYPTION_FORMAT_QCOW &&
-            enc->format != VIR_STORAGE_ENCRYPTION_FORMAT_DEFAULT) {
-            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           _("unsupported volume encryption format %d"),
-                           vol->target.encryption->format);
-            return -1;
-        }
-        if (enc->nsecrets > 1) {
-            virReportError(VIR_ERR_XML_ERROR, "%s",
-                           _("too many secrets for qcow encryption"));
-            return -1;
-        }
-        if (enc->format == VIR_STORAGE_ENCRYPTION_FORMAT_DEFAULT ||
-            enc->nsecrets == 0) {
-            if (virStorageGenerateQcowEncryption(vol) < 0)
-                return -1;
-        }
-    } else if (format == VIR_STORAGE_FILE_RAW) {
+    if (format == VIR_STORAGE_FILE_RAW) {
         if (enc->format != VIR_STORAGE_ENCRYPTION_FORMAT_LUKS) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("unsupported volume encryption format %d"),
@@ -996,12 +821,15 @@ storageBackendCreateQemuImgCheckEncryption(int format,
 
 static int
 storageBackendCreateQemuImgSetInput(virStorageVolDefPtr inputvol,
+                                    virStorageVolEncryptConvertStep convertStep,
                                     struct _virStorageBackendQemuImgInfo *info)
 {
-    if (!(info->inputPath = inputvol->target.path)) {
-        virReportError(VIR_ERR_INVALID_ARG, "%s",
-                       _("missing input volume target path"));
-        return -1;
+    if (convertStep != VIR_STORAGE_VOL_ENCRYPT_CREATE) {
+        if (!(info->inputPath = inputvol->target.path)) {
+            virReportError(VIR_ERR_INVALID_ARG, "%s",
+                           _("missing input volume target path"));
+            return -1;
+        }
     }
 
     info->inputFormat = inputvol->target.format;
@@ -1029,7 +857,7 @@ storageBackendCreateQemuImgSetBacking(virStoragePoolObjPtr pool,
 {
     virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
     int accessRetCode = -1;
-    char *absolutePath = NULL;
+    VIR_AUTOFREE(char *) absolutePath = NULL;
 
     if (info->format == VIR_STORAGE_FILE_RAW) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
@@ -1075,7 +903,6 @@ storageBackendCreateQemuImgSetBacking(virStoragePoolObjPtr pool,
         return -1;
     accessRetCode = access(absolutePath ? absolutePath :
                            info->backingPath, R_OK);
-    VIR_FREE(absolutePath);
     if (accessRetCode != 0) {
         virReportSystemError(errno,
                              _("inaccessible backing store volume %s"),
@@ -1089,21 +916,15 @@ storageBackendCreateQemuImgSetBacking(virStoragePoolObjPtr pool,
 
 static int
 storageBackendCreateQemuImgSetOptions(virCommandPtr cmd,
-                                      int imgformat,
-                                      virStorageEncryptionInfoDefPtr enc,
-                                      struct _virStorageBackendQemuImgInfo info)
+                                      virStorageEncryptionInfoDefPtr encinfo,
+                                      struct _virStorageBackendQemuImgInfo *info)
 {
-    char *opts = NULL;
+    VIR_AUTOFREE(char *) opts = NULL;
 
-    if (info.format == VIR_STORAGE_FILE_QCOW2 && !info.compat &&
-        imgformat >= QEMU_IMG_BACKING_FORMAT_OPTIONS_COMPAT)
-        info.compat = "0.10";
-
-    if (storageBackendCreateQemuImgOpts(enc, &opts, info) < 0)
+    if (storageBackendCreateQemuImgOpts(encinfo, &opts, info) < 0)
         return -1;
     if (opts)
         virCommandAddArgList(cmd, "-o", opts, NULL);
-    VIR_FREE(opts);
 
     return 0;
 }
@@ -1120,7 +941,7 @@ storageBackendCreateQemuImgSecretObject(virCommandPtr cmd,
                                         const char *secretAlias)
 {
     virBuffer buf = VIR_BUFFER_INITIALIZER;
-    char *commandStr = NULL;
+    VIR_AUTOFREE(char *) commandStr = NULL;
 
     virBufferAsprintf(&buf, "secret,id=%s,file=", secretAlias);
     virQEMUBuildBufferEscapeComma(&buf, secretPath);
@@ -1134,7 +955,6 @@ storageBackendCreateQemuImgSecretObject(virCommandPtr cmd,
 
     virCommandAddArgList(cmd, "--object", commandStr, NULL);
 
-    VIR_FREE(commandStr);
     return 0;
 }
 
@@ -1150,7 +970,7 @@ storageBackendResizeQemuImgImageOpts(virCommandPtr cmd,
                                      const char *secretAlias)
 {
     virBuffer buf = VIR_BUFFER_INITIALIZER;
-    char *commandStr = NULL;
+    VIR_AUTOFREE(char *) commandStr = NULL;
 
     virBufferAsprintf(&buf, "driver=luks,key-secret=%s,file.filename=",
                       secretAlias);
@@ -1165,143 +985,215 @@ storageBackendResizeQemuImgImageOpts(virCommandPtr cmd,
 
     virCommandAddArgList(cmd, "--image-opts", commandStr, NULL);
 
-    VIR_FREE(commandStr);
     return 0;
 }
 
 
-/* Create a qemu-img virCommand from the supplied binary path,
- * volume definitions and imgformat
- */
+static int
+virStorageBackendCreateQemuImgSetInfo(virStoragePoolObjPtr pool,
+                                      virStorageVolDefPtr vol,
+                                      virStorageVolDefPtr inputvol,
+                                      virStorageVolEncryptConvertStep convertStep,
+                                      struct _virStorageBackendQemuImgInfo *info)
+{
+    /* Treat output block devices as 'raw' format */
+    if (vol->type == VIR_STORAGE_VOL_BLOCK)
+        info->format = VIR_STORAGE_FILE_RAW;
+
+    if (info->format == VIR_STORAGE_FILE_ISO)
+        info->format = VIR_STORAGE_FILE_RAW;
+
+    if (!(info->type = virStorageFileFormatTypeToString(info->format))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("unknown storage vol type %d"),
+                       info->format);
+        return -1;
+    }
+
+    if (inputvol &&
+        !(info->inputType =
+          virStorageFileFormatTypeToString(inputvol->target.format))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("unknown inputvol storage vol type %d"),
+                       inputvol->target.format);
+        return -1;
+    }
+
+    if (info->preallocate && info->format != VIR_STORAGE_FILE_QCOW2) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                       _("metadata preallocation only available with qcow2"));
+        return -1;
+    }
+    if (info->compat && info->format != VIR_STORAGE_FILE_QCOW2) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                       _("compatibility option only available with qcow2"));
+        return -1;
+    }
+    if (info->features && info->format != VIR_STORAGE_FILE_QCOW2) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                       _("format features only available with qcow2"));
+        return -1;
+    }
+    if (info->format == VIR_STORAGE_FILE_RAW && vol->target.encryption) {
+        if (vol->target.encryption->format == VIR_STORAGE_ENCRYPTION_FORMAT_LUKS) {
+            info->type = "luks";
+        } else {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                           _("Only luks encryption is supported for raw files"));
+            return -1;
+        }
+    }
+
+    if (inputvol &&
+        storageBackendCreateQemuImgSetInput(inputvol, convertStep, info) < 0)
+        return -1;
+
+    if (virStorageSourceHasBacking(&vol->target) &&
+        storageBackendCreateQemuImgSetBacking(pool, vol, inputvol, info) < 0)
+        return -1;
+
+    if (info->encryption &&
+        storageBackendCreateQemuImgCheckEncryption(info->format, info->type,
+                                                   vol) < 0)
+        return -1;
+
+    /* Size in KB */
+    info->size_arg = VIR_DIV_UP(vol->target.capacity, 1024);
+
+    return 0;
+}
+
+
+/* Create a qemu-img virCommand from the supplied arguments */
 virCommandPtr
 virStorageBackendCreateQemuImgCmdFromVol(virStoragePoolObjPtr pool,
                                          virStorageVolDefPtr vol,
                                          virStorageVolDefPtr inputvol,
                                          unsigned int flags,
                                          const char *create_tool,
-                                         int imgformat,
-                                         const char *secretPath)
+                                         const char *secretPath,
+                                         const char *inputSecretPath,
+                                         virStorageVolEncryptConvertStep convertStep)
 {
     virCommandPtr cmd = NULL;
-    const char *type;
     struct _virStorageBackendQemuImgInfo info = {
         .format = vol->target.format,
+        .type = NULL,
+        .inputType = NULL,
         .path = vol->target.path,
         .allocation = vol->target.allocation,
-        .encryption = vol->target.encryption != NULL,
+        .encryption = !!vol->target.encryption,
         .preallocate = !!(flags & VIR_STORAGE_VOL_CREATE_PREALLOC_METADATA),
         .compat = vol->target.compat,
         .features = vol->target.features,
         .nocow = vol->target.nocow,
-        .secretPath = secretPath,
         .secretAlias = NULL,
     };
-    virStorageEncryptionInfoDefPtr enc = NULL;
+    virStorageEncryptionPtr enc = vol->target.encryption;
+    virStorageEncryptionPtr inputenc = inputvol ? inputvol->target.encryption : NULL;
+    virStorageEncryptionInfoDefPtr encinfo = NULL;
+    VIR_AUTOFREE(char *) inputSecretAlias = NULL;
 
     virCheckFlags(VIR_STORAGE_VOL_CREATE_PREALLOC_METADATA, NULL);
 
-    /* Treat output block devices as 'raw' format */
-    if (vol->type == VIR_STORAGE_VOL_BLOCK)
-        info.format = VIR_STORAGE_FILE_RAW;
-
-    if (info.format == VIR_STORAGE_FILE_ISO)
-        info.format = VIR_STORAGE_FILE_RAW;
-
-    if (!(type = virStorageFileFormatTypeToString(info.format))) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unknown storage vol type %d"),
-                       info.format);
-        return NULL;
-    }
-
-    if (info.preallocate && info.format != VIR_STORAGE_FILE_QCOW2) {
+    if (enc && (enc->format == VIR_STORAGE_ENCRYPTION_FORMAT_QCOW ||
+                enc->format == VIR_STORAGE_ENCRYPTION_FORMAT_DEFAULT) &&
+        (vol->target.format == VIR_STORAGE_FILE_QCOW ||
+         vol->target.format == VIR_STORAGE_FILE_QCOW2)) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("metadata preallocation only available with qcow2"));
-        return NULL;
+                       _("creation of qcow2 encrypted image is not supported"));
+        goto error;
     }
-    if (info.compat && info.format != VIR_STORAGE_FILE_QCOW2) {
+
+    if (inputenc && inputenc->format != VIR_STORAGE_ENCRYPTION_FORMAT_LUKS) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("compatibility option only available with qcow2"));
-        return NULL;
-    }
-    if (info.features && info.format != VIR_STORAGE_FILE_QCOW2) {
-        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("format features only available with qcow2"));
-        return NULL;
-    }
-    if (info.format == VIR_STORAGE_FILE_RAW &&
-        vol->target.encryption != NULL) {
-        if (inputvol) {
-            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                           _("cannot use inputvol with encrypted raw volume"));
-            return NULL;
-        }
-        if (!info.encryption) {
-            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                           _("missing encryption description"));
-            return NULL;
-        }
-        if (vol->target.encryption->format == VIR_STORAGE_ENCRYPTION_FORMAT_LUKS) {
-            type = "luks";
-        } else {
-            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                           _("Only luks encryption is supported for raw files"));
-            return NULL;
-        }
+                       _("encryption format of inputvol must be LUKS"));
+        goto error;
     }
 
-    if (inputvol &&
-        storageBackendCreateQemuImgSetInput(inputvol, &info) < 0)
-        return NULL;
-
-    if (virStorageSourceHasBacking(&vol->target) &&
-        storageBackendCreateQemuImgSetBacking(pool, vol, inputvol, &info) < 0)
-        return NULL;
-
-    if (info.encryption &&
-        storageBackendCreateQemuImgCheckEncryption(info.format, type,
-                                                   vol) < 0)
-        return NULL;
-
-
-    /* Size in KB */
-    info.size_arg = VIR_DIV_UP(vol->target.capacity, 1024);
+    if (virStorageBackendCreateQemuImgSetInfo(pool, vol, inputvol,
+                                              convertStep, &info) < 0)
+        goto error;
 
     cmd = virCommandNew(create_tool);
 
-    /* ignore the backing volume when we're converting a volume */
-    if (info.inputPath)
+    /* ignore the backing volume when we're converting a volume
+     * including when we're doing a two step convert during create */
+    if (info.inputPath || convertStep == VIR_STORAGE_VOL_ENCRYPT_CREATE)
         info.backingPath = NULL;
 
-    if (info.inputPath)
+    /* Converting to use encryption is a two step process - step 1 is to
+     * create the image and step 2 is to convert it using special arguments */
+    if (info.inputPath && convertStep == VIR_STORAGE_VOL_ENCRYPT_NONE)
         virCommandAddArgList(cmd, "convert", "-f", info.inputFormatStr,
-                             "-O", type, NULL);
+                             "-O", info.type, NULL);
+    else if (info.inputPath && convertStep == VIR_STORAGE_VOL_ENCRYPT_CONVERT)
+        virCommandAddArgList(cmd, "convert", "--image-opts", "-n",
+                             "--target-image-opts", NULL);
     else
-        virCommandAddArgList(cmd, "create", "-f", type, NULL);
+        virCommandAddArgList(cmd, "create", "-f", info.type, NULL);
 
     if (info.backingPath)
         virCommandAddArgList(cmd, "-b", info.backingPath, NULL);
 
-    if (info.format == VIR_STORAGE_FILE_RAW &&
-        vol->target.encryption != NULL &&
-        vol->target.encryption->format == VIR_STORAGE_ENCRYPTION_FORMAT_LUKS) {
-        if (virAsprintf(&info.secretAlias, "%s_luks0", vol->name) < 0)
+    if (enc) {
+        if (!secretPath) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                           _("path to secret data file is required"));
             goto error;
-        if (storageBackendCreateQemuImgSecretObject(cmd, info.secretPath,
+        }
+        if (virAsprintf(&info.secretAlias, "%s_encrypt0", vol->name) < 0)
+            goto error;
+        if (storageBackendCreateQemuImgSecretObject(cmd, secretPath,
                                                     info.secretAlias) < 0)
             goto error;
-        enc = &vol->target.encryption->encinfo;
+        encinfo = &enc->encinfo;
     }
 
-    if (storageBackendCreateQemuImgSetOptions(cmd, imgformat, enc, info) < 0)
-        goto error;
-    VIR_FREE(info.secretAlias);
+    if (inputenc && convertStep == VIR_STORAGE_VOL_ENCRYPT_CONVERT) {
+        if (!inputSecretPath) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                           _("path to inputvol secret data file is required"));
+            goto error;
+        }
+        if (virAsprintf(&inputSecretAlias, "%s_encrypt0",
+                        inputvol->name) < 0)
+            goto error;
+        if (storageBackendCreateQemuImgSecretObject(cmd, inputSecretPath,
+                                                    inputSecretAlias) < 0)
+            goto error;
+    }
 
-    if (info.inputPath)
-        virCommandAddArg(cmd, info.inputPath);
-    virCommandAddArg(cmd, info.path);
-    if (!info.inputPath && (info.size_arg || !info.backingPath))
-        virCommandAddArgFormat(cmd, "%lluK", info.size_arg);
+    if (convertStep != VIR_STORAGE_VOL_ENCRYPT_CONVERT) {
+        if (storageBackendCreateQemuImgSetOptions(cmd, encinfo, &info) < 0)
+            goto error;
+        if (info.inputPath)
+            virCommandAddArg(cmd, info.inputPath);
+        virCommandAddArg(cmd, info.path);
+        if (!info.inputPath && (info.size_arg || !info.backingPath))
+            virCommandAddArgFormat(cmd, "%lluK", info.size_arg);
+    } else {
+        /* source */
+        if (inputenc)
+            virCommandAddArgFormat(cmd,
+                                   "driver=luks,file.filename=%s,key-secret=%s",
+                                   info.inputPath, inputSecretAlias);
+        else
+            virCommandAddArgFormat(cmd, "driver=%s,file.filename=%s",
+                                   info.inputType ? info.inputType : "raw",
+                                   info.inputPath);
+
+        /* dest */
+        if (enc)
+            virCommandAddArgFormat(cmd,
+                                   "driver=%s,file.filename=%s,key-secret=%s",
+                                   info.type, info.path, info.secretAlias);
+        else
+            virCommandAddArgFormat(cmd, "driver=%s,file.filename=%s",
+                                   info.type, info.path);
+
+    }
+    VIR_FREE(info.secretAlias);
 
     return cmd;
 
@@ -1318,14 +1210,21 @@ storageBackendCreateQemuImgSecretPath(virStoragePoolObjPtr pool,
 {
     virStorageEncryptionPtr enc = vol->target.encryption;
     char *secretPath = NULL;
-    int fd = -1;
     uint8_t *secret = NULL;
     size_t secretlen = 0;
     virConnectPtr conn = NULL;
+    VIR_AUTOCLOSE fd = -1;
 
     if (!enc) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("missing encryption description"));
+        return NULL;
+    }
+
+    if (enc->nsecrets != 1) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("A single <secret type='passphrase'...> "
+                         "element is expected in encryption description"));
         return NULL;
     }
 
@@ -1338,7 +1237,7 @@ storageBackendCreateQemuImgSecretPath(virStoragePoolObjPtr pool,
 
     if ((fd = mkostemp(secretPath, O_CLOEXEC)) < 0) {
         virReportSystemError(errno, "%s",
-                             _("failed to open luks secret file for write"));
+                             _("failed to open secret file for write"));
         goto error;
     }
 
@@ -1349,17 +1248,16 @@ storageBackendCreateQemuImgSecretPath(virStoragePoolObjPtr pool,
 
     if (safewrite(fd, secret, secretlen) < 0) {
         virReportSystemError(errno, "%s",
-                             _("failed to write luks secret file"));
+                             _("failed to write secret file"));
         goto error;
     }
-    VIR_FORCE_CLOSE(fd);
 
-    if ((vol->target.perms->uid != (uid_t) -1) &&
-        (vol->target.perms->gid != (gid_t) -1)) {
+    if ((vol->target.perms->uid != (uid_t)-1) &&
+        (vol->target.perms->gid != (gid_t)-1)) {
         if (chown(secretPath, vol->target.perms->uid,
                   vol->target.perms->gid) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                           _("failed to chown luks secret file"));
+                           _("failed to chown secret file"));
             goto error;
         }
     }
@@ -1367,7 +1265,6 @@ storageBackendCreateQemuImgSecretPath(virStoragePoolObjPtr pool,
  cleanup:
     virObjectUnref(conn);
     VIR_DISPOSE_N(secret, secretlen);
-    VIR_FORCE_CLOSE(fd);
 
     return secretPath;
 
@@ -1379,16 +1276,39 @@ storageBackendCreateQemuImgSecretPath(virStoragePoolObjPtr pool,
 
 
 static int
+storageBackendDoCreateQemuImg(virStoragePoolObjPtr pool,
+                              virStorageVolDefPtr vol,
+                              virStorageVolDefPtr inputvol,
+                              unsigned int flags,
+                              const char *create_tool,
+                              const char *secretPath,
+                              const char *inputSecretPath,
+                              virStorageVolEncryptConvertStep convertStep)
+{
+    VIR_AUTOPTR(virCommand) cmd = NULL;
+
+    cmd = virStorageBackendCreateQemuImgCmdFromVol(pool, vol, inputvol,
+                                                   flags, create_tool,
+                                                   secretPath, inputSecretPath,
+                                                   convertStep);
+    if (!cmd)
+        return -1;
+
+    return virStorageBackendCreateExecCommand(pool, vol, cmd);
+}
+
+
+static int
 storageBackendCreateQemuImg(virStoragePoolObjPtr pool,
                             virStorageVolDefPtr vol,
                             virStorageVolDefPtr inputvol,
                             unsigned int flags)
 {
     int ret = -1;
-    char *create_tool;
-    int imgformat;
-    virCommandPtr cmd;
-    char *secretPath = NULL;
+    virStorageVolEncryptConvertStep convertStep = VIR_STORAGE_VOL_ENCRYPT_NONE;
+    VIR_AUTOFREE(char *) create_tool = NULL;
+    VIR_AUTOFREE(char *) secretPath = NULL;
+    VIR_AUTOFREE(char *) inputSecretPath = NULL;
 
     virCheckFlags(VIR_STORAGE_VOL_CREATE_PREALLOC_METADATA, -1);
 
@@ -1400,33 +1320,46 @@ storageBackendCreateQemuImg(virStoragePoolObjPtr pool,
         return -1;
     }
 
-    imgformat = virStorageBackendQEMUImgBackingFormat(create_tool);
-    if (imgformat < 0)
+    if (vol->target.encryption &&
+        !(secretPath = storageBackendCreateQemuImgSecretPath(pool, vol)))
         goto cleanup;
 
-    if (vol->target.format == VIR_STORAGE_FILE_RAW &&
-        vol->target.encryption &&
-        vol->target.encryption->format == VIR_STORAGE_ENCRYPTION_FORMAT_LUKS) {
-        if (!(secretPath =
-              storageBackendCreateQemuImgSecretPath(pool, vol)))
+    if (inputvol && inputvol->target.encryption &&
+        !(inputSecretPath = storageBackendCreateQemuImgSecretPath(pool,
+                                                                  inputvol)))
+        goto cleanup;
+
+    /* Using an input file for encryption requires a multi-step process
+     * to create an image of the same size as the inputvol and then to
+     * convert the inputvol afterwards. */
+    if ((secretPath || inputSecretPath) && inputvol)
+        convertStep = VIR_STORAGE_VOL_ENCRYPT_CREATE;
+
+    do {
+        ret = storageBackendDoCreateQemuImg(pool, vol, inputvol, flags,
+                                            create_tool, secretPath,
+                                            inputSecretPath, convertStep);
+
+        /* Failure to convert, attempt to delete what we created */
+        if (ret < 0 && convertStep == VIR_STORAGE_VOL_ENCRYPT_CONVERT)
+            ignore_value(virFileRemove(vol->target.path,
+                                       vol->target.perms->uid,
+                                       vol->target.perms->gid));
+
+        if (ret < 0 || convertStep == VIR_STORAGE_VOL_ENCRYPT_NONE)
             goto cleanup;
-    }
 
-    cmd = virStorageBackendCreateQemuImgCmdFromVol(pool, vol, inputvol,
-                                                   flags, create_tool,
-                                                   imgformat, secretPath);
-    if (!cmd)
-        goto cleanup;
+        if (convertStep == VIR_STORAGE_VOL_ENCRYPT_CREATE)
+            convertStep = VIR_STORAGE_VOL_ENCRYPT_CONVERT;
+        else if (convertStep == VIR_STORAGE_VOL_ENCRYPT_CONVERT)
+            convertStep = VIR_STORAGE_VOL_ENCRYPT_DONE;
+    } while (convertStep != VIR_STORAGE_VOL_ENCRYPT_DONE);
 
-    ret = virStorageBackendCreateExecCommand(pool, vol, cmd);
-
-    virCommandFree(cmd);
  cleanup:
-    if (secretPath) {
+    if (secretPath)
         unlink(secretPath);
-        VIR_FREE(secretPath);
-    }
-    VIR_FREE(create_tool);
+    if (inputSecretPath)
+        unlink(inputSecretPath);
     return ret;
 }
 
@@ -1482,10 +1415,10 @@ virStorageBackendGetBuildVolFromFunction(virStorageVolDefPtr vol,
      */
     if ((vol->type == VIR_STORAGE_VOL_FILE &&
          (vol->target.format != VIR_STORAGE_FILE_RAW ||
-          vol->target.encryption != NULL)) ||
+          vol->target.encryption)) ||
         (inputvol->type == VIR_STORAGE_VOL_FILE &&
          (inputvol->target.format != VIR_STORAGE_FILE_RAW ||
-          inputvol->target.encryption != NULL))) {
+          inputvol->target.encryption))) {
         return storageBackendCreateQemuImg;
     }
 
@@ -1747,23 +1680,19 @@ virStorageBackendVolOpen(const char *path, struct stat *sb,
 static bool
 storageBackendIsPloopDir(char *path)
 {
-    bool ret = false;
-    char *root = NULL;
-    char *desc = NULL;
-    if (virAsprintf(&root, "%s/root.hds", path) < 0)
-        return ret;
-    if (!virFileExists(root))
-        goto cleanup;
-    if (virAsprintf(&desc, "%s/DiskDescriptor.xml", path) < 0)
-        goto cleanup;
-    if (!virFileExists(desc))
-        goto cleanup;
+    VIR_AUTOFREE(char *) root = NULL;
+    VIR_AUTOFREE(char *) desc = NULL;
 
-    ret = true;
- cleanup:
-    VIR_FREE(root);
-    VIR_FREE(desc);
-    return ret;
+    if (virAsprintf(&root, "%s/root.hds", path) < 0)
+        return false;
+    if (!virFileExists(root))
+        return false;
+    if (virAsprintf(&desc, "%s/DiskDescriptor.xml", path) < 0)
+        return false;
+    if (!virFileExists(desc))
+        return false;
+
+    return true;
 }
 
 /* In case of ploop volumes, path to volume is the path to the ploop
@@ -1775,20 +1704,14 @@ static int
 storageBackendRedoPloopUpdate(virStorageSourcePtr target, struct stat *sb,
                               int *fd, unsigned int flags)
 {
-    char *path = NULL;
-    int ret = -1;
+    VIR_AUTOFREE(char *) path = NULL;
 
     if (virAsprintf(&path, "%s/root.hds", target->path) < 0)
         return -1;
     VIR_FORCE_CLOSE(*fd);
     if ((*fd = virStorageBackendVolOpen(path, sb, flags)) < 0)
-        goto cleanup;
-    ret = virStorageBackendUpdateVolTargetInfoFD(target, *fd, sb);
-
- cleanup:
-
-    VIR_FREE(path);
-    return ret;
+        return -1;
+    return virStorageBackendUpdateVolTargetInfoFD(target, *fd, sb);
 }
 
 /*
@@ -1812,68 +1735,58 @@ storageBackendUpdateVolTargetInfo(virStorageVolType voltype,
                                   unsigned int openflags,
                                   unsigned int readflags)
 {
-    int ret, fd = -1;
+    int rc;
     struct stat sb;
-    char *buf = NULL;
     ssize_t len = VIR_STORAGE_MAX_HEADER;
+    VIR_AUTOFREE(char *) buf = NULL;
+    VIR_AUTOCLOSE fd = -1;
 
-    if ((ret = virStorageBackendVolOpen(target->path, &sb, openflags)) < 0)
-        goto cleanup;
-    fd = ret;
+    if ((rc = virStorageBackendVolOpen(target->path, &sb, openflags)) < 0)
+        return rc;
+    fd = rc;
 
-    if ((ret = virStorageBackendUpdateVolTargetInfoFD(target, fd, &sb)) < 0)
-        goto cleanup;
+    if ((virStorageBackendUpdateVolTargetInfoFD(target, fd, &sb)) < 0)
+        return -1;
 
     if ((voltype == VIR_STORAGE_VOL_FILE || voltype == VIR_STORAGE_VOL_BLOCK) &&
         target->format != VIR_STORAGE_FILE_NONE) {
         if (S_ISDIR(sb.st_mode)) {
             if (storageBackendIsPloopDir(target->path)) {
-                if ((ret = storageBackendRedoPloopUpdate(target, &sb, &fd,
-                                                         openflags)) < 0)
-                    goto cleanup;
+                if ((storageBackendRedoPloopUpdate(target, &sb, &fd,
+                                                   openflags)) < 0)
+                    return -1;
                 target->format = VIR_STORAGE_FILE_PLOOP;
             } else {
-                ret = 0;
-                goto cleanup;
+                return 0;
             }
         }
 
         if (lseek(fd, 0, SEEK_SET) == (off_t)-1) {
             virReportSystemError(errno, _("cannot seek to start of '%s'"), target->path);
-            ret = -1;
-            goto cleanup;
+            return -1;
         }
 
         if ((len = virFileReadHeaderFD(fd, len, &buf)) < 0) {
             if (readflags & VIR_STORAGE_VOL_READ_NOERROR) {
                 VIR_WARN("ignoring failed header read for '%s'",
                          target->path);
-                ret = -2;
+                return -2;
             } else {
                 virReportSystemError(errno,
                                      _("cannot read header '%s'"),
                                      target->path);
-                ret = -1;
+                return -1;
             }
-            goto cleanup;
         }
 
-        if (virStorageSourceUpdateCapacity(target, buf, len, false) < 0) {
-            ret = -1;
-            goto cleanup;
-        }
+        if (virStorageSourceUpdateCapacity(target, buf, len, false) < 0)
+            return -1;
     }
 
-    if (withBlockVolFormat) {
-        if ((ret = virStorageBackendDetectBlockVolFormatFD(target, fd,
-                                                           readflags)) < 0)
-            goto cleanup;
-    }
+    if (withBlockVolFormat)
+        return virStorageBackendDetectBlockVolFormatFD(target, fd, readflags);
 
- cleanup:
-    VIR_FORCE_CLOSE(fd);
-    VIR_FREE(buf);
-    return ret;
+    return 0;
 }
 
 /*
@@ -2105,7 +2018,7 @@ createFileDir(virStoragePoolObjPtr pool,
 
 
     if ((err = virDirCreate(vol->target.path,
-                            (vol->target.perms->mode == (mode_t) -1 ?
+                            (vol->target.perms->mode == (mode_t)-1 ?
                              VIR_STORAGE_DEFAULT_VOL_PERM_MODE :
                              vol->target.perms->mode),
                             vol->target.perms->uid,
@@ -2172,13 +2085,6 @@ storageBackendVolBuildLocal(virStoragePoolObjPtr pool,
     virStorageBackendBuildVolFrom create_func;
 
     if (inputvol) {
-        if (vol->target.encryption != NULL) {
-            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           "%s", _("storage pool does not support "
-                                   "building encrypted volumes from "
-                                   "other volumes"));
-            return -1;
-        }
         if (!(create_func =
               virStorageBackendGetBuildVolFromFunction(vol, inputvol)))
             return -1;
@@ -2236,7 +2142,7 @@ virStorageBackendVolDeleteLocal(virStoragePoolObjPtr pool ATTRIBUTE_UNUSED,
 {
     virCheckFlags(0, -1);
 
-    switch ((virStorageVolType) vol->type) {
+    switch ((virStorageVolType)vol->type) {
     case VIR_STORAGE_VOL_FILE:
     case VIR_STORAGE_VOL_DIR:
         if (virFileRemove(vol->target.path, vol->target.perms->uid,
@@ -2353,11 +2259,21 @@ storageBackendResizeQemuImg(virStoragePoolObjPtr pool,
                             unsigned long long capacity)
 {
     int ret = -1;
-    char *img_tool = NULL;
-    virCommandPtr cmd = NULL;
     const char *type;
-    char *secretPath = NULL;
-    char *secretAlias = NULL;
+    virStorageEncryptionPtr enc = vol->target.encryption;
+    VIR_AUTOPTR(virCommand) cmd = NULL;
+    VIR_AUTOFREE(char *) img_tool = NULL;
+    VIR_AUTOFREE(char *) secretPath = NULL;
+    VIR_AUTOFREE(char *) secretAlias = NULL;
+
+    if (enc && (enc->format == VIR_STORAGE_ENCRYPTION_FORMAT_QCOW ||
+                enc->format == VIR_STORAGE_ENCRYPTION_FORMAT_DEFAULT) &&
+        (vol->target.format == VIR_STORAGE_FILE_QCOW ||
+         vol->target.format == VIR_STORAGE_FILE_QCOW2)) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                       _("resize of qcow2 encrypted image is not supported"));
+        return -1;
+    }
 
     img_tool = virFindFileInPath("qemu-img");
     if (!img_tool) {
@@ -2382,7 +2298,7 @@ storageBackendResizeQemuImg(virStoragePoolObjPtr pool,
               storageBackendCreateQemuImgSecretPath(pool, vol)))
             goto cleanup;
 
-        if (virAsprintf(&secretAlias, "%s_luks0", vol->name) < 0)
+        if (virAsprintf(&secretAlias, "%s_encrypt0", vol->name) < 0)
             goto cleanup;
     }
 
@@ -2390,12 +2306,12 @@ storageBackendResizeQemuImg(virStoragePoolObjPtr pool,
      * a multiple of 512 */
     capacity = VIR_ROUND_UP(capacity, 512);
 
-    cmd = virCommandNew(img_tool);
+    cmd = virCommandNewArgList(img_tool, "resize", NULL);
+    if (capacity < vol->target.capacity)
+        virCommandAddArg(cmd, "--shrink");
     if (!vol->target.encryption) {
-        virCommandAddArgList(cmd, "resize", vol->target.path, NULL);
+        virCommandAddArg(cmd, vol->target.path);
     } else {
-        virCommandAddArg(cmd, "resize");
-
         if (storageBackendCreateQemuImgSecretObject(cmd, secretPath,
                                                     secretAlias) < 0)
             goto cleanup;
@@ -2409,13 +2325,8 @@ storageBackendResizeQemuImg(virStoragePoolObjPtr pool,
     ret = virCommandRun(cmd, NULL);
 
  cleanup:
-    VIR_FREE(img_tool);
-    if (secretPath) {
+    if (secretPath)
         unlink(secretPath);
-        VIR_FREE(secretPath);
-    }
-    VIR_FREE(secretAlias);
-    virCommandFree(cmd);
     return ret;
 }
 
@@ -2439,8 +2350,8 @@ virStorageBackendVolResizeLocal(virStoragePoolObjPtr pool,
     } else if (vol->target.format == VIR_STORAGE_FILE_RAW && vol->target.encryption) {
         if (pre_allocate) {
             virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
-                           _("preallocate is only supported for raw "
-                             "type volume"));
+                           _("preallocate is only supported for an "
+                             "unencrypted raw volume"));
             return -1;
         }
 
@@ -2469,36 +2380,29 @@ virStorageBackendVolResizeLocal(virStoragePoolObjPtr pool,
 static int
 storageBackendPloopHasSnapshots(char *path)
 {
-    virCommandPtr cmd = NULL;
-    char *output = NULL;
     char *snap_tool = NULL;
-    int ret = -1;
+    VIR_AUTOPTR(virCommand) cmd = NULL;
+    VIR_AUTOFREE(char *) output = NULL;
 
     snap_tool = virFindFileInPath("ploop");
     if (!snap_tool) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "%s", _("unable to find ploop, please install "
                                "ploop tools"));
-        return ret;
+        return -1;
     }
 
     cmd = virCommandNewArgList(snap_tool, "snapshot-list", NULL);
     virCommandAddArgFormat(cmd, "%s/DiskDescriptor.xml", path);
     virCommandSetOutputBuffer(cmd, &output);
 
-    if ((ret = virCommandRun(cmd, NULL)) < 0)
-        goto cleanup;
+    if (virCommandRun(cmd, NULL) < 0)
+        return -1;
 
-    if (!strstr(output, "root.hds.")) {
-        ret = 1;
-        goto cleanup;
-    }
-    ret = 0;
+    if (!strstr(output, "root.hds."))
+        return 1;
 
- cleanup:
-    VIR_FREE(output);
-    virCommandFree(cmd);
-    return ret;
+    return 0;
 }
 
 
@@ -2510,11 +2414,10 @@ virStorageBackendVolUploadLocal(virStoragePoolObjPtr pool ATTRIBUTE_UNUSED,
                                 unsigned long long len,
                                 unsigned int flags)
 {
-    char *path = NULL;
     char *target_path = vol->target.path;
-    int ret = -1;
     int has_snap = 0;
     bool sparse = flags & VIR_STORAGE_VOL_UPLOAD_SPARSE_STREAM;
+    VIR_AUTOFREE(char *)path = NULL;
 
     virCheckFlags(VIR_STORAGE_VOL_UPLOAD_SPARSE_STREAM, -1);
     /* if volume has target format VIR_STORAGE_FILE_PLOOP
@@ -2525,12 +2428,12 @@ virStorageBackendVolUploadLocal(virStoragePoolObjPtr pool ATTRIBUTE_UNUSED,
         /* Fail if the volume contains snapshots or we failed to check it.*/
         has_snap = storageBackendPloopHasSnapshots(vol->target.path);
         if (has_snap < 0) {
-            goto cleanup;
+            return -1;
         } else if (!has_snap) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("can't upload volume, all existing snapshots"
                              " will be lost"));
-            goto cleanup;
+            return -1;
         }
 
         if (virAsprintf(&path, "%s/root.hds", vol->target.path) < 0)
@@ -2540,12 +2443,8 @@ virStorageBackendVolUploadLocal(virStoragePoolObjPtr pool ATTRIBUTE_UNUSED,
 
     /* Not using O_CREAT because the file is required to already exist at
      * this point */
-    ret = virFDStreamOpenBlockDevice(stream, target_path,
-                                     offset, len, sparse, O_WRONLY);
-
- cleanup:
-    VIR_FREE(path);
-    return ret;
+    return virFDStreamOpenBlockDevice(stream, target_path,
+                                      offset, len, sparse, O_WRONLY);
 }
 
 int
@@ -2556,34 +2455,29 @@ virStorageBackendVolDownloadLocal(virStoragePoolObjPtr pool ATTRIBUTE_UNUSED,
                                   unsigned long long len,
                                   unsigned int flags)
 {
-    char *path = NULL;
     char *target_path = vol->target.path;
-    int ret = -1;
     int has_snap = 0;
     bool sparse = flags & VIR_STORAGE_VOL_DOWNLOAD_SPARSE_STREAM;
+    VIR_AUTOFREE(char *) path = NULL;
 
     virCheckFlags(VIR_STORAGE_VOL_DOWNLOAD_SPARSE_STREAM, -1);
     if (vol->target.format == VIR_STORAGE_FILE_PLOOP) {
         has_snap = storageBackendPloopHasSnapshots(vol->target.path);
         if (has_snap < 0) {
-            goto cleanup;
+            return -1;
         } else if (!has_snap) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("can't download volume, all existing snapshots"
                              " will be lost"));
-            goto cleanup;
+            return -1;
         }
         if (virAsprintf(&path, "%s/root.hds", vol->target.path) < 0)
-            goto cleanup;
+            return -1;
         target_path = path;
     }
 
-    ret = virFDStreamOpenBlockDevice(stream, target_path,
-                                     offset, len, sparse, O_RDONLY);
-
- cleanup:
-    VIR_FREE(path);
-    return ret;
+    return virFDStreamOpenBlockDevice(stream, target_path,
+                                      offset, len, sparse, O_RDONLY);
 }
 
 
@@ -2633,14 +2527,14 @@ storageBackendWipeLocal(const char *path,
                         size_t writebuf_length,
                         bool zero_end)
 {
-    int ret = -1, written = 0;
+    int written = 0;
     unsigned long long remaining = 0;
     off_t size;
     size_t write_size = 0;
-    char *writebuf = NULL;
+    VIR_AUTOFREE(char *) writebuf = NULL;
 
     if (VIR_ALLOC_N(writebuf, writebuf_length) < 0)
-        goto cleanup;
+        return -1;
 
     if (!zero_end) {
         if ((size = lseek(fd, 0, SEEK_SET)) < 0) {
@@ -2648,7 +2542,7 @@ storageBackendWipeLocal(const char *path,
                                  _("Failed to seek to the start in volume "
                                    "with path '%s'"),
                                  path);
-            goto cleanup;
+            return -1;
         }
     } else {
         if ((size = lseek(fd, -wipe_len, SEEK_END)) < 0) {
@@ -2656,11 +2550,11 @@ storageBackendWipeLocal(const char *path,
                                  _("Failed to seek to %llu bytes to the end "
                                    "in volume with path '%s'"),
                                  wipe_len, path);
-            goto cleanup;
+            return -1;
         }
     }
 
-    VIR_DEBUG("wiping start: %zd len: %llu", (ssize_t) size, wipe_len);
+    VIR_DEBUG("wiping start: %zd len: %llu", (ssize_t)size, wipe_len);
 
     remaining = wipe_len;
     while (remaining > 0) {
@@ -2673,7 +2567,7 @@ storageBackendWipeLocal(const char *path,
                                    "storage volume with path '%s'"),
                                  write_size, path);
 
-            goto cleanup;
+            return -1;
         }
 
         remaining -= written;
@@ -2683,16 +2577,12 @@ storageBackendWipeLocal(const char *path,
         virReportSystemError(errno,
                              _("cannot sync data to volume with path '%s'"),
                              path);
-        goto cleanup;
+        return -1;
     }
 
     VIR_DEBUG("Wrote %llu bytes to volume with path '%s'", wipe_len, path);
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(writebuf);
-    return ret;
+    return 0;
 }
 
 
@@ -2702,24 +2592,24 @@ storageBackendVolWipeLocalFile(const char *path,
                                unsigned long long allocation,
                                bool zero_end)
 {
-    int ret = -1, fd = -1;
     const char *alg_char = NULL;
     struct stat st;
-    virCommandPtr cmd = NULL;
+    VIR_AUTOCLOSE fd = -1;
+    VIR_AUTOPTR(virCommand) cmd = NULL;
 
     fd = open(path, O_RDWR);
     if (fd == -1) {
         virReportSystemError(errno,
                              _("Failed to open storage volume with path '%s'"),
                              path);
-        goto cleanup;
+        return -1;
     }
 
     if (fstat(fd, &st) == -1) {
         virReportSystemError(errno,
                              _("Failed to stat storage volume with path '%s'"),
                              path);
-        goto cleanup;
+        return -1;
     }
 
     switch ((virStorageVolWipeAlgorithm) algorithm) {
@@ -2753,12 +2643,12 @@ storageBackendVolWipeLocalFile(const char *path,
     case VIR_STORAGE_VOL_WIPE_ALG_TRIM:
         virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED, "%s",
                        _("'trim' algorithm not supported"));
-        goto cleanup;
+        return -1;
     case VIR_STORAGE_VOL_WIPE_ALG_LAST:
         virReportError(VIR_ERR_INVALID_ARG,
                        _("unsupported algorithm %d"),
                        algorithm);
-        goto cleanup;
+        return -1;
     }
 
     VIR_DEBUG("Wiping file '%s' with algorithm '%s'", path, alg_char);
@@ -2767,25 +2657,14 @@ storageBackendVolWipeLocalFile(const char *path,
         cmd = virCommandNew(SCRUB);
         virCommandAddArgList(cmd, "-f", "-p", alg_char, path, NULL);
 
-        if (virCommandRun(cmd, NULL) < 0)
-            goto cleanup;
-
-        ret = 0;
-    } else {
-        if (S_ISREG(st.st_mode) && st.st_blocks < (st.st_size / DEV_BSIZE)) {
-            ret = storageBackendVolZeroSparseFileLocal(path, st.st_size, fd);
-        } else {
-            ret = storageBackendWipeLocal(path, fd, allocation, st.st_blksize,
-                                          zero_end);
-        }
-        if (ret < 0)
-            goto cleanup;
+        return virCommandRun(cmd, NULL);
     }
 
- cleanup:
-    virCommandFree(cmd);
-    VIR_FORCE_CLOSE(fd);
-    return ret;
+    if (S_ISREG(st.st_mode) && st.st_blocks < (st.st_size / DEV_BSIZE))
+        return storageBackendVolZeroSparseFileLocal(path, st.st_size, fd);
+
+    return storageBackendWipeLocal(path, fd, allocation, st.st_blksize,
+                                   zero_end);
 }
 
 
@@ -2793,12 +2672,10 @@ static int
 storageBackendVolWipePloop(virStorageVolDefPtr vol,
                            unsigned int algorithm)
 {
-    virCommandPtr cmd = NULL;
-    char *target_path = NULL;
-    char *disk_desc = NULL;
-    char *create_tool = NULL;
-
-    int ret = -1;
+    VIR_AUTOPTR(virCommand) cmd = NULL;
+    VIR_AUTOFREE(char *) target_path = NULL;
+    VIR_AUTOFREE(char *) disk_desc = NULL;
+    VIR_AUTOFREE(char *) create_tool = NULL;
 
     create_tool = virFindFileInPath("ploop");
     if (!create_tool) {
@@ -2808,24 +2685,24 @@ storageBackendVolWipePloop(virStorageVolDefPtr vol,
     }
 
     if (virAsprintf(&target_path, "%s/root.hds", vol->target.path) < 0)
-        goto cleanup;
+        return -1;
 
     if (virAsprintf(&disk_desc, "%s/DiskDescriptor.xml", vol->target.path) < 0)
-        goto cleanup;
+        return -1;
 
     if (storageBackendVolWipeLocalFile(target_path, algorithm,
                                        vol->target.allocation, false) < 0)
-        goto cleanup;
+        return -1;
 
     if (virFileRemove(disk_desc, 0, 0) < 0) {
         virReportError(errno, _("Failed to delete DiskDescriptor.xml of volume '%s'"),
                        vol->target.path);
-        goto cleanup;
+        return -1;
     }
     if (virFileRemove(target_path, 0, 0) < 0) {
         virReportError(errno, _("failed to delete root.hds of volume '%s'"),
                        vol->target.path);
-        goto cleanup;
+        return -1;
     }
 
     cmd = virCommandNewArgList(create_tool, "init", "-s", NULL);
@@ -2834,14 +2711,7 @@ storageBackendVolWipePloop(virStorageVolDefPtr vol,
                                                     (1024 * 1024)));
     virCommandAddArgList(cmd, "-t", "ext4", NULL);
     virCommandAddArg(cmd, target_path);
-    ret = virCommandRun(cmd, NULL);
-
- cleanup:
-    VIR_FREE(disk_desc);
-    VIR_FREE(target_path);
-    VIR_FREE(create_tool);
-    virCommandFree(cmd);
-    return ret;
+    return virCommandRun(cmd, NULL);
 }
 
 
@@ -2881,20 +2751,19 @@ int
 virStorageBackendBuildLocal(virStoragePoolObjPtr pool)
 {
     virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
-    int ret = -1;
-    char *parent = NULL;
     char *p = NULL;
     mode_t mode;
     bool needs_create_as_uid;
     unsigned int dir_create_flags;
+    VIR_AUTOFREE(char *) parent = NULL;
 
     if (VIR_STRDUP(parent, def->target.path) < 0)
-        goto cleanup;
+        return -1;
     if (!(p = strrchr(parent, '/'))) {
         virReportError(VIR_ERR_INVALID_ARG,
                        _("path '%s' is not absolute"),
                        def->target.path);
-        goto cleanup;
+        return -1;
     }
 
     if (p != parent) {
@@ -2904,7 +2773,7 @@ virStorageBackendBuildLocal(virStoragePoolObjPtr pool)
         if (virFileMakePath(parent) < 0) {
             virReportSystemError(errno, _("cannot create path '%s'"),
                                  parent);
-            goto cleanup;
+            return -1;
         }
     }
 
@@ -2912,7 +2781,7 @@ virStorageBackendBuildLocal(virStoragePoolObjPtr pool)
     needs_create_as_uid = (def->type == VIR_STORAGE_POOL_NETFS);
     mode = def->target.perms.mode;
 
-    if (mode == (mode_t) -1 &&
+    if (mode == (mode_t)-1 &&
         (needs_create_as_uid || !virFileExists(def->target.path)))
         mode = VIR_STORAGE_DEFAULT_POOL_PERM_MODE;
     if (needs_create_as_uid)
@@ -2921,18 +2790,11 @@ virStorageBackendBuildLocal(virStoragePoolObjPtr pool)
     /* Now create the final dir in the path with the uid/gid/mode
      * requested in the config. If the dir already exists, just set
      * the perms. */
-    if (virDirCreate(def->target.path,
-                     mode,
-                     def->target.perms.uid,
-                     def->target.perms.gid,
-                     dir_create_flags) < 0)
-        goto cleanup;
-
-    ret = 0;
-
- cleanup:
-    VIR_FREE(parent);
-    return ret;
+    return virDirCreate(def->target.path,
+                        mode,
+                        def->target.perms.uid,
+                        def->target.perms.gid,
+                        dir_create_flags);
 }
 
 
@@ -2973,12 +2835,12 @@ virStorageUtilGlusterExtractPoolSources(const char *host,
 {
     xmlDocPtr doc = NULL;
     xmlXPathContextPtr ctxt = NULL;
-    xmlNodePtr *nodes = NULL;
     virStoragePoolSource *src = NULL;
-    char *volname = NULL;
     size_t i;
     int nnodes;
     int ret = -1;
+    VIR_AUTOFREE(xmlNodePtr *) nodes = NULL;
+    VIR_AUTOFREE(char *) volname = NULL;
 
     if (!(doc = virXMLParseStringCtxt(xml, _("(gluster_cli_output)"), &ctxt)))
         goto cleanup;
@@ -3022,8 +2884,6 @@ virStorageUtilGlusterExtractPoolSources(const char *host,
     ret = nnodes;
 
  cleanup:
-    VIR_FREE(volname);
-    VIR_FREE(nodes);
     xmlXPathFreeContext(ctxt);
     xmlFreeDoc(doc);
 
@@ -3052,12 +2912,10 @@ virStorageBackendFindGlusterPoolSources(const char *host,
                                         virStoragePoolSourceListPtr list,
                                         bool report)
 {
-    char *glusterpath = NULL;
-    char *outbuf = NULL;
-    virCommandPtr cmd = NULL;
     int rc;
-
-    int ret = -1;
+    VIR_AUTOPTR(virCommand) cmd = NULL;
+    VIR_AUTOFREE(char *) glusterpath = NULL;
+    VIR_AUTOFREE(char *) outbuf = NULL;
 
     if (!(glusterpath = virFindFileInPath("gluster"))) {
         if (report) {
@@ -3078,20 +2936,12 @@ virStorageBackendFindGlusterPoolSources(const char *host,
     virCommandSetOutputBuffer(cmd, &outbuf);
 
     if (virCommandRun(cmd, &rc) < 0)
-        goto cleanup;
+        return -1;
 
-    if (rc != 0) {
-        ret = 0;
-        goto cleanup;
-    }
+    if (rc != 0)
+        return 0;
 
-    ret = virStorageUtilGlusterExtractPoolSources(host, outbuf, list, pooltype);
-
- cleanup:
-    VIR_FREE(outbuf);
-    virCommandFree(cmd);
-    VIR_FREE(glusterpath);
-    return ret;
+    return virStorageUtilGlusterExtractPoolSources(host, outbuf, list, pooltype);
 }
 
 
@@ -3212,7 +3062,6 @@ virStorageBackendBLKIDFindEmpty(const char *device,
                                 const char *format,
                                 bool writelabel)
 {
-
     int ret = -1;
     int rc;
     blkid_probe probe = NULL;
@@ -3330,12 +3179,13 @@ virStorageBackendPARTEDFindLabel(const char *device,
     const char *const args[] = {
         device, "print", "--script", NULL,
     };
-    virCommandPtr cmd = virCommandNew(PARTED);
-    char *output = NULL;
-    char *error = NULL;
     char *start, *end;
     int ret = VIR_STORAGE_PARTED_ERROR;
+    VIR_AUTOPTR(virCommand) cmd = NULL;
+    VIR_AUTOFREE(char *) output = NULL;
+    VIR_AUTOFREE(char *) error = NULL;
 
+    cmd = virCommandNew(PARTED);
     virCommandAddArgSet(cmd, args);
     virCommandAddEnvString(cmd, "LC_ALL=C");
     virCommandSetOutputBuffer(cmd, &output);
@@ -3348,7 +3198,7 @@ virStorageBackendPARTEDFindLabel(const char *device,
             (error && strstr(error, "unrecognised disk label"))) {
             ret = VIR_STORAGE_PARTED_UNKNOWN;
         }
-        goto cleanup;
+        return ret;
     }
 
     /* Search for "Partition Table:" in the output. If not present,
@@ -3357,8 +3207,7 @@ virStorageBackendPARTEDFindLabel(const char *device,
     if (!(start = strstr(output, "Partition Table: ")) ||
         !(end = strstr(start, "\n"))) {
         VIR_DEBUG("Unable to find tag in output: %s", output);
-        ret = VIR_STORAGE_PARTED_NOPTTYPE;
-        goto cleanup;
+        return VIR_STORAGE_PARTED_NOPTTYPE;
     }
     start += strlen("Partition Table: ");
     *end = '\0';
@@ -3368,22 +3217,14 @@ virStorageBackendPARTEDFindLabel(const char *device,
         start += 2;
 
     /* Make sure we know about this type */
-    if (virStoragePoolFormatDiskTypeFromString(start) < 0) {
-        ret = VIR_STORAGE_PARTED_PTTYPE_UNK;
-        goto cleanup;
-    }
+    if (virStoragePoolFormatDiskTypeFromString(start) < 0)
+        return VIR_STORAGE_PARTED_PTTYPE_UNK;
 
     /*  Does the on disk match what the pool desired? */
     if (STREQ(start, format))
-        ret = VIR_STORAGE_PARTED_MATCH;
-    else
-        ret = VIR_STORAGE_PARTED_DIFFERENT;
+        return VIR_STORAGE_PARTED_MATCH;
 
- cleanup:
-    virCommandFree(cmd);
-    VIR_FREE(output);
-    VIR_FREE(error);
-    return ret;
+    return VIR_STORAGE_PARTED_DIFFERENT;
 }
 
 
@@ -3516,11 +3357,10 @@ storageBackendProbeTarget(virStorageSourcePtr target,
                           virStorageEncryptionPtr *encryption)
 {
     int backingStoreFormat;
-    int fd = -1;
-    int ret = -1;
     int rc;
-    virStorageSourcePtr meta = NULL;
     struct stat sb;
+    VIR_AUTOUNREF(virStorageSourcePtr) meta = NULL;
+    VIR_AUTOCLOSE fd = -1;
 
     if (encryption)
         *encryption = NULL;
@@ -3531,17 +3371,16 @@ storageBackendProbeTarget(virStorageSourcePtr target,
     fd = rc;
 
     if (virStorageBackendUpdateVolTargetInfoFD(target, fd, &sb) < 0)
-        goto cleanup;
+        return -1;
 
     if (S_ISDIR(sb.st_mode)) {
         if (storageBackendIsPloopDir(target->path)) {
             if (storageBackendRedoPloopUpdate(target, &sb, &fd,
                                               VIR_STORAGE_VOL_FS_PROBE_FLAGS) < 0)
-                goto cleanup;
+                return -1;
         } else {
             target->format = VIR_STORAGE_FILE_DIR;
-            ret = 0;
-            goto cleanup;
+            return 0;
         }
     }
 
@@ -3549,11 +3388,11 @@ storageBackendProbeTarget(virStorageSourcePtr target,
                                                  fd,
                                                  VIR_STORAGE_FILE_AUTO,
                                                  &backingStoreFormat)))
-        goto cleanup;
+        return -1;
 
     if (meta->backingStoreRaw) {
         if (!(target->backingStore = virStorageSourceNewFromBacking(meta)))
-            goto cleanup;
+            return -1;
 
         target->backingStore->format = backingStoreFormat;
 
@@ -3561,10 +3400,10 @@ storageBackendProbeTarget(virStorageSourcePtr target,
          * remote storage. To avoid trouble, just fake the backing store is RAW
          * and put the string from the metadata as the path of the target. */
         if (!virStorageSourceIsLocalStorage(target->backingStore)) {
-            virStorageSourceFree(target->backingStore);
+            virObjectUnref(target->backingStore);
 
-            if (VIR_ALLOC(target->backingStore) < 0)
-                goto cleanup;
+            if (!(target->backingStore = virStorageSourceNew()))
+                return -1;
 
             target->backingStore->type = VIR_STORAGE_TYPE_NETWORK;
             target->backingStore->path = meta->backingStoreRaw;
@@ -3593,8 +3432,6 @@ storageBackendProbeTarget(virStorageSourcePtr target,
     target->format = meta->format;
 
     /* Default to success below this point */
-    ret = 0;
-
     if (meta->capacity)
         target->capacity = meta->capacity;
 
@@ -3613,19 +3450,14 @@ storageBackendProbeTarget(virStorageSourcePtr target,
     }
 
     virBitmapFree(target->features);
-    target->features = meta->features;
-    meta->features = NULL;
+    VIR_STEAL_PTR(target->features, meta->features);
 
     if (meta->compat) {
         VIR_FREE(target->compat);
-        target->compat = meta->compat;
-        meta->compat = NULL;
+        VIR_STEAL_PTR(target->compat, meta->compat);
     }
 
- cleanup:
-    VIR_FORCE_CLOSE(fd);
-    virStorageSourceFree(meta);
-    return ret;
+    return 0;
 }
 
 
@@ -3693,10 +3525,11 @@ virStorageBackendRefreshLocal(virStoragePoolObjPtr pool)
     struct dirent *ent;
     struct statvfs sb;
     struct stat statbuf;
-    virStorageVolDefPtr vol = NULL;
-    virStorageSourcePtr target = NULL;
     int direrr;
-    int fd = -1, ret = -1;
+    int ret = -1;
+    VIR_AUTOPTR(virStorageVolDef) vol = NULL;
+    VIR_AUTOCLOSE fd = -1;
+    VIR_AUTOUNREF(virStorageSourcePtr) target = NULL;
 
     if (virDirOpen(&dir, def->target.path) < 0)
         goto cleanup;
@@ -3705,8 +3538,8 @@ virStorageBackendRefreshLocal(virStoragePoolObjPtr pool)
         int err;
 
         if (virStringHasControlChars(ent->d_name)) {
-            VIR_WARN("Ignoring file with control characters under '%s'",
-                     def->target.path);
+            VIR_WARN("Ignoring file '%s' with control characters under '%s'",
+                     ent->d_name, def->target.path);
             continue;
         }
 
@@ -3743,7 +3576,7 @@ virStorageBackendRefreshLocal(virStoragePoolObjPtr pool)
         goto cleanup;
     VIR_DIR_CLOSE(dir);
 
-    if (VIR_ALLOC(target))
+    if (!(target = virStorageSourceNew()))
         goto cleanup;
 
     if ((fd = open(def->target.path, O_RDONLY)) < 0) {
@@ -3787,48 +3620,28 @@ virStorageBackendRefreshLocal(virStoragePoolObjPtr pool)
     ret = 0;
  cleanup:
     VIR_DIR_CLOSE(dir);
-    VIR_FORCE_CLOSE(fd);
-    virStorageVolDefFree(vol);
-    virStorageSourceFree(target);
-    if (ret < 0)
-        virStoragePoolObjClearVols(pool);
     return ret;
 }
 
 
 static char *
-virStorageBackendSCSISerial(const char *dev)
+virStorageBackendSCSISerial(const char *dev,
+                            bool isNPIV)
 {
+    int rc;
     char *serial = NULL;
-#ifdef WITH_UDEV
-    virCommandPtr cmd = virCommandNewArgList(
-        "/lib/udev/scsi_id",
-        "--replace-whitespace",
-        "--whitelisted",
-        "--device", dev,
-        NULL
-        );
 
-    /* Run the program and capture its output */
-    virCommandSetOutputBuffer(cmd, &serial);
-    if (virCommandRun(cmd, NULL) < 0)
-        goto cleanup;
-#endif
+    if (isNPIV)
+        rc = virStorageFileGetNPIVKey(dev, &serial);
+    else
+        rc = virStorageFileGetSCSIKey(dev, &serial, true);
+    if (rc == 0 && serial)
+        return serial;
 
-    if (serial && STRNEQ(serial, "")) {
-        char *nl = strchr(serial, '\n');
-        if (nl)
-            *nl = '\0';
-    } else {
-        VIR_FREE(serial);
-        ignore_value(VIR_STRDUP(serial, dev));
-    }
+    if (rc == -2)
+        return NULL;
 
-#ifdef WITH_UDEV
- cleanup:
-    virCommandFree(cmd);
-#endif
-
+    ignore_value(VIR_STRDUP(serial, dev));
     return serial;
 }
 
@@ -3852,9 +3665,9 @@ virStorageBackendSCSINewLun(virStoragePoolObjPtr pool,
                             const char *dev)
 {
     virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
-    virStorageVolDefPtr vol = NULL;
-    char *devpath = NULL;
     int retval = -1;
+    VIR_AUTOPTR(virStorageVolDef) vol = NULL;
+    VIR_AUTOFREE(char *) devpath = NULL;
 
     /* Check if the pool is using a stable target path. The call to
      * virStorageBackendStablePath will fail if the pool target path
@@ -3869,11 +3682,11 @@ virStorageBackendSCSINewLun(virStoragePoolObjPtr pool,
         virReportError(VIR_ERR_INVALID_ARG,
                        _("unable to use target path '%s' for dev '%s'"),
                        NULLSTR(def->target.path), dev);
-        goto cleanup;
+        return -1;
     }
 
     if (VIR_ALLOC(vol) < 0)
-        goto cleanup;
+        return -1;
 
     vol->type = VIR_STORAGE_VOL_BLOCK;
 
@@ -3883,10 +3696,10 @@ virStorageBackendSCSINewLun(virStoragePoolObjPtr pool,
      * just leave 'host' out
      */
     if (virAsprintf(&(vol->name), "unit:%u:%u:%u", bus, target, lun) < 0)
-        goto cleanup;
+        return -1;
 
     if (virAsprintf(&devpath, "/dev/%s", dev) < 0)
-        goto cleanup;
+        return -1;
 
     VIR_DEBUG("Trying to create volume for '%s'", devpath);
 
@@ -3899,7 +3712,7 @@ virStorageBackendSCSINewLun(virStoragePoolObjPtr pool,
     if ((vol->target.path = virStorageBackendStablePath(pool,
                                                         devpath,
                                                         true)) == NULL)
-        goto cleanup;
+        return -1;
 
     if (STREQ(devpath, vol->target.path) &&
         !(STREQ(def->target.path, "/dev") ||
@@ -3908,32 +3721,29 @@ virStorageBackendSCSINewLun(virStoragePoolObjPtr pool,
         VIR_DEBUG("No stable path found for '%s' in '%s'",
                   devpath, def->target.path);
 
-        retval = -2;
-        goto cleanup;
+        return -2;
     }
 
     /* Allow a volume read failure to ignore or skip this block file */
     if ((retval = virStorageBackendUpdateVolInfo(vol, true,
                                                  VIR_STORAGE_VOL_OPEN_DEFAULT,
                                                  VIR_STORAGE_VOL_READ_NOERROR)) < 0)
-        goto cleanup;
+        return retval;
 
-    if (!(vol->key = virStorageBackendSCSISerial(vol->target.path)))
-        goto cleanup;
+    vol->key = virStorageBackendSCSISerial(vol->target.path,
+                                           (def->source.adapter.type ==
+                                            VIR_STORAGE_ADAPTER_TYPE_FC_HOST));
+    if (!vol->key)
+        return -1;
 
     def->capacity += vol->target.capacity;
     def->allocation += vol->target.allocation;
 
     if (virStoragePoolObjAddVol(pool, vol) < 0)
-        goto cleanup;
+        return -1;
     vol = NULL;
 
-    retval = 0;
-
- cleanup:
-    virStorageVolDefFree(vol);
-    VIR_FREE(devpath);
-    return retval;
+    return 0;
 }
 
 
@@ -3943,11 +3753,11 @@ getNewStyleBlockDevice(const char *lun_path,
                        const char *block_name ATTRIBUTE_UNUSED,
                        char **block_device)
 {
-    char *block_path = NULL;
     DIR *block_dir = NULL;
     struct dirent *block_dirent = NULL;
     int retval = -1;
     int direrr;
+    VIR_AUTOFREE(char *) block_path = NULL;
 
     if (virAsprintf(&block_path, "%s/block", lun_path) < 0)
         goto cleanup;
@@ -3973,7 +3783,6 @@ getNewStyleBlockDevice(const char *lun_path,
 
  cleanup:
     VIR_DIR_CLOSE(block_dir);
-    VIR_FREE(block_path);
     return retval;
 }
 
@@ -4023,11 +3832,11 @@ getBlockDevice(uint32_t host,
                uint32_t lun,
                char **block_device)
 {
-    char *lun_path = NULL;
     DIR *lun_dir = NULL;
     struct dirent *lun_dirent = NULL;
     int retval = -1;
     int direrr;
+    VIR_AUTOFREE(char *) lun_path = NULL;
 
     *block_device = NULL;
 
@@ -4065,7 +3874,6 @@ getBlockDevice(uint32_t host,
 
  cleanup:
     VIR_DIR_CLOSE(lun_dir);
-    VIR_FREE(lun_path);
     return retval;
 }
 
@@ -4081,15 +3889,14 @@ getDeviceType(uint32_t host,
               uint32_t lun,
               int *type)
 {
-    char *type_path = NULL;
     char typestr[3];
     char *gottype, *p;
     FILE *typefile;
-    int retval = 0;
+    VIR_AUTOFREE(char *) type_path = NULL;
 
     if (virAsprintf(&type_path, "/sys/bus/scsi/devices/%u:%u:%u:%u/type",
                     host, bus, target, lun) < 0)
-        goto out;
+        return -1;
 
     typefile = fopen(type_path, "r");
     if (typefile == NULL) {
@@ -4097,8 +3904,7 @@ getDeviceType(uint32_t host,
                              _("Could not find typefile '%s'"),
                              type_path);
         /* there was no type file; that doesn't seem right */
-        retval = -1;
-        goto out;
+        return -1;
     }
 
     gottype = fgets(typestr, 3, typefile);
@@ -4109,8 +3915,7 @@ getDeviceType(uint32_t host,
                              _("Could not read typefile '%s'"),
                              type_path);
         /* we couldn't read the type file; have to give up */
-        retval = -1;
-        goto out;
+        return -1;
     }
 
     /* we don't actually care about p, but if you pass NULL and the last
@@ -4121,15 +3926,12 @@ getDeviceType(uint32_t host,
                        _("Device type '%s' is not an integer"),
                        typestr);
         /* Hm, type wasn't an integer; seems strange */
-        retval = -1;
-        goto out;
+        return -1;
     }
 
     VIR_DEBUG("Device type is %d", *type);
 
- out:
-    VIR_FREE(type_path);
-    return retval;
+    return 0;
 }
 
 
@@ -4151,7 +3953,7 @@ processLU(virStoragePoolObjPtr pool,
 {
     int retval = -1;
     int device_type;
-    char *block_device = NULL;
+    VIR_AUTOFREE(char *) block_device = NULL;
 
     VIR_DEBUG("Processing LU %u:%u:%u:%u",
               host, bus, target, lun);
@@ -4183,14 +3985,12 @@ processLU(virStoragePoolObjPtr pool,
     if (retval < 0) {
         VIR_DEBUG("Failed to create new storage volume for %u:%u:%u:%u",
                   host, bus, target, lun);
-        goto cleanup;
+        return retval;
     }
 
     VIR_DEBUG("Created new storage volume for %u:%u:%u:%u successfully",
               host, bus, target, lun);
 
- cleanup:
-    VIR_FREE(block_device);
     return retval;
 }
 
@@ -4266,4 +4066,172 @@ virStorageBackendZeroPartitionTable(const char *path,
 
     return storageBackendVolWipeLocalFile(path, VIR_STORAGE_VOL_WIPE_ALG_ZERO,
                                           size, true);
+}
+
+
+/**
+ * virStorageBackendFileSystemGetPoolSource
+ * @pool: storage pool object pointer
+ *
+ * Allocate/return a string representing the FS storage pool source.
+ * It is up to the caller to VIR_FREE the allocated string
+ */
+char *
+virStorageBackendFileSystemGetPoolSource(virStoragePoolObjPtr pool)
+{
+    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+    char *src = NULL;
+
+    if (def->type == VIR_STORAGE_POOL_NETFS) {
+        if (def->source.format == VIR_STORAGE_POOL_NETFS_CIFS) {
+            if (virAsprintf(&src, "//%s/%s",
+                            def->source.hosts[0].name,
+                            def->source.dir) < 0)
+                return NULL;
+        } else {
+            if (virAsprintf(&src, "%s:%s",
+                            def->source.hosts[0].name,
+                            def->source.dir) < 0)
+                return NULL;
+        }
+    } else {
+        if (VIR_STRDUP(src, def->source.devices[0].path) < 0)
+            return NULL;
+    }
+    return src;
+}
+
+
+static void
+virStorageBackendFileSystemMountAddOptions(virCommandPtr cmd,
+                                           virStoragePoolDefPtr def,
+                                           const char *providedOpts)
+{
+    VIR_AUTOFREE(char *) mountOpts = NULL;
+    virBuffer buf = VIR_BUFFER_INITIALIZER;
+
+    if (*default_mount_opts != '\0')
+        virBufferAsprintf(&buf, "%s,", default_mount_opts);
+
+    if (providedOpts)
+        virBufferAsprintf(&buf, "%s,", providedOpts);
+
+    if (def->namespaceData) {
+        size_t i;
+        virStoragePoolFSMountOptionsDefPtr opts = def->namespaceData;
+        char uuidstr[VIR_UUID_STRING_BUFLEN];
+
+        for (i = 0; i < opts->noptions; i++)
+            virBufferAsprintf(&buf, "%s,", opts->options[i]);
+
+        virUUIDFormat(def->uuid, uuidstr);
+        VIR_WARN("Storage Pool name='%s' uuid='%s' is tainted by custom "
+                 "mount_opts from XML", def->name, uuidstr);
+    }
+
+    virBufferTrim(&buf, ",", -1);
+    mountOpts = virBufferContentAndReset(&buf);
+
+    if (mountOpts)
+        virCommandAddArgList(cmd, "-o", mountOpts, NULL);
+}
+
+
+static void
+virStorageBackendFileSystemMountNFSArgs(virCommandPtr cmd,
+                                        const char *src,
+                                        virStoragePoolDefPtr def,
+                                        const char *nfsVers)
+{
+    virCommandAddArgList(cmd, src, def->target.path, NULL);
+    virStorageBackendFileSystemMountAddOptions(cmd, def, nfsVers);
+}
+
+
+static void
+virStorageBackendFileSystemMountGlusterArgs(virCommandPtr cmd,
+                                            const char *src,
+                                            virStoragePoolDefPtr def)
+{
+    const char *fmt;
+
+    fmt = virStoragePoolFormatFileSystemNetTypeToString(def->source.format);
+    virCommandAddArgList(cmd, "-t", fmt, src, def->target.path, NULL);
+    virStorageBackendFileSystemMountAddOptions(cmd, def, "direct-io-mode=1");
+}
+
+
+static void
+virStorageBackendFileSystemMountCIFSArgs(virCommandPtr cmd,
+                                         const char *src,
+                                         virStoragePoolDefPtr def)
+{
+    const char *fmt;
+
+    fmt = virStoragePoolFormatFileSystemNetTypeToString(def->source.format);
+    virCommandAddArgList(cmd, "-t", fmt, src, def->target.path, NULL);
+    virStorageBackendFileSystemMountAddOptions(cmd, def, "guest");
+}
+
+
+static void
+virStorageBackendFileSystemMountDefaultArgs(virCommandPtr cmd,
+                                            const char *src,
+                                            virStoragePoolDefPtr def,
+                                            const char *nfsVers)
+{
+    const char *fmt;
+
+    if (def->type == VIR_STORAGE_POOL_FS)
+        fmt = virStoragePoolFormatFileSystemTypeToString(def->source.format);
+    else
+        fmt = virStoragePoolFormatFileSystemNetTypeToString(def->source.format);
+    virCommandAddArgList(cmd, "-t", fmt, src, def->target.path, NULL);
+    virStorageBackendFileSystemMountAddOptions(cmd, def, nfsVers);
+}
+
+
+virCommandPtr
+virStorageBackendFileSystemMountCmd(const char *cmdstr,
+                                    virStoragePoolDefPtr def,
+                                    const char *src)
+{
+    /* 'mount -t auto' doesn't seem to auto determine nfs (or cifs),
+     *  while plain 'mount' does. We have to craft separate argvs to
+     *  accommodate this */
+    bool netauto = (def->type == VIR_STORAGE_POOL_NETFS &&
+                    def->source.format == VIR_STORAGE_POOL_NETFS_AUTO);
+    bool glusterfs = (def->type == VIR_STORAGE_POOL_NETFS &&
+                      def->source.format == VIR_STORAGE_POOL_NETFS_GLUSTERFS);
+    bool cifsfs = (def->type == VIR_STORAGE_POOL_NETFS &&
+                   def->source.format == VIR_STORAGE_POOL_NETFS_CIFS);
+    virCommandPtr cmd = NULL;
+    VIR_AUTOFREE(char *) nfsVers = NULL;
+
+    if (def->type == VIR_STORAGE_POOL_NETFS && def->source.protocolVer > 0 &&
+        virAsprintf(&nfsVers, "nfsvers=%u", def->source.protocolVer) < 0)
+        return NULL;
+
+    cmd = virCommandNew(cmdstr);
+    if (netauto)
+        virStorageBackendFileSystemMountNFSArgs(cmd, src, def, nfsVers);
+    else if (glusterfs)
+        virStorageBackendFileSystemMountGlusterArgs(cmd, src, def);
+    else if (cifsfs)
+        virStorageBackendFileSystemMountCIFSArgs(cmd, src, def);
+    else
+        virStorageBackendFileSystemMountDefaultArgs(cmd, src, def, nfsVers);
+    return cmd;
+}
+
+
+virCommandPtr
+virStorageBackendLogicalChangeCmd(const char *cmdstr,
+                                  virStoragePoolDefPtr def,
+                                  bool on)
+{
+    return virCommandNewArgList(cmdstr,
+                                on ? "-aly" : "-aln",
+                                def->source.name,
+                                NULL);
 }

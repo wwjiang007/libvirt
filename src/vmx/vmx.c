@@ -59,7 +59,7 @@ def->name = <value>               <=>   displayName = "<value>"
 def->mem.max_balloon = <value kilobyte>    <=>   memsize = "<value megabyte>"            # must be a multiple of 4, defaults to 32
 def->mem.cur_balloon = <value kilobyte>    <=>   sched.mem.max = "<value megabyte>"      # defaults to "unlimited" -> def->mem.cur_balloon = def->mem.max_balloon
 def->mem.min_guarantee = <value kilobyte>  <=>   sched.mem.minsize = "<value megabyte>"  # defaults to 0
-def->maxvcpus = <value>           <=>   numvcpus = "<value>"                    # must be 1 or a multiple of 2, defaults to 1
+def->maxvcpus = <value>           <=>   numvcpus = "<value>"                    # must be greater than 0, defaults to 1
 def->cpumask = <uint list>        <=>   sched.cpu.affinity = "<uint list>"
 def->cputune.shares = <value>     <=>   sched.cpu.shares = "<value>"            # with handling for special values
                                                                                 # "high", "normal", "low"
@@ -508,8 +508,9 @@ def->parallels[0]...
 /* directly map the virDomainControllerModel to virVMXSCSIControllerModel,
  * this is good enough for now because all virDomainControllerModel values
  * are actually SCSI controller models in the ESX case */
-VIR_ENUM_DECL(virVMXControllerModelSCSI)
-VIR_ENUM_IMPL(virVMXControllerModelSCSI, VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LAST,
+VIR_ENUM_DECL(virVMXControllerModelSCSI);
+VIR_ENUM_IMPL(virVMXControllerModelSCSI,
+              VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LAST,
               "auto", /* just to match virDomainControllerModel, will never be used */
               "buslogic",
               "lsilogic",
@@ -517,7 +518,10 @@ VIR_ENUM_IMPL(virVMXControllerModelSCSI, VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LAST,
               "pvscsi",
               "UNUSED ibmvscsi",
               "UNUSED virtio-scsi",
-              "UNUSED lsisas1078");
+              "UNUSED lsisas1078",
+              "UNUSED virtio-transitional",
+              "UNUSED virtio-non-transitional",
+);
 
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
@@ -550,7 +554,8 @@ static virDomainDefParserConfig virVMXDomainDefParserConfig = {
     .devicesPostParseCallback = virVMXDomainDevicesDefPostParse,
     .domainPostParseCallback = virVMXDomainDefPostParse,
     .features = (VIR_DOMAIN_DEF_FEATURE_WIDE_SCSI |
-                 VIR_DOMAIN_DEF_FEATURE_NAME_SLASH),
+                 VIR_DOMAIN_DEF_FEATURE_NAME_SLASH |
+                 VIR_DOMAIN_DEF_FEATURE_NO_BOOT_ORDER),
 };
 
 struct virVMXDomainDefNamespaceData {
@@ -722,39 +727,36 @@ virVMXConvertToUTF8(const char *encoding, const char *string)
 
 
 static int
+virVMXGetConfigStringHelper(virConfPtr conf, const char *name, char **string,
+                            bool optional)
+{
+    int rc;
+    *string = NULL;
+
+    rc = virConfGetValueString(conf, name, string);
+    if (rc == 1 && *string != NULL)
+        return 1;
+
+    if (optional)
+        return 0;
+
+    virReportError(VIR_ERR_INTERNAL_ERROR,
+                   _("Missing essential config entry '%s'"), name);
+    return -1;
+}
+
+
+
+static int
 virVMXGetConfigString(virConfPtr conf, const char *name, char **string,
                       bool optional)
 {
-    virConfValuePtr value;
-
     *string = NULL;
-    value = virConfGetValue(conf, name);
 
-    if (value == NULL) {
-        if (optional)
-            return 0;
-
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Missing essential config entry '%s'"), name);
+    if (virVMXGetConfigStringHelper(conf, name, string, optional) < 0)
         return -1;
-    }
 
-    if (value->type != VIR_CONF_STRING) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Config entry '%s' must be a string"), name);
-        return -1;
-    }
-
-    if (value->str == NULL) {
-        if (optional)
-            return 0;
-
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Missing essential config entry '%s'"), name);
-        return -1;
-    }
-
-    return VIR_STRDUP(*string, value->str);
+    return 0;
 }
 
 
@@ -763,43 +765,26 @@ static int
 virVMXGetConfigUUID(virConfPtr conf, const char *name, unsigned char *uuid,
                     bool optional)
 {
-    virConfValuePtr value;
+    char *string = NULL;
+    int ret = -1;
+    int rc;
 
-    value = virConfGetValue(conf, name);
+    rc = virVMXGetConfigStringHelper(conf, name, &string, optional);
+    if (rc <= 0)
+        return rc;
 
-    if (value == NULL) {
-        if (optional) {
-            return 0;
-        } else {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Missing essential config entry '%s'"), name);
-            return -1;
-        }
-    }
-
-    if (value->type != VIR_CONF_STRING) {
+    rc = virUUIDParse(string, uuid);
+    if (rc < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Config entry '%s' must be a string"), name);
-        return -1;
+                       _("Could not parse UUID from string '%s'"), string);
+        goto cleanup;
     }
 
-    if (value->str == NULL) {
-        if (optional) {
-            return 0;
-        } else {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Missing essential config entry '%s'"), name);
-            return -1;
-        }
-    }
+    ret = 0;
 
-    if (virUUIDParse(value->str, uuid) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Could not parse UUID from string '%s'"), value->str);
-        return -1;
-    }
-
-    return 0;
+ cleanup:
+    VIR_FREE(string);
+    return ret;
 }
 
 
@@ -808,47 +793,30 @@ static int
 virVMXGetConfigLong(virConfPtr conf, const char *name, long long *number,
                     long long default_, bool optional)
 {
-    virConfValuePtr value;
+    char *string = NULL;
+    int ret = -1;
+    int rc;
 
     *number = default_;
-    value = virConfGetValue(conf, name);
 
-    if (value == NULL) {
-        if (optional) {
-            return 0;
-        } else {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Missing essential config entry '%s'"), name);
-            return -1;
-        }
-    }
+    rc = virVMXGetConfigStringHelper(conf, name, &string, optional);
+    if (rc <= 0)
+        return rc;
 
-    if (value->type == VIR_CONF_STRING) {
-        if (value->str == NULL) {
-            if (optional) {
-                return 0;
-            } else {
-                virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("Missing essential config entry '%s'"), name);
-                return -1;
-            }
-        }
-
-        if (STRCASEEQ(value->str, "unlimited")) {
-            *number = -1;
-        } else if (virStrToLong_ll(value->str, NULL, 10, number) < 0) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Config entry '%s' must represent an integer value"),
-                           name);
-            return -1;
-        }
-    } else {
+    if (STRCASEEQ(string, "unlimited")) {
+        *number = -1;
+    } else if (virStrToLong_ll(string, NULL, 10, number) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Config entry '%s' must be a string"), name);
-        return -1;
+                _("Config entry '%s' must represent an integer value"),
+                name);
+        goto cleanup;
     }
 
-    return 0;
+    ret = 0;
+
+ cleanup:
+    VIR_FREE(string);
+    return ret;
 }
 
 
@@ -857,49 +825,32 @@ static int
 virVMXGetConfigBoolean(virConfPtr conf, const char *name, bool *boolean_,
                        bool default_, bool optional)
 {
-    virConfValuePtr value;
+    char *string = NULL;
+    int ret = -1;
+    int rc;
 
     *boolean_ = default_;
-    value = virConfGetValue(conf, name);
 
-    if (value == NULL) {
-        if (optional) {
-            return 0;
-        } else {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Missing essential config entry '%s'"), name);
-            return -1;
-        }
-    }
+    rc = virVMXGetConfigStringHelper(conf, name, &string, optional);
+    if (rc <= 0)
+        return rc;
 
-    if (value->type == VIR_CONF_STRING) {
-        if (value->str == NULL) {
-            if (optional) {
-                return 0;
-            } else {
-                virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("Missing essential config entry '%s'"), name);
-                return -1;
-            }
-        }
-
-        if (STRCASEEQ(value->str, "true")) {
-            *boolean_ = 1;
-        } else if (STRCASEEQ(value->str, "false")) {
-            *boolean_ = 0;
-        } else {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Config entry '%s' must represent a boolean value "
-                             "(true|false)"), name);
-            return -1;
-        }
+    if (STRCASEEQ(string, "true")) {
+        *boolean_ = 1;
+    } else if (STRCASEEQ(string, "false")) {
+        *boolean_ = 0;
     } else {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Config entry '%s' must be a string"), name);
-        return -1;
+                       _("Config entry '%s' must represent a boolean value "
+                         "(true|false)"), name);
+        goto cleanup;
     }
 
-    return 0;
+    ret = 0;
+
+ cleanup:
+    VIR_FREE(string);
+    return ret;
 }
 
 
@@ -1309,8 +1260,8 @@ virVMXConfigScanResultsCollector(const char* name,
             return -1;
         }
 
-        if ((int) idx > results->networks_max_index)
-            results->networks_max_index = (int) idx;
+        if ((int)idx > results->networks_max_index)
+            results->networks_max_index = (int)idx;
     }
 
     return 0;
@@ -1351,8 +1302,10 @@ virVMXParseConfig(virVMXContext *ctx,
     int unit;
     bool hgfs_disabled = true;
     long long sharedFolder_maxNum = 0;
-    int cpumasklen;
     struct virVMXConfigScanResults results = { -1 };
+    long long coresPerSocket = 0;
+    virCPUDefPtr cpu = NULL;
+    char *firmware = NULL;
 
     if (ctx->parseFileName == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -1503,10 +1456,10 @@ virVMXParseConfig(virVMXContext *ctx,
     if (virVMXGetConfigLong(conf, "numvcpus", &numvcpus, 1, true) < 0)
         goto cleanup;
 
-    if (numvcpus <= 0 || (numvcpus % 2 != 0 && numvcpus != 1)) {
+    if (numvcpus <= 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Expecting VMX entry 'numvcpus' to be an unsigned "
-                         "integer (1 or a multiple of 2) but found %lld"), numvcpus);
+                         "integer greater than 0 but found %lld"), numvcpus);
         goto cleanup;
     }
 
@@ -1516,6 +1469,31 @@ virVMXParseConfig(virVMXContext *ctx,
     if (virDomainDefSetVcpus(def, numvcpus) < 0)
         goto cleanup;
 
+    /* vmx:cpuid.coresPerSocket -> def:cpu */
+    if (virVMXGetConfigLong(conf, "cpuid.coresPerSocket", &coresPerSocket, 1,
+                            true) < 0)
+        goto cleanup;
+
+    if (coresPerSocket > 1) {
+        if (VIR_ALLOC(cpu) < 0)
+            goto cleanup;
+
+        cpu->type = VIR_CPU_TYPE_GUEST;
+        cpu->mode = VIR_CPU_MODE_CUSTOM;
+
+        cpu->sockets = numvcpus / coresPerSocket;
+        if (cpu->sockets <= 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                           _("VMX entry 'cpuid.coresPerSocket' smaller than "
+                             "'numvcpus'"));
+            goto cleanup;
+        }
+        cpu->cores = coresPerSocket;
+        cpu->threads = 1;
+
+        VIR_STEAL_PTR(def->cpu, cpu);
+    }
+
     /* vmx:sched.cpu.affinity -> def:cpumask */
     /* NOTE: maps to VirtualMachine:config.cpuAffinity.affinitySet */
     if (virVMXGetConfigString(conf, "sched.cpu.affinity", &sched_cpu_affinity,
@@ -1524,21 +1502,35 @@ virVMXParseConfig(virVMXContext *ctx,
     }
 
     if (sched_cpu_affinity != NULL && STRCASENEQ(sched_cpu_affinity, "all")) {
-        const char *current = sched_cpu_affinity;
-        int number, count = 0;
-
-        cpumasklen = 0;
+        VIR_AUTOSTRINGLIST afflist = NULL;
+        char **aff;
+        size_t naffs;
 
         def->cpumask = virBitmapNew(VIR_DOMAIN_CPUMASK_LEN);
         if (!def->cpumask)
             goto cleanup;
 
-        while (*current != '\0') {
+        if (!(afflist = virStringSplitCount(sched_cpu_affinity, ",", 0, &naffs)))
+            goto cleanup;
+
+        if (naffs < numvcpus) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Expecting VMX entry 'sched.cpu.affinity' to contain "
+                             "at least as many values as 'numvcpus' (%lld) but "
+                             "found only %zu value(s)"), numvcpus, naffs);
+            goto cleanup;
+        }
+
+        for (aff = afflist; *aff; aff++) {
+            const char *current = *aff;
+            unsigned int number;
+            int rc;
+
+            virSkipSpaces(&current);
+            rc = virStrToLong_uip(current, (char **) &current, 10, &number);
             virSkipSpaces(&current);
 
-            number = virParseNumber(&current);
-
-            if (number < 0) {
+            if (rc < 0 || *current != '\0') {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
                                _("Expecting VMX entry 'sched.cpu.affinity' to be "
                                  "a comma separated list of unsigned integers but "
@@ -1553,35 +1545,7 @@ virVMXParseConfig(virVMXContext *ctx,
                 goto cleanup;
             }
 
-            if (number + 1 > cpumasklen)
-                cpumasklen = number + 1;
-
             ignore_value(virBitmapSetBit(def->cpumask, number));
-            ++count;
-
-            virSkipSpaces(&current);
-
-            if (*current == ',') {
-                ++current;
-            } else if (*current == '\0') {
-                break;
-            } else {
-                virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("Expecting VMX entry 'sched.cpu.affinity' to be "
-                                 "a comma separated list of unsigned integers but "
-                                 "found '%s'"), sched_cpu_affinity);
-                goto cleanup;
-            }
-
-            virSkipSpaces(&current);
-        }
-
-        if (count < numvcpus) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Expecting VMX entry 'sched.cpu.affinity' to contain "
-                             "at least as many values as 'numvcpus' (%lld) but "
-                             "found only %d value(s)"), numvcpus, count);
-            goto cleanup;
         }
     }
 
@@ -1623,7 +1587,7 @@ virVMXParseConfig(virVMXContext *ctx,
     if (virVMXGetConfigString(conf, "guestOS", &guestOS, true) < 0)
         goto cleanup;
 
-    if (guestOS != NULL && virFileHasSuffix(guestOS, "-64")) {
+    if (guestOS != NULL && virStringHasSuffix(guestOS, "-64")) {
         def->os.arch = VIR_ARCH_X86_64;
     } else {
         def->os.arch = VIR_ARCH_I686;
@@ -1864,6 +1828,21 @@ virVMXParseConfig(virVMXContext *ctx,
         def->namespaceData = nsdata;
     }
 
+    /* vmx:firmware */
+    if (virVMXGetConfigString(conf, "firmware", &firmware, true) < 0)
+        goto cleanup;
+
+    if (firmware != NULL) {
+        if (STREQ(firmware, "efi")) {
+            def->os.firmware = VIR_DOMAIN_OS_DEF_FIRMWARE_EFI;
+        } else {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("VMX entry 'firmware' has unknown value '%s'"),
+                           firmware);
+            goto cleanup;
+        }
+    }
+
     if (virDomainDefPostParse(def, caps, VIR_DOMAIN_DEF_PARSE_ABI_UPDATE,
                               xmlopt, NULL) < 0)
         goto cleanup;
@@ -1881,6 +1860,8 @@ virVMXParseConfig(virVMXContext *ctx,
     VIR_FREE(sched_cpu_affinity);
     VIR_FREE(sched_cpu_shares);
     VIR_FREE(guestOS);
+    virCPUDefFree(cpu);
+    VIR_FREE(firmware);
 
     return def;
 }
@@ -2198,7 +2179,7 @@ virVMXParseDisk(virVMXContext *ctx, virDomainXMLOptionPtr xmlopt, virConfPtr con
         goto cleanup;
     }
 
-    /* FIXME: Need to distiguish between active and inactive domains here */
+    /* FIXME: Need to distinguish between active and inactive domains here */
     if (! present/* && ! startConnected*/)
         goto ignore;
 
@@ -2240,7 +2221,7 @@ virVMXParseDisk(virVMXContext *ctx, virDomainXMLOptionPtr xmlopt, virConfPtr con
 
     /* Setup virDomainDiskDef */
     if (device == VIR_DOMAIN_DISK_DEVICE_DISK) {
-        if (virFileHasSuffix(fileName, ".vmdk")) {
+        if (virStringHasCaseSuffix(fileName, ".vmdk")) {
             char *tmp;
 
             if (deviceType != NULL) {
@@ -2276,7 +2257,7 @@ virVMXParseDisk(virVMXContext *ctx, virDomainXMLOptionPtr xmlopt, virConfPtr con
             if (mode)
                 (*def)->transient = STRCASEEQ(mode,
                                               "independent-nonpersistent");
-        } else if (virFileHasSuffix(fileName, ".iso") ||
+        } else if (virStringHasCaseSuffix(fileName, ".iso") ||
                    STREQ(fileName, "emptyBackingString") ||
                    (deviceType &&
                     (STRCASEEQ(deviceType, "atapi-cdrom") ||
@@ -2299,7 +2280,7 @@ virVMXParseDisk(virVMXContext *ctx, virDomainXMLOptionPtr xmlopt, virConfPtr con
             goto cleanup;
         }
     } else if (device == VIR_DOMAIN_DISK_DEVICE_CDROM) {
-        if (virFileHasSuffix(fileName, ".iso")) {
+        if (virStringHasCaseSuffix(fileName, ".iso")) {
             char *tmp;
 
             if (deviceType && STRCASENEQ(deviceType, "cdrom-image")) {
@@ -2317,7 +2298,7 @@ virVMXParseDisk(virVMXContext *ctx, virDomainXMLOptionPtr xmlopt, virConfPtr con
                 goto cleanup;
             }
             VIR_FREE(tmp);
-        } else if (virFileHasSuffix(fileName, ".vmdk")) {
+        } else if (virStringHasCaseSuffix(fileName, ".vmdk")) {
             /*
              * This function was called in order to parse a CDROM device, but
              * .vmdk files are for harddisk devices only. Just ignore it,
@@ -2568,6 +2549,8 @@ virVMXParseEthernet(virConfPtr conf, int controller, virDomainNetDefPtr *def)
     char networkName_name[48] = "";
     char *networkName = NULL;
 
+    int netmodel = VIR_DOMAIN_NET_MODEL_UNKNOWN;
+
     if (def == NULL || *def != NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Invalid argument"));
         return -1;
@@ -2596,7 +2579,7 @@ virVMXParseEthernet(virConfPtr conf, int controller, virDomainNetDefPtr *def)
         return -1;
     }
 
-    /* FIXME: Need to distiguish between active and inactive domains here */
+    /* FIXME: Need to distinguish between active and inactive domains here */
     if (! present/* && ! startConnected*/)
         return 0;
 
@@ -2652,11 +2635,17 @@ virVMXParseEthernet(virConfPtr conf, int controller, virDomainNetDefPtr *def)
     }
 
     if (virtualDev != NULL) {
-        if (STRCASENEQ(virtualDev, "vlance") &&
-            STRCASENEQ(virtualDev, "vmxnet") &&
-            STRCASENEQ(virtualDev, "vmxnet3") &&
-            STRCASENEQ(virtualDev, "e1000") &&
-            STRCASENEQ(virtualDev, "e1000e")) {
+        if (STRCASEEQ(virtualDev, "vlance")) {
+            netmodel = VIR_DOMAIN_NET_MODEL_VLANCE;
+        } else if (STRCASEEQ(virtualDev, "vmxnet")) {
+            netmodel = VIR_DOMAIN_NET_MODEL_VMXNET;
+        } else if (STRCASEEQ(virtualDev, "vmxnet3")) {
+            netmodel = VIR_DOMAIN_NET_MODEL_VMXNET3;
+        } else if (STRCASEEQ(virtualDev, "e1000")) {
+            netmodel = VIR_DOMAIN_NET_MODEL_E1000;
+        } else if (STRCASEEQ(virtualDev, "e1000e")) {
+            netmodel = VIR_DOMAIN_NET_MODEL_E1000E;
+        } else {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("Expecting VMX entry '%s' to be 'vlance' or 'vmxnet' or "
                              "'vmxnet3' or 'e1000' or 'e1000e' but found '%s'"),
@@ -2664,12 +2653,8 @@ virVMXParseEthernet(virConfPtr conf, int controller, virDomainNetDefPtr *def)
             goto cleanup;
         }
 
-        if (STRCASEEQ(virtualDev, "vmxnet") && features == 15) {
-            VIR_FREE(virtualDev);
-
-            if (VIR_STRDUP(virtualDev, "vmxnet2") < 0)
-                goto cleanup;
-        }
+        if (netmodel == VIR_DOMAIN_NET_MODEL_VMXNET && features == 15)
+            netmodel = VIR_DOMAIN_NET_MODEL_VMXNET2;
     }
 
     /* vmx:networkName -> def:data.bridge.brname */
@@ -2693,10 +2678,8 @@ virVMXParseEthernet(virConfPtr conf, int controller, virDomainNetDefPtr *def)
     /* Setup virDomainNetDef */
     if (connectionType == NULL || STRCASEEQ(connectionType, "bridged")) {
         (*def)->type = VIR_DOMAIN_NET_TYPE_BRIDGE;
-        (*def)->model = virtualDev;
         (*def)->data.bridge.brname = networkName;
 
-        virtualDev = NULL;
         networkName = NULL;
     } else if (STRCASEEQ(connectionType, "hostonly")) {
         /* FIXME */
@@ -2706,16 +2689,12 @@ virVMXParseEthernet(virConfPtr conf, int controller, virDomainNetDefPtr *def)
         goto cleanup;
     } else if (STRCASEEQ(connectionType, "nat")) {
         (*def)->type = VIR_DOMAIN_NET_TYPE_USER;
-        (*def)->model = virtualDev;
 
-        virtualDev = NULL;
     } else if (STRCASEEQ(connectionType, "custom")) {
         (*def)->type = VIR_DOMAIN_NET_TYPE_BRIDGE;
-        (*def)->model = virtualDev;
         (*def)->data.bridge.brname = networkName;
         (*def)->ifname = vnet;
 
-        virtualDev = NULL;
         networkName = NULL;
         vnet = NULL;
     } else {
@@ -2725,6 +2704,7 @@ virVMXParseEthernet(virConfPtr conf, int controller, virDomainNetDefPtr *def)
         goto cleanup;
     }
 
+    (*def)->model = netmodel;
     result = 0;
 
  cleanup:
@@ -2799,7 +2779,7 @@ virVMXParseSerial(virVMXContext *ctx, virConfPtr conf, int port,
         return -1;
     }
 
-    /* FIXME: Need to distiguish between active and inactive domains here */
+    /* FIXME: Need to distinguish between active and inactive domains here */
     if (! present/* && ! startConnected*/)
         return 0;
 
@@ -2978,7 +2958,7 @@ virVMXParseParallel(virVMXContext *ctx, virConfPtr conf, int port,
         return -1;
     }
 
-    /* FIXME: Need to distiguish between active and inactive domains here */
+    /* FIXME: Need to distinguish between active and inactive domains here */
     if (! present/* && ! startConnected*/)
         return 0;
 
@@ -3208,15 +3188,43 @@ virVMXFormatConfig(virVMXContext *ctx, virDomainXMLOptionPtr xmlopt, virDomainDe
         goto cleanup;
     }
     maxvcpus = virDomainDefGetVcpusMax(def);
-    if (maxvcpus == 0 || (maxvcpus % 2 != 0 && maxvcpus != 1)) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Expecting domain XML entry 'vcpu' to be 1 or a "
-                         "multiple of 2 but found %d"),
-                       maxvcpus);
+    if (maxvcpus == 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Expecting domain XML entry 'vcpu' to be greater "
+                         "than 0"));
         goto cleanup;
     }
 
     virBufferAsprintf(&buffer, "numvcpus = \"%d\"\n", maxvcpus);
+
+    if (def->cpu) {
+        unsigned int calculated_vcpus;
+
+        if (def->cpu->mode != VIR_CPU_MODE_CUSTOM) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Expecting domain XML CPU mode 'custom' but "
+                             "found '%s'"),
+                           virCPUModeTypeToString(def->cpu->mode));
+            goto cleanup;
+        }
+
+        if (def->cpu->threads != 1) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                           _("Only 1 thread per core is supported"));
+            goto cleanup;
+        }
+
+        calculated_vcpus = def->cpu->sockets * def->cpu->cores;
+        if (calculated_vcpus != maxvcpus) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Expecting domain XML CPU sockets per core as %d "
+                             "but found %d"),
+                           maxvcpus, calculated_vcpus);
+            goto cleanup;
+        }
+
+        virBufferAsprintf(&buffer, "cpuid.coresPerSocket = \"%d\"\n", def->cpu->cores);
+    }
 
     /* def:cpumask -> vmx:sched.cpu.affinity */
     if (def->cpumask && virBitmapSize(def->cpumask) > 0) {
@@ -3279,6 +3287,7 @@ virVMXFormatConfig(virVMXContext *ctx, virDomainXMLOptionPtr xmlopt, virDomainDe
           case VIR_DOMAIN_GRAPHICS_TYPE_RDP:
           case VIR_DOMAIN_GRAPHICS_TYPE_DESKTOP:
           case VIR_DOMAIN_GRAPHICS_TYPE_SPICE:
+          case VIR_DOMAIN_GRAPHICS_TYPE_EGL_HEADLESS:
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("Unsupported graphics type '%s'"),
                            virDomainGraphicsTypeToString(def->graphics[i]->type));
@@ -3399,6 +3408,10 @@ virVMXFormatConfig(virVMXContext *ctx, virDomainXMLOptionPtr xmlopt, virDomainDe
         if (virVMXFormatParallel(ctx, def->parallels[i], &buffer) < 0)
             goto cleanup;
     }
+
+    /* vmx:firmware */
+    if (def->os.firmware == VIR_DOMAIN_OS_DEF_FIRMWARE_EFI)
+        virBufferAddLit(&buffer, "firmware = \"efi\"\n");
 
     if (virtualHW_version >= 7) {
         if (hasSCSI) {
@@ -3578,7 +3591,7 @@ virVMXFormatDisk(virVMXContext *ctx, virDomainDiskDefPtr def,
         const char *src = virDomainDiskGetSource(def);
 
         if (src) {
-            if (!virFileHasSuffix(src, fileExt)) {
+            if (!virStringHasCaseSuffix(src, fileExt)) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
                                _("Image file for %s %s '%s' has "
                                  "unsupported suffix, expecting '%s'"),
@@ -3733,28 +3746,30 @@ virVMXFormatEthernet(virDomainNetDefPtr def, int controller,
     virBufferAsprintf(buffer, "ethernet%d.present = \"true\"\n", controller);
 
     /* def:model -> vmx:virtualDev, vmx:features */
-    if (def->model != NULL) {
-        if (STRCASENEQ(def->model, "vlance") &&
-            STRCASENEQ(def->model, "vmxnet") &&
-            STRCASENEQ(def->model, "vmxnet2") &&
-            STRCASENEQ(def->model, "vmxnet3") &&
-            STRCASENEQ(def->model, "e1000") &&
-            STRCASENEQ(def->model, "e1000e")) {
+    if (def->model) {
+        if (def->model != VIR_DOMAIN_NET_MODEL_VLANCE &&
+            def->model != VIR_DOMAIN_NET_MODEL_VMXNET &&
+            def->model != VIR_DOMAIN_NET_MODEL_VMXNET2 &&
+            def->model != VIR_DOMAIN_NET_MODEL_VMXNET3 &&
+            def->model != VIR_DOMAIN_NET_MODEL_E1000 &&
+            def->model != VIR_DOMAIN_NET_MODEL_E1000E) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("Expecting domain XML entry 'devices/interface/model' "
                              "to be 'vlance' or 'vmxnet' or 'vmxnet2' or 'vmxnet3' "
-                             "or 'e1000' or 'e1000e' but found '%s'"), def->model);
+                             "or 'e1000' or 'e1000e' but found '%s'"),
+                            virDomainNetModelTypeToString(def->model));
             return -1;
         }
 
-        if (STRCASEEQ(def->model, "vmxnet2")) {
+        if (def->model == VIR_DOMAIN_NET_MODEL_VMXNET2) {
             virBufferAsprintf(buffer, "ethernet%d.virtualDev = \"vmxnet\"\n",
                               controller);
             virBufferAsprintf(buffer, "ethernet%d.features = \"15\"\n",
                               controller);
         } else {
             virBufferAsprintf(buffer, "ethernet%d.virtualDev = \"%s\"\n",
-                              controller, def->model);
+                              controller,
+                              virDomainNetModelTypeToString(def->model));
         }
     }
 

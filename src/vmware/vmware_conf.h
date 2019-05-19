@@ -1,4 +1,3 @@
-/*---------------------------------------------------------------------------*/
 /*
  * Copyright (C) 2014 Red Hat, Inc.
  * Copyright 2010, diateam (www.diateam.net)
@@ -18,16 +17,16 @@
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
  */
-/*---------------------------------------------------------------------------*/
 
-#ifndef VMWARE_CONF_H
-# define VMWARE_CONF_H
+#ifndef LIBVIRT_VMWARE_CONF_H
+# define LIBVIRT_VMWARE_CONF_H
 
 # define NOGUI "nogui"
 
 # include "internal.h"
 # include "virdomainobjlist.h"
 # include "virthread.h"
+# include "virenum.h"
 
 # define VIR_FROM_THIS VIR_FROM_VMWARE
 # define PROGRAM_SENTINEL ((char *)0x1)
@@ -40,7 +39,7 @@ enum vmwareDriverType {
     VMWARE_DRIVER_LAST,            /* required last item */
 };
 
-VIR_ENUM_DECL(vmwareDriver)
+VIR_ENUM_DECL(vmwareDriver);
 
 struct vmware_driver {
     virMutex lock;
@@ -87,4 +86,4 @@ int vmwareExtractPid(const char * vmxPath);
 
 char *vmwareCopyVMXFileName(const char *datastorePath, void *opaque);
 
-#endif
+#endif /* LIBVIRT_VMWARE_CONF_H */

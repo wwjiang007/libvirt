@@ -20,9 +20,8 @@
  *
  */
 
-
-#ifndef __VIR_MEMORY_H_
-# define __VIR_MEMORY_H_
+#ifndef LIBVIRT_VIRALLOC_H
+# define LIBVIRT_VIRALLOC_H
 
 # include "internal.h"
 
@@ -79,6 +78,8 @@ int virAllocVar(void *ptrptr, size_t struct_size, size_t element_size, size_t co
 void virFree(void *ptrptr) ATTRIBUTE_NONNULL(1);
 
 void virDispose(void *ptrptr, size_t count, size_t element_size, size_t *countptr)
+    ATTRIBUTE_NONNULL(1);
+void virDisposeString(char **strptr)
     ATTRIBUTE_NONNULL(1);
 
 /**
@@ -559,7 +560,7 @@ void virDispose(void *ptrptr, size_t count, size_t element_size, size_t *countpt
  * @ptr: pointer holding address to be cleared and freed
  * @count: count of elements in @ptr
  *
- * Clear the memory of the array of elemets pointed to by 'ptr' of 'count'
+ * Clear the memory of the array of elements pointed to by 'ptr' of 'count'
  * elements and free it. Update the pointer/count to NULL/0.
  *
  * This macro is safe to use on arguments with side effects.
@@ -576,9 +577,17 @@ void virDispose(void *ptrptr, size_t count, size_t element_size, size_t *countpt
  *
  * This macro is not safe to be used on arguments with side effects.
  */
-# define VIR_DISPOSE_STRING(ptr) virDispose(1 ? (void *) &(ptr) : (ptr), \
-                                            (ptr) ? strlen((ptr)) : 0, 1, NULL)
+# define VIR_DISPOSE_STRING(ptr) virDisposeString(&(ptr))
 
+/**
+ * VIR_AUTODISPOSE_STR:
+ *
+ * Macro to automatically free and clear the memory allocated to
+ * the string variable declared with it by calling virDisposeString
+ * when the variable goes out of scope.
+ */
+# define VIR_AUTODISPOSE_STR \
+    __attribute__((cleanup(virDisposeString))) char *
 
 /**
  * VIR_DISPOSE:
@@ -596,4 +605,15 @@ void virAllocTestInit(void);
 int virAllocTestCount(void);
 void virAllocTestOOM(int n, int m);
 void virAllocTestHook(void (*func)(int, void*), void *data);
-#endif /* __VIR_MEMORY_H_ */
+
+/**
+ * VIR_AUTOFREE:
+ * @type: type of the variable to be freed automatically
+ *
+ * Macro to automatically free the memory allocated to
+ * the variable declared with it by calling virFree
+ * when the variable goes out of scope.
+ */
+# define VIR_AUTOFREE(type) __attribute__((cleanup(virFree))) type
+
+#endif /* LIBVIRT_VIRALLOC_H */

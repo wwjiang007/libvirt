@@ -18,15 +18,11 @@
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
  *
- * Author: Nehal J Wani <nehaljw.kkd1@gmail.com>
- *
  * For IPv6 support, use dnsmasq >= 2.67
  */
 
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
 
 #include "virthread.h"
 #include "virfile.h"
@@ -36,6 +32,7 @@
 #include "viralloc.h"
 #include "virjson.h"
 #include "virlease.h"
+#include "virenum.h"
 #include "configmake.h"
 #include "virgettext.h"
 
@@ -76,8 +73,10 @@ enum virLeaseActionFlags {
 
 VIR_ENUM_DECL(virLeaseAction);
 
-VIR_ENUM_IMPL(virLeaseAction, VIR_LEASE_ACTION_LAST,
-              "add", "old", "del", "init");
+VIR_ENUM_IMPL(virLeaseAction,
+              VIR_LEASE_ACTION_LAST,
+              "add", "old", "del", "init",
+);
 
 int
 main(int argc, char **argv)

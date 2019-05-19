@@ -4,9 +4,6 @@
  *
  * lxc_conf.c: config functions for managing linux containers
  *
- * Authors:
- *  David L. Leskovec <dlesko at linux.vnet.ibm.com>
- *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -54,7 +51,7 @@ static int virLXCConfigOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(virLXCConfig)
+VIR_ONCE_GLOBAL_INIT(virLXCConfig);
 
 
 /* Functions */
@@ -69,7 +66,7 @@ virCapsPtr virLXCDriverCapsInit(virLXCDriverPtr driver)
                                    false, false)) == NULL)
         goto error;
 
-    /* Some machines have problematic NUMA toplogy causing
+    /* Some machines have problematic NUMA topology causing
      * unexpected failures. We don't want to break the lxc
      * driver in this scenario, so log errors & carry on
      */
@@ -86,6 +83,10 @@ virCapsPtr virLXCDriverCapsInit(virLXCDriverPtr driver)
     if (driver && virNodeSuspendGetTargetMask(&caps->host.powerMgmt) < 0)
         VIR_WARN("Failed to get host power management capabilities");
 
+    /* Add huge pages info */
+    if (virCapabilitiesInitPages(caps) < 0)
+        VIR_WARN("Failed to get pages info");
+
     if (virGetHostUUID(caps->host.host_uuid)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "%s", _("cannot get the host uuid"));
@@ -93,7 +94,7 @@ virCapsPtr virLXCDriverCapsInit(virLXCDriverPtr driver)
     }
 
     if (!(lxc_path = virFileFindResource("libvirt_lxc",
-                                         abs_topbuilddir "/src",
+                                         abs_top_builddir "/src",
                                          LIBEXECDIR)))
         goto error;
 

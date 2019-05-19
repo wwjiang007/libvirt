@@ -16,14 +16,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Daniel Veillard <veillard@redhat.com>
  */
 
 #include <config.h>
 
-#include <string.h>
-#include <stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -69,12 +65,14 @@ struct _virConfParserCtxt {
   do { while ((ctxt->cur < ctxt->end) && (c_isblank(CUR))) \
           ctxt->cur++; } while (0)
 
-VIR_ENUM_IMPL(virConf, VIR_CONF_LAST,
+VIR_ENUM_IMPL(virConf,
+              VIR_CONF_LAST,
               "*unexpected*",
               "long",
               "unsigned long",
               "string",
-              "list");
+              "list",
+);
 
 typedef struct _virConfEntry virConfEntry;
 typedef virConfEntry *virConfEntryPtr;
@@ -463,7 +461,7 @@ virConfParseValue(virConfParserCtxtPtr ctxt)
         return NULL;
     }
     if ((CUR == '"') || (CUR == '\'') ||
-         (ctxt->conf->flags & VIR_CONF_FLAG_LXC_FORMAT)) {
+        (ctxt->conf->flags & VIR_CONF_FLAG_LXC_FORMAT)) {
         type = VIR_CONF_STRING;
         str = virConfParseString(ctxt);
         if (str == NULL)
@@ -1428,7 +1426,7 @@ int virConfWalk(virConfPtr conf,
     cur = conf->entries;
     while (cur != NULL) {
         if (cur->name && cur->value &&
-                callback(cur->name, cur->value, opaque) < 0)
+            callback(cur->name, cur->value, opaque) < 0)
             return -1;
         cur = cur->next;
     }

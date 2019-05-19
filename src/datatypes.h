@@ -1,7 +1,7 @@
 /*
  * datatypes.h: management of structs for public data types
  *
- * Copyright (C) 2006-2015 Red Hat, Inc.
+ * Copyright (C) 2006-2019 Red Hat, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,8 +19,8 @@
  *
  */
 
-#ifndef __VIR_DATATYPES_H_
-# define __VIR_DATATYPES_H_
+#ifndef LIBVIRT_DATATYPES_H
+# define LIBVIRT_DATATYPES_H
 
 # include "internal.h"
 
@@ -31,11 +31,13 @@
 
 extern virClassPtr virConnectClass;
 extern virClassPtr virDomainClass;
+extern virClassPtr virDomainCheckpointClass;
 extern virClassPtr virDomainSnapshotClass;
 extern virClassPtr virInterfaceClass;
 extern virClassPtr virNetworkClass;
 extern virClassPtr virNodeDeviceClass;
 extern virClassPtr virNWFilterClass;
+extern virClassPtr virNWFilterBindingClass;
 extern virClassPtr virSecretClass;
 extern virClassPtr virStreamClass;
 extern virClassPtr virStorageVolClass;
@@ -270,6 +272,35 @@ extern virClassPtr virAdmClientClass;
             !virObjectIsClass(_nw->conn, virConnectClass)) { \
             virReportErrorHelper(VIR_FROM_NWFILTER, \
                                  VIR_ERR_INVALID_NWFILTER, \
+                                 __FILE__, __FUNCTION__, __LINE__, \
+                                 __FUNCTION__); \
+            virDispatchError(NULL); \
+            return retval; \
+        } \
+    } while (0)
+
+# define virCheckNWFilterBindingReturn(obj, retval) \
+    do { \
+        virNWFilterBindingPtr _nw = (obj); \
+        if (!virObjectIsClass(_nw, virNWFilterBindingClass) || \
+            !virObjectIsClass(_nw->conn, virConnectClass)) { \
+            virReportErrorHelper(VIR_FROM_NWFILTER, \
+                                 VIR_ERR_INVALID_NWFILTER_BINDING, \
+                                 __FILE__, __FUNCTION__, __LINE__, \
+                                 __FUNCTION__); \
+            virDispatchError(NULL); \
+            return retval; \
+        } \
+    } while (0)
+
+# define virCheckDomainCheckpointReturn(obj, retval) \
+    do { \
+        virDomainCheckpointPtr _check = (obj); \
+        if (!virObjectIsClass(_check, virDomainCheckpointClass) || \
+            !virObjectIsClass(_check->domain, virDomainClass) || \
+            !virObjectIsClass(_check->domain->conn, virConnectClass)) { \
+            virReportErrorHelper(VIR_FROM_DOMAIN_CHECKPOINT, \
+                                 VIR_ERR_INVALID_DOMAIN_CHECKPOINT, \
                                  __FILE__, __FUNCTION__, __LINE__, \
                                  __FUNCTION__); \
             virDispatchError(NULL); \
@@ -650,7 +681,21 @@ struct _virStream {
 
     virStreamDriverPtr driver;
     void *privateData;
+    virFreeCallback ff;
 };
+
+
+/**
+ * _virDomainCheckpoint
+ *
+ * Internal structure associated with a domain checkpoint
+ */
+struct _virDomainCheckpoint {
+    virObject parent;
+    char *name;
+    virDomainPtr domain;
+};
+
 
 /**
  * _virDomainSnapshot
@@ -673,6 +718,19 @@ struct _virNWFilter {
     virConnectPtr conn;                  /* pointer back to the connection */
     char *name;                          /* the network filter external name */
     unsigned char uuid[VIR_UUID_BUFLEN]; /* the network filter unique identifier */
+};
+
+
+/**
+* _virNWFilterBinding:
+*
+* Internal structure associated to a network filter port binding
+*/
+struct _virNWFilterBinding {
+    virObject parent;
+    virConnectPtr conn;                  /* pointer back to the connection */
+    char *portdev;                       /* the network filter port device name */
+    char *filtername;                    /* the network filter name */
 };
 
 
@@ -712,6 +770,11 @@ virStreamPtr virGetStream(virConnectPtr conn);
 virNWFilterPtr virGetNWFilter(virConnectPtr conn,
                               const char *name,
                               const unsigned char *uuid);
+virNWFilterBindingPtr virGetNWFilterBinding(virConnectPtr conn,
+                                            const char *portdev,
+                                            const char *filtername);
+virDomainCheckpointPtr virGetDomainCheckpoint(virDomainPtr domain,
+                                              const char *name);
 virDomainSnapshotPtr virGetDomainSnapshot(virDomainPtr domain,
                                           const char *name);
 
@@ -746,4 +809,4 @@ int virAdmConnectCloseCallbackDataRegister(virAdmConnectCloseCallbackDataPtr cbd
 int virAdmConnectCloseCallbackDataUnregister(virAdmConnectCloseCallbackDataPtr cbdata,
                                              virAdmConnectCloseFunc cb);
 
-#endif /* __VIR_DATATYPES_H__ */
+#endif /* LIBVIRT_DATATYPES_H */

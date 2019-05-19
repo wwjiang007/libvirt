@@ -16,10 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *      Daniel P. Berrange <berrange@redhat.com>
- *      Michal Privoznik <mprivozn@redhat.com>
  */
 
 #include <config.h>
@@ -59,7 +55,7 @@ static int virCloseCallbacksOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(virCloseCallbacks)
+VIR_ONCE_GLOBAL_INIT(virCloseCallbacks);
 
 
 virCloseCallbacksPtr
@@ -342,8 +338,8 @@ virCloseCallbacksRun(virCloseCallbacksPtr closeCallbacks,
         virDomainObjPtr vm;
 
         /* Grab a ref and lock to the vm */
-        if (!(vm = virDomainObjListFindByUUIDRef(domains,
-                                                 list->entries[i].uuid))) {
+        if (!(vm = virDomainObjListFindByUUID(domains,
+                                              list->entries[i].uuid))) {
             char uuidstr[VIR_UUID_STRING_BUFLEN];
             virUUIDFormat(list->entries[i].uuid, uuidstr);
             VIR_DEBUG("No domain object with UUID %s", uuidstr);

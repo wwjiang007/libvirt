@@ -19,24 +19,14 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- * Shuveb Hussain <shuveb@binarykarma.com>
- * Anoop Joe Cyriac <anoop@binarykarma.com>
- *
  */
 
 #include <config.h>
 
 #include <sys/types.h>
 #include <sys/poll.h>
-#include <limits.h>
-#include <string.h>
-#include <stdio.h>
 #include <stdarg.h>
-#include <stdlib.h>
 #include <unistd.h>
-#include <errno.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <pwd.h>
@@ -95,7 +85,7 @@ openvzDomObjFromDomainLocked(struct openvz_driver *driver,
     virDomainObjPtr vm;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
 
-    if (!(vm = virDomainObjListFindByUUIDRef(driver->domains, uuid))) {
+    if (!(vm = virDomainObjListFindByUUID(driver->domains, uuid))) {
         virUUIDFormat(uuid, uuidstr);
 
         virReportError(VIR_ERR_NO_DOMAIN,
@@ -342,7 +332,7 @@ static virDomainPtr openvzDomainLookupByID(virConnectPtr conn,
     virDomainPtr dom = NULL;
 
     openvzDriverLock(driver);
-    vm = virDomainObjListFindByIDRef(driver->domains, id);
+    vm = virDomainObjListFindByID(driver->domains, id);
     openvzDriverUnlock(driver);
 
     if (!vm) {
@@ -529,7 +519,7 @@ static char *openvzDomainGetXMLDesc(virDomainPtr dom, unsigned int flags) {
     virDomainObjPtr vm;
     char *ret = NULL;
 
-    /* Flags checked by virDomainDefFormat */
+    virCheckFlags(VIR_DOMAIN_XML_COMMON_FLAGS, NULL);
 
     if (!(vm = openvzDomObjFromDomain(driver, dom->uuid)))
         return NULL;
@@ -982,8 +972,7 @@ openvzDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int fla
 
  cleanup:
     virDomainDefFree(vmdef);
-    if (vm)
-        virObjectUnlock(vm);
+    virDomainObjEndAPI(&vm);
     openvzDriverUnlock(driver);
     return dom;
 }
@@ -1071,8 +1060,7 @@ openvzDomainCreateXML(virConnectPtr conn, const char *xml,
 
  cleanup:
     virDomainDefFree(vmdef);
-    if (vm)
-        virObjectUnlock(vm);
+    virDomainObjEndAPI(&vm);
     openvzDriverUnlock(driver);
     return dom;
 }
@@ -1151,12 +1139,10 @@ openvzDomainUndefineFlags(virDomainPtr dom,
     if (virRun(prog, NULL) < 0)
         goto cleanup;
 
-    if (virDomainObjIsActive(vm)) {
+    if (virDomainObjIsActive(vm))
         vm->persistent = 0;
-    } else {
+    else
         virDomainObjListRemove(driver->domains, vm);
-        virObjectLock(vm);
-    }
 
     ret = 0;
 
@@ -1651,14 +1637,14 @@ openvzDomainGetBarrierLimit(virDomainPtr domain,
     virSkipSpaces(&tmp);
     if (virStrToLong_ull(tmp, &endp, 10, barrier) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Can't parse limit from "VZLIST" output '%s'"), output);
+                       _("Can't parse limit from vzlist output '%s'"), output);
         goto cleanup;
     }
     tmp = endp;
     virSkipSpaces(&tmp);
     if (virStrToLong_ull(tmp, &endp, 10, limit) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Can't parse barrier from "VZLIST" output '%s'"), output);
+                       _("Can't parse barrier from vzlist output '%s'"), output);
         goto cleanup;
     }
 
@@ -2232,16 +2218,13 @@ openvzDomainMigratePrepare3Params(virConnectPtr dconn,
 
  error:
     virDomainDefFree(def);
-    if (vm) {
+    if (vm)
         virDomainObjListRemove(driver->domains, vm);
-        vm = NULL;
-    }
 
  done:
     VIR_FREE(my_hostname);
     virURIFree(uri);
-    if (vm)
-        virObjectUnlock(vm);
+    virDomainObjEndAPI(&vm);
     return ret;
 }
 
@@ -2396,7 +2379,6 @@ openvzDomainMigrateConfirm3Params(virDomainPtr domain,
     VIR_DEBUG("Domain '%s' successfully migrated", vm->def->name);
 
     virDomainObjListRemove(driver->domains, vm);
-    virObjectLock(vm);
 
     ret = 0;
 

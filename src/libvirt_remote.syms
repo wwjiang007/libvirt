@@ -20,6 +20,7 @@ virNetClientAddStream;
 virNetClientClose;
 virNetClientDupFD;
 virNetClientGetFD;
+virNetClientGetTLSKeySize;
 virNetClientHasPassFD;
 virNetClientIsEncrypted;
 virNetClientIsOpen;
@@ -37,10 +38,10 @@ virNetClientRegisterKeepAlive;
 virNetClientRemoteAddrStringSASL;
 virNetClientRemoveStream;
 virNetClientSendNonBlock;
-virNetClientSendNoReply;
+virNetClientSendStream;
 virNetClientSendWithReply;
-virNetClientSendWithReplyStream;
 virNetClientSetCloseCallback;
+virNetClientSetTLSSession;
 
 
 # rpc/virnetclientprogram.h
@@ -53,6 +54,8 @@ virNetClientProgramNew;
 
 
 # rpc/virnetclientstream.h
+virNetClientStreamCheckSendStatus;
+virNetClientStreamCheckState;
 virNetClientStreamEOF;
 virNetClientStreamEventAddCallback;
 virNetClientStreamEventRemoveCallback;
@@ -60,7 +63,6 @@ virNetClientStreamEventUpdateCallback;
 virNetClientStreamMatches;
 virNetClientStreamNew;
 virNetClientStreamQueuePacket;
-virNetClientStreamRaiseError;
 virNetClientStreamRecvHole;
 virNetClientStreamRecvPacket;
 virNetClientStreamSendHole;
@@ -130,6 +132,7 @@ virNetServerProcessClients;
 virNetServerSetClientAuthenticated;
 virNetServerSetClientLimits;
 virNetServerSetThreadPoolParameters;
+virNetServerSetTLSContext;
 virNetServerStart;
 virNetServerUpdateServices;
 
@@ -148,8 +151,11 @@ virNetServerClientGetPrivateData;
 virNetServerClientGetReadonly;
 virNetServerClientGetSELinuxContext;
 virNetServerClientGetTimestamp;
+virNetServerClientGetTLSKeySize;
+virNetServerClientGetTLSSession;
 virNetServerClientGetTransport;
 virNetServerClientGetUNIXIdentity;
+virNetServerClientHasTLSSession;
 virNetServerClientImmediateClose;
 virNetServerClientInit;
 virNetServerClientInitKeepAlive;
@@ -170,6 +176,7 @@ virNetServerClientSetAuthLocked;
 virNetServerClientSetAuthPendingLocked;
 virNetServerClientSetCloseHook;
 virNetServerClientSetDispatcher;
+virNetServerClientSetQuietEOF;
 virNetServerClientSetReadonly;
 virNetServerClientStartKeepAlive;
 virNetServerClientWantCloseLocked;
@@ -207,6 +214,7 @@ virNetServerServiceClose;
 virNetServerServiceGetAuth;
 virNetServerServiceGetMaxRequests;
 virNetServerServiceGetPort;
+virNetServerServiceGetTLSContext;
 virNetServerServiceIsReadonly;
 virNetServerServiceNewFD;
 virNetServerServiceNewFDOrUNIX;
@@ -253,8 +261,26 @@ virNetSocketRemoteAddrStringURI;
 virNetSocketRemoveIOCallback;
 virNetSocketSendFD;
 virNetSocketSetBlocking;
+virNetSocketSetTLSSession;
 virNetSocketUpdateIOCallback;
 virNetSocketWrite;
+
+
+# rpc/virnettlscontext.h
+virNetTLSContextCheckCertificate;
+virNetTLSContextNewClient;
+virNetTLSContextNewClientPath;
+virNetTLSContextNewServer;
+virNetTLSContextNewServerPath;
+virNetTLSInit;
+virNetTLSSessionGetHandshakeStatus;
+virNetTLSSessionGetKeySize;
+virNetTLSSessionGetX509DName;
+virNetTLSSessionHandshake;
+virNetTLSSessionNew;
+virNetTLSSessionRead;
+virNetTLSSessionSetIOCallbacks;
+virNetTLSSessionWrite;
 
 
 # Let emacs know we want case-insensitive sorting

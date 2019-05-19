@@ -14,13 +14,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library;  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
 
-#include <stdlib.h>
 
 #include "testutils.h"
 
@@ -86,7 +83,8 @@ static int testKeycodeStrings(const void *data ATTRIBUTE_UNUSED)
 
     TRANSLATE(LINUX, "KEY_DELETE", 111);
     TRANSLATE(LINUX, "KEY_RFKILL", 524);
-    TRANSLATE(LINUX, "KEY_WIBBLE", -1);
+    TRANSLATE(LINUX, "KEY_WIBBLE",
+              -1);
     TRANSLATE(OSX, "Function", 0x3f);
     TRANSLATE(WIN32, "VK_UP", 0x26);
 

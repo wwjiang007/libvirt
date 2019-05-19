@@ -17,8 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -51,6 +49,7 @@ struct _virNetServer {
 
     char *name;
 
+    /* Immutable pointer, self-locking APIs */
     virThreadPoolPtr workers;
 
     char *mdnsGroupName;
@@ -73,9 +72,7 @@ struct _virNetServer {
     int keepaliveInterval;
     unsigned int keepaliveCount;
 
-#ifdef WITH_GNUTLS
     virNetTLSContextPtr tls;
-#endif
 
     virNetServerClientPrivNew clientPrivNew;
     virNetServerClientPrivPreExecRestart clientPrivPreExecRestart;
@@ -99,7 +96,7 @@ static int virNetServerOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(virNetServer)
+VIR_ONCE_GLOBAL_INIT(virNetServer);
 
 unsigned long long virNetServerNextClientID(virNetServerPtr srv)
 {
@@ -179,9 +176,11 @@ static void virNetServerHandleJob(void *jobOpaque, void *opaque)
     VIR_FREE(job);
 }
 
-static void virNetServerDispatchNewMessage(virNetServerClientPtr client,
-                                           virNetMessagePtr msg,
-                                           void *opaque)
+
+static void
+virNetServerDispatchNewMessage(virNetServerClientPtr client,
+                               virNetMessagePtr msg,
+                               void *opaque)
 {
     virNetServerPtr srv = opaque;
     virNetServerProgramPtr prog = NULL;
@@ -198,8 +197,13 @@ static void virNetServerDispatchNewMessage(virNetServerClientPtr client,
             break;
         }
     }
+    /* we can unlock @srv since @prog can only become invalid in case
+     * of disposing @srv, but let's grab a ref first to ensure nothing
+     * disposes of it before we use it. */
+    virObjectRef(srv);
+    virObjectUnlock(srv);
 
-    if (srv->workers) {
+    if (virThreadPoolGetMaxWorkers(srv->workers) > 0)  {
         virNetServerJobPtr job;
 
         if (VIR_ALLOC(job) < 0)
@@ -225,14 +229,15 @@ static void virNetServerDispatchNewMessage(virNetServerClientPtr client,
             goto error;
     }
 
-    virObjectUnlock(srv);
+    virObjectUnref(srv);
     return;
 
  error:
     virNetMessageFree(msg);
     virNetServerClientClose(client);
-    virObjectUnlock(srv);
+    virObjectUnref(srv);
 }
+
 
 /**
  * virNetServerCheckLimits:
@@ -320,9 +325,7 @@ static int virNetServerDispatchNewClient(virNetServerServicePtr svc,
                                          virNetServerServiceGetAuth(svc),
                                          virNetServerServiceIsReadonly(svc),
                                          virNetServerServiceGetMaxRequests(svc),
-#if WITH_GNUTLS
                                          virNetServerServiceGetTLSContext(svc),
-#endif
                                          srv->clientPrivNew,
                                          srv->clientPrivPreExecRestart,
                                          srv->clientPrivFree,
@@ -362,8 +365,7 @@ virNetServerPtr virNetServerNew(const char *name,
     if (!(srv = virObjectLockableNew(virNetServerClass)))
         return NULL;
 
-    if (max_workers &&
-        !(srv->workers = virThreadPoolNew(min_workers, max_workers,
+    if (!(srv->workers = virThreadPoolNew(min_workers, max_workers,
                                           priority_workers,
                                           virNetServerHandleJob,
                                           srv)))
@@ -411,7 +413,6 @@ virNetServerPtr virNetServerNewPostExecRestart(virJSONValuePtr object,
     virJSONValuePtr clients;
     virJSONValuePtr services;
     size_t i;
-    ssize_t n;
     unsigned int min_workers;
     unsigned int max_workers;
     unsigned int priority_workers;
@@ -492,14 +493,13 @@ virNetServerPtr virNetServerNewPostExecRestart(virJSONValuePtr object,
         goto error;
     }
 
-    n =  virJSONValueArraySize(services);
-    if (n < 0) {
+    if (!virJSONValueIsArray(services)) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Malformed services data in JSON document"));
+                       _("Malformed services array"));
         goto error;
     }
 
-    for (i = 0; i < n; i++) {
+    for (i = 0; i < virJSONValueArraySize(services); i++) {
         virNetServerServicePtr service;
         virJSONValuePtr child = virJSONValueArrayGet(services, i);
         if (!child) {
@@ -525,14 +525,13 @@ virNetServerPtr virNetServerNewPostExecRestart(virJSONValuePtr object,
         goto error;
     }
 
-    n =  virJSONValueArraySize(clients);
-    if (n < 0) {
+    if (!virJSONValueIsArray(clients)) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Malformed clients data in JSON document"));
+                       _("Malformed clients array"));
         goto error;
     }
 
-    for (i = 0; i < n; i++) {
+    for (i = 0; i < virJSONValueArraySize(clients); i++) {
         virNetServerClientPtr client;
         virJSONValuePtr child = virJSONValueArrayGet(clients, i);
         if (!child) {
@@ -577,21 +576,18 @@ virJSONValuePtr virNetServerPreExecRestart(virNetServerPtr srv)
         goto error;
 
     if (virJSONValueObjectAppendNumberUint(object, "min_workers",
-                                           srv->workers == NULL ? 0 :
                                            virThreadPoolGetMinWorkers(srv->workers)) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Cannot set min_workers data in JSON document"));
         goto error;
     }
     if (virJSONValueObjectAppendNumberUint(object, "max_workers",
-                                           srv->workers == NULL ? 0 :
                                            virThreadPoolGetMaxWorkers(srv->workers)) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Cannot set max_workers data in JSON document"));
         goto error;
     }
     if (virJSONValueObjectAppendNumberUint(object, "priority_workers",
-                                           srv->workers == NULL ? 0 :
                                            virThreadPoolGetPriorityWorkers(srv->workers)) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Cannot set priority_workers data in JSON document"));
@@ -633,7 +629,9 @@ virJSONValuePtr virNetServerPreExecRestart(virNetServerPtr srv)
         goto error;
     }
 
-    services = virJSONValueNewArray();
+    if (!(services = virJSONValueNewArray()))
+        goto error;
+
     if (virJSONValueObjectAppend(object, "services", services) < 0) {
         virJSONValueFree(services);
         goto error;
@@ -650,7 +648,9 @@ virJSONValuePtr virNetServerPreExecRestart(virNetServerPtr srv)
         }
     }
 
-    clients = virJSONValueNewArray();
+    if (!(clients = virJSONValueNewArray()))
+        goto error;
+
     if (virJSONValueObjectAppend(object, "clients", clients) < 0) {
         virJSONValueFree(clients);
         goto error;
@@ -731,14 +731,12 @@ int virNetServerAddProgram(virNetServerPtr srv,
     return -1;
 }
 
-#if WITH_GNUTLS
 int virNetServerSetTLSContext(virNetServerPtr srv,
                               virNetTLSContextPtr tls)
 {
     srv->tls = virObjectRef(tls);
     return 0;
 }
-#endif
 
 
 /**

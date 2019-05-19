@@ -128,20 +128,6 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
 
     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
 
-    /* Require server part */
-    if (conn->uri->server == NULL) {
-        virReportError(VIR_ERR_INVALID_ARG, "%s",
-                       _("URI is missing the server part"));
-        return VIR_DRV_OPEN_ERROR;
-    }
-
-    /* Require auth */
-    if (auth == NULL || auth->cb == NULL) {
-        virReportError(VIR_ERR_INVALID_ARG, "%s",
-                       _("Missing or invalid auth pointer"));
-        return VIR_DRV_OPEN_ERROR;
-    }
-
     /* Allocate per-connection private data */
     if (VIR_ALLOC(priv) < 0)
         goto cleanup;
@@ -166,21 +152,15 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
         if (VIR_STRDUP(username, conn->uri->user) < 0)
             goto cleanup;
     } else {
-        username = virAuthGetUsername(conn, auth, "hyperv", "administrator", conn->uri->server);
-
-        if (username == NULL) {
-            virReportError(VIR_ERR_AUTH_FAILED, "%s", _("Username request failed"));
+        if (!(username = virAuthGetUsername(conn, auth, "hyperv",
+                                            "administrator",
+                                            conn->uri->server)))
             goto cleanup;
-        }
     }
 
-    password = virAuthGetPassword(conn, auth, "hyperv", username, conn->uri->server);
-
-    if (password == NULL) {
-        virReportError(VIR_ERR_AUTH_FAILED, "%s", _("Password request failed"));
+    if (!(password = virAuthGetPassword(conn, auth, "hyperv", username,
+                                        conn->uri->server)))
         goto cleanup;
-    }
-
 
     if (hypervInitConnection(conn, priv, username, password) < 0)
         goto cleanup;
@@ -314,8 +294,7 @@ hypervNodeGetInfo(virConnectPtr conn, virNodeInfoPtr info)
     }
 
     /* Fill struct */
-    if (virStrncpy(info->model, processorList->data.common->Name,
-                   sizeof(info->model) - 1, sizeof(info->model)) == NULL) {
+    if (virStrcpyStatic(info->model, processorList->data.common->Name) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("CPU model %s too long for destination"),
                        processorList->data.common->Name);
@@ -775,7 +754,7 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     Msvm_ProcessorSettingData *processorSettingData = NULL;
     Msvm_MemorySettingData *memorySettingData = NULL;
 
-    /* Flags checked by virDomainDefFormat */
+    virCheckFlags(VIR_DOMAIN_XML_COMMON_FLAGS, NULL);
 
     if (!(def = virDomainDefNew()))
         goto cleanup;
@@ -1466,8 +1445,8 @@ hypervDomainSendKey(virDomainPtr domain, unsigned int codeset,
  cleanup:
     VIR_FREE(translatedKeycodes);
     VIR_FREE(selector);
-    hypervFreeObject(priv, (hypervObject *) keyboard);
-    hypervFreeObject(priv, (hypervObject *) computerSystem);
+    hypervFreeObject(priv, (hypervObject *)keyboard);
+    hypervFreeObject(priv, (hypervObject *)computerSystem);
     virBufferFreeAndReset(&query);
     return result;
 }
@@ -1572,8 +1551,8 @@ hypervDomainSetMemoryFlags(virDomainPtr domain, unsigned long memory,
     virBufferFreeAndReset(&eprQuery);
  cleanup:
     VIR_FREE(memory_str);
-    hypervFreeObject(priv, (hypervObject *) vssd);
-    hypervFreeObject(priv, (hypervObject *) memsd);
+    hypervFreeObject(priv, (hypervObject *)vssd);
+    hypervFreeObject(priv, (hypervObject *)memsd);
     return result;
 }
 
@@ -1662,6 +1641,7 @@ hypervDebugHandler(const char *message, debug_level_e level,
 
 
 static virConnectDriver hypervConnectDriver = {
+    .remoteOnly = true,
     .uriSchemes = (const char *[]){ "hyperv", NULL },
     .hypervisorDriver = &hypervHypervisorDriver,
 };

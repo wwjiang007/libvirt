@@ -19,14 +19,15 @@
  *
  */
 
-#ifndef __VIR_PROCESS_H__
-# define __VIR_PROCESS_H__
+#ifndef LIBVIRT_VIRPROCESS_H
+# define LIBVIRT_VIRPROCESS_H
 
 # include <sys/types.h>
 
 # include "internal.h"
 # include "virbitmap.h"
 # include "virutil.h"
+# include "virenum.h"
 
 typedef enum {
     VIR_PROC_POLICY_NONE = 0,
@@ -55,6 +56,9 @@ virProcessWait(pid_t pid, int *exitstatus, bool raw)
 int virProcessKill(pid_t pid, int sig);
 
 int virProcessKillPainfully(pid_t pid, bool force);
+int virProcessKillPainfullyDelay(pid_t pid,
+                                 bool force,
+                                 unsigned int extradelay);
 
 int virProcessSetAffinity(pid_t pid, virBitmapPtr map);
 
@@ -90,6 +94,22 @@ int virProcessRunInMountNamespace(pid_t pid,
                                   virProcessNamespaceCallback cb,
                                   void *opaque);
 
+/**
+ * virProcessForkCallback:
+ * @ppid: parent's pid
+ * @opaque: opaque data
+ *
+ * Callback to run in fork()-ed process.
+ *
+ * Returns: 0 on success,
+ *         -1 on error (treated as EXIT_CANCELED)
+ */
+typedef int (*virProcessForkCallback)(pid_t ppid,
+                                      void *opaque);
+
+int virProcessRunInFork(virProcessForkCallback cb,
+                        void *opaque);
+
 int virProcessSetupPrivateMountNS(void);
 
 int virProcessSetScheduler(pid_t pid,
@@ -106,4 +126,4 @@ typedef enum {
 
 int virProcessNamespaceAvailable(unsigned int ns);
 
-#endif /* __VIR_PROCESS_H__ */
+#endif /* LIBVIRT_VIRPROCESS_H */

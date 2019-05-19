@@ -17,8 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -61,7 +59,7 @@ qemuParseDriveURIString(virDomainDiskDefPtr def, virURIPtr uri,
     char *sock = NULL;
     char *volimg = NULL;
     char *secret = NULL;
-    virStorageAuthDefPtr authdef = NULL;
+    VIR_AUTOPTR(virStorageAuthDef) authdef = NULL;
 
     if (VIR_ALLOC(def->src->hosts) < 0)
         goto error;
@@ -135,8 +133,7 @@ qemuParseDriveURIString(virDomainDiskDefPtr def, virURIPtr uri,
             if (VIR_STRDUP(authdef->secrettype, secrettype) < 0)
                 goto error;
         }
-        def->src->auth = authdef;
-        authdef = NULL;
+        VIR_STEAL_PTR(def->src->auth, authdef);
 
         /* Cannot formulate a secretType (eg, usage or uuid) given
          * what is provided.
@@ -154,7 +151,6 @@ qemuParseDriveURIString(virDomainDiskDefPtr def, virURIPtr uri,
  error:
     virStorageNetHostDefClear(def->src->hosts);
     VIR_FREE(def->src->hosts);
-    virStorageAuthDefFree(authdef);
     goto cleanup;
 }
 
@@ -1113,8 +1109,9 @@ qemuParseCommandLineNet(virDomainXMLOptionPtr xmlopt,
                 goto error;
             }
         } else if (STREQ(keywords[i], "model")) {
-            def->model = values[i];
-            values[i] = NULL;
+            if (virDomainNetSetModelString(def, values[i]) < 0)
+                goto error;
+            VIR_FREE(values[i]);
         } else if (STREQ(keywords[i], "vhost")) {
             if ((values[i] == NULL) || STREQ(values[i], "on")) {
                 def->driver.virtio.name = VIR_DOMAIN_NET_BACKEND_TYPE_VHOST;
@@ -1536,6 +1533,11 @@ qemuParseCommandLineCPU(virDomainDefPtr dom,
             case VIR_DOMAIN_HYPERV_SYNIC:
             case VIR_DOMAIN_HYPERV_STIMER:
             case VIR_DOMAIN_HYPERV_RESET:
+            case VIR_DOMAIN_HYPERV_FREQUENCIES:
+            case VIR_DOMAIN_HYPERV_REENLIGHTENMENT:
+            case VIR_DOMAIN_HYPERV_TLBFLUSH:
+            case VIR_DOMAIN_HYPERV_IPI:
+            case VIR_DOMAIN_HYPERV_EVMCS:
                 if (value) {
                     virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                                    _("HyperV feature '%s' should not "
@@ -1826,7 +1828,8 @@ qemuParseCommandLineBootDevs(virDomainDefPtr def, const char *str)
  * as is practical. This is not an exact science....
  */
 static virDomainDefPtr
-qemuParseCommandLine(virCapsPtr caps,
+qemuParseCommandLine(virFileCachePtr capsCache,
+                     virCapsPtr caps,
                      virDomainXMLOptionPtr xmlopt,
                      char **progenv,
                      char **progargv,
@@ -1834,7 +1837,7 @@ qemuParseCommandLine(virCapsPtr caps,
                      virDomainChrSourceDefPtr *monConfig,
                      bool *monJSON)
 {
-    virDomainDefPtr def;
+    virDomainDefPtr def = NULL;
     size_t i;
     bool nographics = false;
     bool fullscreen = false;
@@ -1848,6 +1851,7 @@ qemuParseCommandLine(virCapsPtr caps,
     virDomainDiskDefPtr disk = NULL;
     const char *ceph_args = qemuFindEnv(progenv, "CEPH_ARGS");
     bool have_sdl = false;
+    virQEMUCapsPtr qemuCaps = NULL;
 
     if (pidfile)
         *pidfile = NULL;
@@ -1861,6 +1865,9 @@ qemuParseCommandLine(virCapsPtr caps,
                        "%s", _("no emulator path found"));
         return NULL;
     }
+
+    if (!(qemuCaps = virQEMUCapsCacheLookup(capsCache, progargv[0])))
+        goto error;
 
     if (!(def = virDomainDefNew()))
         goto error;
@@ -2014,17 +2021,18 @@ qemuParseCommandLine(virCapsPtr caps,
     /* If no machine type has been found among the arguments, then figure
      * out a reasonable value by using capabilities */
     if (!def->os.machine) {
-        virCapsDomainDataPtr capsdata;
+        const char *mach = virQEMUCapsGetDefaultMachine(qemuCaps);
 
-        if (!(capsdata = virCapabilitiesDomainDataLookup(caps, def->os.type,
-                def->os.arch, def->virtType, NULL, NULL)))
-            goto error;
-
-        if (VIR_STRDUP(def->os.machine, capsdata->machinetype) < 0) {
-            VIR_FREE(capsdata);
+        if (!mach) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                           _("Binary '%s' does not have a default machine type "
+                             "and no '-machine' arg is present"),
+                           progargv[0]);
             goto error;
         }
-        VIR_FREE(capsdata);
+
+        if (VIR_STRDUP(def->os.machine, mach) < 0)
+            goto error;
     }
 
     /* Now the real processing loop */
@@ -2488,7 +2496,7 @@ qemuParseCommandLine(virCapsPtr caps,
                     goto error;
 
                 if (qemuParseCommandLineChr(chr, val) < 0) {
-                    virDomainChrSourceDefFree(chr);
+                    virObjectUnref(chr);
                     goto error;
                 }
 
@@ -2715,6 +2723,7 @@ qemuParseCommandLine(virCapsPtr caps,
     else
         qemuDomainCmdlineDefFree(cmd);
 
+    virObjectUnref(qemuCaps);
     return def;
 
  error:
@@ -2724,16 +2733,18 @@ qemuParseCommandLine(virCapsPtr caps,
     virStringListFree(list);
     VIR_FREE(nics);
     if (monConfig) {
-        virDomainChrSourceDefFree(*monConfig);
+        virObjectUnref(*monConfig);
         *monConfig = NULL;
     }
     if (pidfile)
         VIR_FREE(*pidfile);
+    virObjectUnref(qemuCaps);
     return NULL;
 }
 
 
-virDomainDefPtr qemuParseCommandLineString(virCapsPtr caps,
+virDomainDefPtr qemuParseCommandLineString(virFileCachePtr capsCache,
+                                           virCapsPtr caps,
                                            virDomainXMLOptionPtr xmlopt,
                                            const char *args,
                                            char **pidfile,
@@ -2747,7 +2758,7 @@ virDomainDefPtr qemuParseCommandLineString(virCapsPtr caps,
     if (qemuStringToArgvEnv(args, &progenv, &progargv) < 0)
         goto cleanup;
 
-    def = qemuParseCommandLine(caps, xmlopt, progenv, progargv,
+    def = qemuParseCommandLine(capsCache, caps, xmlopt, progenv, progargv,
                                pidfile, monConfig, monJSON);
 
  cleanup:
@@ -2805,7 +2816,8 @@ static int qemuParseProcFileStrings(int pid_value,
     return ret;
 }
 
-virDomainDefPtr qemuParseCommandLinePid(virCapsPtr caps,
+virDomainDefPtr qemuParseCommandLinePid(virFileCachePtr capsCache,
+                                        virCapsPtr caps,
                                         virDomainXMLOptionPtr xmlopt,
                                         pid_t pid,
                                         char **pidfile,
@@ -2820,22 +2832,22 @@ virDomainDefPtr qemuParseCommandLinePid(virCapsPtr caps,
 
     /* The parser requires /proc/pid, which only exists on platforms
      * like Linux where pid_t fits in int.  */
-    if ((int) pid != pid ||
+    if ((int)pid != pid ||
         qemuParseProcFileStrings(pid, "cmdline", &progargv) < 0 ||
         qemuParseProcFileStrings(pid, "environ", &progenv) < 0)
         goto cleanup;
 
-    if (!(def = qemuParseCommandLine(caps, xmlopt, progenv, progargv,
+    if (!(def = qemuParseCommandLine(capsCache, caps, xmlopt, progenv, progargv,
                                      pidfile, monConfig, monJSON)))
         goto cleanup;
 
-    if (virAsprintf(&exepath, "/proc/%d/exe", (int) pid) < 0)
+    if (virAsprintf(&exepath, "/proc/%d/exe", (int)pid) < 0)
         goto cleanup;
 
     if (virFileResolveLink(exepath, &emulator) < 0) {
         virReportSystemError(errno,
                              _("Unable to resolve %s for pid %u"),
-                             exepath, (int) pid);
+                             exepath, (int)pid);
         goto cleanup;
     }
     VIR_FREE(def->emulator);

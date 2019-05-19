@@ -24,9 +24,7 @@
         </choice>
       </attribute>
       <interleave>
-        <zeroOrMore>
-          <ref name='secret'/>
-        </zeroOrMore>
+        <ref name='secret'/>
         <optional>
           <element name='cipher'>
             <ref name='keycipher'/>
@@ -36,6 +34,64 @@
           </element>
         </optional>
       </interleave>
+    </element>
+  </define>
+
+  <define name='initiatorinfo'>
+    <element name='initiator'>
+      <element name='iqn'>
+        <attribute name='name'>
+          <text/>
+        </attribute>
+        <empty/>
+      </element>
+    </element>
+  </define>
+
+  <define name="reconnect">
+    <element name="reconnect">
+      <attribute name="enabled">
+        <ref name="virYesNo"/>
+      </attribute>
+      <optional>
+        <attribute name="timeout">
+          <ref name="unsignedInt"/>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name='unixSocketSource'>
+    <element name="source">
+      <attribute name="type">
+        <value>unix</value>
+      </attribute>
+      <attribute name="path">
+        <ref name="absFilePath"/>
+      </attribute>
+      <attribute name="mode">
+        <choice>
+          <value>server</value>
+          <value>client</value>
+        </choice>
+      </attribute>
+      <optional>
+         <ref name="reconnect"/>
+      </optional>
+      <empty/>
+    </element>
+  </define>
+
+  <define name='reservations'>
+    <element name='reservations'>
+      <optional>
+        <attribute name='managed'>
+          <ref name='virYesNo'/>
+        </attribute>
+      </optional>
+      <optional>
+        <ref name='unixSocketSource'/>
+      </optional>
     </element>
   </define>
 
@@ -178,6 +234,13 @@
         <text/>
       </attribute>
     </optional>
+  </define>
+
+  <define name='refreshVolumeAllocation'>
+    <choice>
+      <value>default</value>
+      <value>capacity</value>
+    </choice>
   </define>
 
 </grammar>

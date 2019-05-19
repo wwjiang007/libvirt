@@ -26,6 +26,7 @@
 #include "testutilsqemu.h"
 #include "qemumonitortestutils.h"
 #include "qemu/qemu_migration_params.h"
+#define LIBVIRT_QEMU_MIGRATION_PARAMSPRIV_H_ALLOW
 #include "qemu/qemu_migration_paramspriv.h"
 #include "qemu/qemu_monitor.h"
 
@@ -204,7 +205,7 @@ mymain(void)
     int ret = 0;
 
 #if !WITH_YAJL
-    fputs("libvirt not compiled with yajl, skipping this test\n", stderr);
+    fputs("libvirt not compiled with JSON support, skipping this test\n", stderr);
     return EXIT_AM_SKIP;
 #endif
 

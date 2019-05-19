@@ -17,23 +17,18 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Jim Fehlig <jfehlig@suse.com>
  */
 
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
-#include <string.h>
 
 #include <sys/types.h>
 #include <fcntl.h>
 
 #include "testutils.h"
 
-#if defined(WITH_LIBXL) && defined(WITH_YAJL) && defined(HAVE_LIBXL_DOMAIN_CONFIG_FROM_JSON)
+#if defined(WITH_LIBXL) && defined(WITH_YAJL)
 
 # include "internal.h"
 # include "viralloc.h"
@@ -46,7 +41,6 @@
 
 # define VIR_FROM_THIS VIR_FROM_LIBXL
 
-static const char *abs_top_srcdir;
 static virCapsPtr caps;
 
 static int
@@ -65,13 +59,13 @@ testCompareXMLToDomConfig(const char *xmlfile,
     char *tempjson = NULL;
     char *expectjson = NULL;
 
-    libxl_domain_config_init(&actualconfig);
-    libxl_domain_config_init(&expectconfig);
-
     if (!(cfg = libxlDriverConfigNew()))
-        goto cleanup;
+        return -1;
 
     cfg->caps = caps;
+
+    libxl_domain_config_init(&actualconfig);
+    libxl_domain_config_init(&expectconfig);
 
     if (!(log = (xentoollog_logger *)xtl_createlogger_stdiostream(stderr, XTL_DEBUG, 0)))
         goto cleanup;
@@ -104,7 +98,9 @@ testCompareXMLToDomConfig(const char *xmlfile,
         goto cleanup;
     }
 
-    virTestLoadFile(jsonfile, &tempjson);
+    if (virTestLoadFile(jsonfile, &tempjson) < 0)
+        goto cleanup;
+
     if (libxl_domain_config_from_json(cfg->ctx, &expectconfig, tempjson) != 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        "Failed to create libxl_domain_config from JSON doc");
@@ -175,10 +171,6 @@ mymain(void)
 {
     int ret = 0;
 
-    abs_top_srcdir = getenv("abs_top_srcdir");
-    if (!abs_top_srcdir)
-        abs_top_srcdir = abs_srcdir "/..";
-
     /* Set the timezone because we are mocking the time() function.
      * If we don't do that, then localtime() may return unpredictable
      * results. In order to detect things that just work by a blind
@@ -204,17 +196,32 @@ mymain(void)
 
     DO_TEST("basic-pv");
     DO_TEST("basic-hvm");
+# ifdef HAVE_XEN_PVH
+    DO_TEST("basic-pvh");
+# endif
     DO_TEST("cpu-shares-hvm");
     DO_TEST("variable-clock-hvm");
     DO_TEST("moredevs-hvm");
-    DO_TEST("vnuma-hvm");
     DO_TEST("multiple-ip");
+
+# ifdef LIBXL_HAVE_BUILDINFO_NESTED_HVM
+    DO_TEST("vnuma-hvm");
     DO_TEST("fullvirt-cpuid");
+# else
+    DO_TEST("vnuma-hvm-legacy-nest");
+    DO_TEST("fullvirt-cpuid-legacy-nest");
+# endif
+
+# ifdef LIBXL_HAVE_BUILDINFO_GRANT_LIMITS
+    DO_TEST("max-gntframes-hvm");
+# endif
+
+    unlink("libxl-driver.log");
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/virmocklibxl.so")
+VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/libxlmock.so")
 
 #else
 
@@ -223,4 +230,4 @@ int main(void)
     return EXIT_AM_SKIP;
 }
 
-#endif /* WITH_LIBXL && WITH_YAJL && HAVE_LIBXL_DOMAIN_CONFIG_FROM_JSON */
+#endif /* WITH_LIBXL && WITH_YAJL */

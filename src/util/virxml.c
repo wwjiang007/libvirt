@@ -16,17 +16,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Daniel Veillard <veillard@redhat.com>
  */
 
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <stdarg.h>
-#include <limits.h>
 #include <math.h>               /* for isnan() */
 #include <sys/stat.h>
 
@@ -708,7 +702,7 @@ catchXMLError(void *ctx, const char *msg ATTRIBUTE_UNUSED, ...)
 
     /* conditions for error printing */
     if (!ctxt ||
-        (virGetLastError() != NULL) ||
+        (virGetLastErrorCode()) ||
         ctxt->input == NULL ||
         ctxt->lastError.level != XML_ERR_FATAL ||
         ctxt->lastError.message == NULL)
@@ -845,9 +839,10 @@ virXMLParseHelper(int domcode,
     xmlFreeDoc(xml);
     xml = NULL;
 
-    if (virGetLastError() == NULL) {
+    if (virGetLastErrorCode() == VIR_ERR_OK) {
         virGenericReportError(domcode, VIR_ERR_XML_ERROR,
-                              "%s", _("failed to parse xml document"));
+                              _("failed to parse xml document '%s'"),
+                              filename ? filename : "[inline data]");
     }
     goto cleanup;
 }
@@ -1255,7 +1250,7 @@ virXMLValidatorInit(const char *schemafile)
         goto error;
 
     if (!(validator->rngParser =
-              xmlRelaxNGNewParserCtxt(validator->schemafile))) {
+          xmlRelaxNGNewParserCtxt(validator->schemafile))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Unable to create RNG parser for %s"),
                        validator->schemafile);
@@ -1362,6 +1357,8 @@ virXMLValidatorFree(virXMLValidatorPtr validator)
  * @childBuf are NULL or are empty buffers the element is not
  * formatted.
  *
+ * Both passed buffers are always consumed and freed.
+ *
  * Returns 0 on success, -1 on error.
  */
 int
@@ -1370,15 +1367,16 @@ virXMLFormatElement(virBufferPtr buf,
                     virBufferPtr attrBuf,
                     virBufferPtr childBuf)
 {
+    int ret = -1;
+
     if ((!attrBuf || virBufferUse(attrBuf) == 0) &&
         (!childBuf || virBufferUse(childBuf) == 0)) {
         return 0;
     }
 
     if ((attrBuf && virBufferCheckError(attrBuf) < 0) ||
-        (childBuf && virBufferCheckError(childBuf) < 0)) {
-        return -1;
-    }
+        (childBuf && virBufferCheckError(childBuf) < 0))
+        goto cleanup;
 
     virBufferAsprintf(buf, "<%s", name);
 
@@ -1393,5 +1391,20 @@ virXMLFormatElement(virBufferPtr buf,
         virBufferAddLit(buf, "/>\n");
     }
 
-    return 0;
+    ret = 0;
+
+ cleanup:
+    virBufferFreeAndReset(attrBuf);
+    virBufferFreeAndReset(childBuf);
+    return ret;
+}
+
+
+void
+virXPathContextNodeRestore(virXPathContextNodeSavePtr save)
+{
+    if (!save->ctxt)
+        return;
+
+    save->ctxt->node = save->node;
 }

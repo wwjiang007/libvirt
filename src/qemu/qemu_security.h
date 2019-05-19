@@ -16,15 +16,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Michal Privoznik <mprivozn@redhat.com>
  */
 
-#ifndef __QEMU_SECURITY_H__
-# define __QEMU_SECURITY_H__
+#ifndef LIBVIRT_QEMU_SECURITY_H
+# define LIBVIRT_QEMU_SECURITY_H
 
-# include <stdbool.h>
 
 # include "qemu_conf.h"
 # include "domain_conf.h"
@@ -38,21 +34,15 @@ void qemuSecurityRestoreAllLabel(virQEMUDriverPtr driver,
                                  virDomainObjPtr vm,
                                  bool migrated);
 
-int qemuSecuritySetDiskLabel(virQEMUDriverPtr driver,
-                             virDomainObjPtr vm,
-                             virDomainDiskDefPtr disk);
-
-int qemuSecurityRestoreDiskLabel(virQEMUDriverPtr driver,
-                                 virDomainObjPtr vm,
-                                 virDomainDiskDefPtr disk);
-
 int qemuSecuritySetImageLabel(virQEMUDriverPtr driver,
                               virDomainObjPtr vm,
-                              virStorageSourcePtr src);
+                              virStorageSourcePtr src,
+                              bool backingChain);
 
 int qemuSecurityRestoreImageLabel(virQEMUDriverPtr driver,
                                   virDomainObjPtr vm,
-                                  virStorageSourcePtr src);
+                                  virStorageSourcePtr src,
+                                  bool backingChain);
 
 int qemuSecuritySetHostdevLabel(virQEMUDriverPtr driver,
                                 virDomainObjPtr vm,
@@ -84,12 +74,35 @@ int qemuSecurityRestoreChardevLabel(virQEMUDriverPtr driver,
                                     virDomainObjPtr vm,
                                     virDomainChrDefPtr chr);
 
+int qemuSecurityStartTPMEmulator(virQEMUDriverPtr driver,
+                                 virDomainObjPtr vm,
+                                 virCommandPtr cmd,
+                                 uid_t uid,
+                                 gid_t gid,
+                                 int *exitstatus,
+                                 int *cmdret);
+
+void qemuSecurityCleanupTPMEmulator(virQEMUDriverPtr driver,
+                                    virDomainObjPtr vm);
+
+int qemuSecurityDomainSetPathLabel(virQEMUDriverPtr driver,
+                                   virDomainObjPtr vm,
+                                   const char *path,
+                                   bool allowSubtree);
+
+int qemuSecuritySetSavedStateLabel(virQEMUDriverPtr driver,
+                                   virDomainObjPtr vm,
+                                   const char *savefile);
+
+int qemuSecurityRestoreSavedStateLabel(virQEMUDriverPtr driver,
+                                       virDomainObjPtr vm,
+                                       const char *savefile);
+
 /* Please note that for these APIs there is no wrapper yet. Do NOT blindly add
- * new APIs here. If an API can touch a /dev file add a proper wrapper instead.
+ * new APIs here. If an API can touch a file add a proper wrapper instead.
  */
 # define qemuSecurityCheckAllLabel virSecurityManagerCheckAllLabel
 # define qemuSecurityClearSocketLabel virSecurityManagerClearSocketLabel
-# define qemuSecurityDomainSetPathLabel virSecurityManagerDomainSetPathLabel
 # define qemuSecurityGenLabel virSecurityManagerGenLabel
 # define qemuSecurityGetBaseLabel virSecurityManagerGetBaseLabel
 # define qemuSecurityGetDOI virSecurityManagerGetDOI
@@ -104,14 +117,12 @@ int qemuSecurityRestoreChardevLabel(virQEMUDriverPtr driver,
 # define qemuSecurityPreFork virSecurityManagerPreFork
 # define qemuSecurityReleaseLabel virSecurityManagerReleaseLabel
 # define qemuSecurityReserveLabel virSecurityManagerReserveLabel
-# define qemuSecurityRestoreSavedStateLabel virSecurityManagerRestoreSavedStateLabel
 # define qemuSecuritySetChildProcessLabel virSecurityManagerSetChildProcessLabel
 # define qemuSecuritySetDaemonSocketLabel virSecurityManagerSetDaemonSocketLabel
 # define qemuSecuritySetImageFDLabel virSecurityManagerSetImageFDLabel
-# define qemuSecuritySetSavedStateLabel virSecurityManagerSetSavedStateLabel
 # define qemuSecuritySetSocketLabel virSecurityManagerSetSocketLabel
 # define qemuSecuritySetTapFDLabel virSecurityManagerSetTapFDLabel
 # define qemuSecurityStackAddNested virSecurityManagerStackAddNested
 # define qemuSecurityVerify virSecurityManagerVerify
 
-#endif /* __QEMU_SECURITY_H__ */
+#endif /* LIBVIRT_QEMU_SECURITY_H */

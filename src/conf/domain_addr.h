@@ -17,17 +17,20 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __DOMAIN_ADDR_H__
-# define __DOMAIN_ADDR_H__
+#ifndef LIBVIRT_DOMAIN_ADDR_H
+# define LIBVIRT_DOMAIN_ADDR_H
 
 # include "domain_conf.h"
 
 # define VIR_PCI_ADDRESS_SLOT_LAST 31
 # define VIR_PCI_ADDRESS_FUNCTION_LAST 7
+
+typedef enum {
+    VIR_PCI_ADDRESS_EXTENSION_NONE = 0, /* no extension */
+    VIR_PCI_ADDRESS_EXTENSION_ZPCI = 1 << 0, /* zPCI support */
+} virPCIDeviceAddressExtensionFlags;
 
 typedef enum {
    VIR_PCI_CONNECT_HOTPLUGGABLE = 1 << 0, /* is hotplug needed/supported */
@@ -111,6 +114,12 @@ typedef struct {
 } virDomainPCIAddressBus;
 typedef virDomainPCIAddressBus *virDomainPCIAddressBusPtr;
 
+typedef struct {
+    virHashTablePtr uids;
+    virHashTablePtr fids;
+} virDomainZPCIAddressIds;
+typedef virDomainZPCIAddressIds *virDomainZPCIAddressIdsPtr;
+
 struct _virDomainPCIAddressSet {
     virDomainPCIAddressBus *buses;
     size_t nbuses;
@@ -120,14 +129,13 @@ struct _virDomainPCIAddressSet {
     bool areMultipleRootsSupported;
     /* If true, the guest can use the pcie-to-pci-bridge controller */
     bool isPCIeToPCIBridgeSupported;
+    virDomainZPCIAddressIdsPtr zpciIds;
 };
 typedef struct _virDomainPCIAddressSet virDomainPCIAddressSet;
 typedef virDomainPCIAddressSet *virDomainPCIAddressSetPtr;
 
-char *virDomainPCIAddressAsString(virPCIDeviceAddressPtr addr)
-      ATTRIBUTE_NONNULL(1);
-
-virDomainPCIAddressSetPtr virDomainPCIAddressSetAlloc(unsigned int nbuses);
+virDomainPCIAddressSetPtr virDomainPCIAddressSetAlloc(unsigned int nbuses,
+                                                      virPCIDeviceAddressExtensionFlags extFlags);
 
 void virDomainPCIAddressSetFree(virDomainPCIAddressSetPtr addrs);
 
@@ -146,11 +154,16 @@ int virDomainPCIAddressBusSetModel(virDomainPCIAddressBusPtr bus,
 bool virDomainPCIAddressBusIsFullyReserved(virDomainPCIAddressBusPtr bus)
     ATTRIBUTE_NONNULL(1);
 
-bool virDomainPCIAddressBusIsEmpty(virDomainPCIAddressBusPtr bus)
-    ATTRIBUTE_NONNULL(1);
-
 bool virDomainPCIAddressSlotInUse(virDomainPCIAddressSetPtr addrs,
                                   virPCIDeviceAddressPtr addr)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+
+int virDomainPCIAddressExtensionReserveAddr(virDomainPCIAddressSetPtr addrs,
+                                            virPCIDeviceAddressPtr addr)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+
+int virDomainPCIAddressExtensionReserveNextAddr(virDomainPCIAddressSetPtr addrs,
+                                                virPCIDeviceAddressPtr addr)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
 int virDomainPCIAddressReserveAddr(virDomainPCIAddressSetPtr addrs,
@@ -174,6 +187,10 @@ void virDomainPCIAddressReleaseAddr(virDomainPCIAddressSetPtr addrs,
                                     virPCIDeviceAddressPtr addr)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
+void virDomainPCIAddressExtensionReleaseAddr(virDomainPCIAddressSetPtr addrs,
+                                             virPCIDeviceAddressPtr addr)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+
 void virDomainPCIAddressSetAllMulti(virDomainDefPtr def)
     ATTRIBUTE_NONNULL(1);
 
@@ -189,21 +206,10 @@ int virDomainCCWAddressAssign(virDomainDeviceInfoPtr dev,
                               bool autoassign)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 void virDomainCCWAddressSetFree(virDomainCCWAddressSetPtr addrs);
-int virDomainCCWAddressAllocate(virDomainDefPtr def,
-                                virDomainDeviceDefPtr dev,
-                                virDomainDeviceInfoPtr info,
-                                void *data)
-    ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(4);
-int virDomainCCWAddressValidate(virDomainDefPtr def,
-                                virDomainDeviceDefPtr dev,
-                                virDomainDeviceInfoPtr info,
-                                void *data)
-    ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(4);
 
-int virDomainCCWAddressReleaseAddr(virDomainCCWAddressSetPtr addrs,
-                                   virDomainDeviceInfoPtr dev)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
-virDomainCCWAddressSetPtr virDomainCCWAddressSetCreate(void);
+virDomainCCWAddressSetPtr
+virDomainCCWAddressSetCreateFromDomain(virDomainDefPtr def)
+    ATTRIBUTE_NONNULL(1);
 
 struct _virDomainVirtioSerialController {
     unsigned int idx;
@@ -220,12 +226,6 @@ struct _virDomainVirtioSerialAddrSet {
 typedef struct _virDomainVirtioSerialAddrSet virDomainVirtioSerialAddrSet;
 typedef virDomainVirtioSerialAddrSet *virDomainVirtioSerialAddrSetPtr;
 
-virDomainVirtioSerialAddrSetPtr
-virDomainVirtioSerialAddrSetCreate(void);
-int
-virDomainVirtioSerialAddrSetAddControllers(virDomainVirtioSerialAddrSetPtr addrs,
-                                           virDomainDefPtr def)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 void
 virDomainVirtioSerialAddrSetFree(virDomainVirtioSerialAddrSetPtr addrs);
 virDomainVirtioSerialAddrSetPtr
@@ -246,26 +246,6 @@ virDomainVirtioSerialAddrAutoAssign(virDomainDefPtr def,
                                     bool allowZero)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
-int
-virDomainVirtioSerialAddrAssign(virDomainDefPtr def,
-                                virDomainVirtioSerialAddrSetPtr addrs,
-                                virDomainDeviceInfoPtr info,
-                                bool allowZero,
-                                bool portOnly)
-    ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
-
-int
-virDomainVirtioSerialAddrReserve(virDomainDefPtr def,
-                                 virDomainDeviceDefPtr dev,
-                                 virDomainDeviceInfoPtr info,
-                                 void *data)
-    ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(4);
-
-int
-virDomainVirtioSerialAddrRelease(virDomainVirtioSerialAddrSetPtr addrs,
-                                 virDomainDeviceInfoPtr info)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
-
 bool
 virDomainUSBAddressPortIsValid(unsigned int *port)
     ATTRIBUTE_NONNULL(1);
@@ -274,9 +254,6 @@ void
 virDomainUSBAddressPortFormatBuf(virBufferPtr buf,
                                  unsigned int *port)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
-char *
-virDomainUSBAddressPortFormat(unsigned int *port)
-    ATTRIBUTE_NONNULL(1);
 
 # define VIR_DOMAIN_USB_HUB_PORTS 8
 
@@ -335,4 +312,4 @@ int
 virDomainUSBAddressRelease(virDomainUSBAddressSetPtr addrs,
                            virDomainDeviceInfoPtr info)
     ATTRIBUTE_NONNULL(2);
-#endif /* __DOMAIN_ADDR_H__ */
+#endif /* LIBVIRT_DOMAIN_ADDR_H */

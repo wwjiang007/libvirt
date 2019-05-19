@@ -14,10 +14,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Mark McLoughlin <markmc@redhat.com>
- *     Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -35,12 +31,8 @@
 #include "virstring.h"
 #include "datatypes.h"
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
 #include <unistd.h>
 #include <regex.h>
-#include <dirent.h>
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
@@ -48,7 +40,8 @@
 #ifdef __linux__
 # include <linux/if_tun.h>    /* IFF_TUN, IFF_NO_PI */
 #elif defined(__FreeBSD__)
-# include <net/if_tap.h>
+# include <net/if_mib.h>
+# include <sys/sysctl.h>
 #endif
 #if defined(HAVE_GETIFADDRS) && defined(AF_LINK)
 # include <ifaddrs.h>
@@ -101,55 +94,44 @@ virNetDevTapGetName(int tapfd ATTRIBUTE_UNUSED, char **ifname ATTRIBUTE_UNUSED)
 char*
 virNetDevTapGetRealDeviceName(char *ifname ATTRIBUTE_UNUSED)
 {
-#ifdef TAPGIFNAME
+#ifdef IFDATA_DRIVERNAME
+    int ifindex = 0;
+    int name[6];
+    size_t len = 0;
     char *ret = NULL;
-    struct dirent *dp;
-    DIR *dirp = NULL;
-    char *devpath = NULL;
-    int fd;
 
-    if (virDirOpen(&dirp, "/dev") < 0)
+    if ((ifindex = if_nametoindex(ifname)) == 0) {
+        virReportSystemError(errno,
+                             _("Unable to get interface index for '%s'"),
+                             ifname);
         return NULL;
-
-    while (virDirRead(dirp, &dp, "/dev") > 0) {
-        if (STRPREFIX(dp->d_name, "tap")) {
-            struct ifreq ifr;
-            if (virAsprintf(&devpath, "/dev/%s", dp->d_name) < 0)
-                goto cleanup;
-            if ((fd = open(devpath, O_RDWR)) < 0) {
-                if (errno == EBUSY) {
-                    VIR_FREE(devpath);
-                    continue;
-                }
-
-                virReportSystemError(errno, _("Unable to open '%s'"), devpath);
-                goto cleanup;
-            }
-
-            if (ioctl(fd, TAPGIFNAME, (void *)&ifr) < 0) {
-                virReportSystemError(errno, "%s",
-                                     _("Unable to query tap interface name"));
-                goto cleanup;
-            }
-
-            if (STREQ(ifname, ifr.ifr_name)) {
-                /* we can ignore the return value
-                 * because we still have nothing
-                 * to do but return;
-                 */
-                ignore_value(VIR_STRDUP(ret, dp->d_name));
-                goto cleanup;
-            }
-
-            VIR_FREE(devpath);
-            VIR_FORCE_CLOSE(fd);
-        }
     }
 
- cleanup:
-    VIR_FREE(devpath);
-    VIR_FORCE_CLOSE(fd);
-    VIR_DIR_CLOSE(dirp);
+    name[0] = CTL_NET;
+    name[1] = PF_LINK;
+    name[2] = NETLINK_GENERIC;
+    name[3] = IFMIB_IFDATA;
+    name[4] = ifindex;
+    name[5] = IFDATA_DRIVERNAME;
+
+    if (sysctl(name, 6, NULL, &len, 0, 0) < 0) {
+        virReportSystemError(errno,
+                             _("Unable to get driver name for '%s'"),
+                             ifname);
+        return NULL;
+    }
+
+    if (VIR_ALLOC_N(ret, len) < 0)
+        return NULL;
+
+    if (sysctl(name, 6, ret, &len, 0, 0) < 0) {
+        virReportSystemError(errno,
+                             _("Unable to get driver name for '%s'"),
+                             ifname);
+        VIR_FREE(ret);
+        return NULL;
+    }
+
     return ret;
 #else
     return NULL;
@@ -281,7 +263,7 @@ int virNetDevTapCreate(char **ifname,
             ifr.ifr_flags |= IFF_VNET_HDR;
 # endif
 
-        if (virStrcpyStatic(ifr.ifr_name, *ifname) == NULL) {
+        if (virStrcpyStatic(ifr.ifr_name, *ifname) < 0) {
             virReportSystemError(ERANGE,
                                  _("Network interface name '%s' is too long"),
                                  *ifname);
@@ -347,7 +329,7 @@ int virNetDevTapDelete(const char *ifname,
     memset(&try, 0, sizeof(struct ifreq));
     try.ifr_flags = IFF_TAP|IFF_NO_PI;
 
-    if (virStrcpyStatic(try.ifr_name, ifname) == NULL) {
+    if (virStrcpyStatic(try.ifr_name, ifname) < 0) {
         virReportSystemError(ERANGE,
                              _("Network interface name '%s' is too long"),
                              ifname);
@@ -411,16 +393,15 @@ int virNetDevTapCreate(char **ifname,
     if (strstr(*ifname, "%d") != NULL) {
         size_t i;
         for (i = 0; i <= IF_MAXUNIT; i++) {
-            char *newname;
+            VIR_AUTOFREE(char *) newname = NULL;
+
             if (virAsprintf(&newname, *ifname, i) < 0)
                 goto cleanup;
 
             if (virNetDevExists(newname) == 0) {
-                newifname = newname;
+                VIR_STEAL_PTR(newifname, newname);
                 break;
             }
-
-            VIR_FREE(newname);
         }
         if (newifname) {
             VIR_FREE(*ifname);
@@ -434,7 +415,7 @@ int virNetDevTapCreate(char **ifname,
     }
 
     if (tapfd) {
-        char *dev_path = NULL;
+        VIR_AUTOFREE(char *) dev_path = NULL;
         if (virAsprintf(&dev_path, "/dev/%s", ifr.ifr_name) < 0)
             goto cleanup;
 
@@ -442,11 +423,8 @@ int virNetDevTapCreate(char **ifname,
             virReportSystemError(errno,
                                  _("Unable to open %s"),
                                  dev_path);
-            VIR_FREE(dev_path);
             goto cleanup;
         }
-
-        VIR_FREE(dev_path);
     }
 
     if (virNetDevSetName(ifr.ifr_name, *ifname) == -1)
@@ -572,6 +550,73 @@ virNetDevTapAttachBridge(const char *tapname,
 
  error:
     return -1;
+}
+
+
+/**
+ * virNetDevTapReattachBridge:
+ * @tapname: the tap interface name (or name template)
+ * @brname: the bridge name
+ * @macaddr: desired MAC address
+ * @virtPortProfile: bridge/port specific configuration
+ * @virtVlan: vlan tag info
+ * @mtu: requested MTU for port (or 0 for "default")
+ * @actualMTU: MTU actually set for port (after accounting for bridge's MTU)
+ *
+ * Ensures that the tap device (@tapname) is connected to the bridge
+ * (@brname), potentially removing it from any existing bridge that
+ * does not match.
+ *
+ * Returns 0 in case of success or -1 on failure
+ */
+int
+virNetDevTapReattachBridge(const char *tapname,
+                           const char *brname,
+                           const virMacAddr *macaddr,
+                           const unsigned char *vmuuid,
+                           virNetDevVPortProfilePtr virtPortProfile,
+                           virNetDevVlanPtr virtVlan,
+                           unsigned int mtu,
+                           unsigned int *actualMTU)
+{
+    bool useOVS = false;
+    VIR_AUTOFREE(char *) master = NULL;
+
+    if (virNetDevGetMaster(tapname, &master) < 0)
+        return -1;
+
+    /* IFLA_MASTER for a tap on an OVS switch is always "ovs-system" */
+    if (STREQ_NULLABLE(master, "ovs-system")) {
+        useOVS = true;
+        if (virNetDevOpenvswitchInterfaceGetMaster(tapname, &master) < 0)
+            return -1;
+    }
+
+    /* Nothing more todo if we're on the right bridge already */
+    if (STREQ_NULLABLE(brname, master))
+        return 0;
+
+    /* disconnect from current (incorrect) bridge, if any  */
+    if (master) {
+        int ret;
+        VIR_INFO("Removing %s from %s", tapname, master);
+        if (useOVS)
+            ret = virNetDevOpenvswitchRemovePort(master, tapname);
+        else
+            ret = virNetDevBridgeRemovePort(master, tapname);
+        if (ret < 0)
+            return -1;
+    }
+
+    VIR_INFO("Attaching %s to %s", tapname, brname);
+    if (virNetDevTapAttachBridge(tapname, brname,
+                                 macaddr, vmuuid,
+                                 virtPortProfile,
+                                 virtVlan,
+                                 mtu, actualMTU) < 0)
+        return -1;
+
+    return 0;
 }
 
 
@@ -702,6 +747,12 @@ virNetDevTapInterfaceStats(const char *ifname,
     FILE *fp;
     char line[256], *colon;
 
+    if (!ifname) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Interface name not provided"));
+        return -1;
+    }
+
     fp = fopen("/proc/net/dev", "r");
     if (!fp) {
         virReportSystemError(errno, "%s",
@@ -778,6 +829,12 @@ virNetDevTapInterfaceStats(const char *ifname,
     struct ifaddrs *ifap, *ifa;
     struct if_data *ifd;
     int ret = -1;
+
+    if (!ifname) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Interface name not provided"));
+        return -1;
+    }
 
     if (getifaddrs(&ifap) < 0) {
         virReportSystemError(errno, "%s",

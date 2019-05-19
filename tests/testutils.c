@@ -16,14 +16,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Karel Zak <kzak@redhat.com>
  */
 
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <stdarg.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -31,9 +27,7 @@
 #include <sys/wait.h>
 #include <regex.h>
 #include <unistd.h>
-#include <string.h>
 #include <fcntl.h>
-#include <limits.h>
 #include "testutils.h"
 #include "internal.h"
 #include "viralloc.h"
@@ -178,8 +172,7 @@ virTestRun(const char *title,
 
     virResetLastError();
     ret = body(data);
-    virErrorPtr err = virGetLastError();
-    if (err) {
+    if (virGetLastErrorCode()) {
         if (virTestGetVerbose() || virTestGetDebug())
             virDispatchError(NULL);
     }
@@ -258,8 +251,7 @@ virTestRun(const char *title,
                 fprintf(stderr, " alloc %zu failed but no err status\n", i + 1);
 # endif
             } else {
-                virErrorPtr lerr = virGetLastError();
-                if (!lerr) {
+                if (virGetLastErrorCode() == VIR_ERR_OK) {
 # if 0
                     fprintf(stderr, " alloc %zu failed but no error report\n", i + 1);
 # endif
@@ -451,7 +443,6 @@ void virTestCaptureProgramExecChild(const char *const argv[],
     int stdinfd = -1;
     const char *const env[] = {
         "LANG=C",
-        "LIBVIRT_DRIVER_DIR=" TEST_DRIVER_DIR,
         NULL
     };
 
@@ -533,8 +524,8 @@ virTestRewrapFile(const char *filename)
     char *script = NULL;
     virCommandPtr cmd = NULL;
 
-    if (!(virFileHasSuffix(filename, ".args") ||
-          virFileHasSuffix(filename, ".ldargs")))
+    if (!(virStringHasSuffix(filename, ".args") ||
+          virStringHasSuffix(filename, ".ldargs")))
         return 0;
 
     if (!perl) {
@@ -775,19 +766,19 @@ int virTestDifferenceBin(FILE *stream,
 }
 
 /*
- * @param strcontent: String input content
- * @param filename: File to compare strcontent against
+ * @param actual: String input content
+ * @param filename: File to compare @actual against
  *
- * If @strcontent is NULL, it's treated as an empty string.
+ * If @actual is NULL, it's treated as an empty string.
  */
 int
-virTestCompareToFile(const char *strcontent,
+virTestCompareToFile(const char *actual,
                      const char *filename)
 {
     int ret = -1;
     char *filecontent = NULL;
     char *fixedcontent = NULL;
-    const char *cmpcontent = strcontent;
+    const char *cmpcontent = actual;
 
     if (!cmpcontent)
         cmpcontent = "";
@@ -822,43 +813,28 @@ virTestCompareToFile(const char *strcontent,
     return ret;
 }
 
-/*
- * @param content: Input content
- * @param src: Source to compare @content against
- */
 int
-virTestCompareToULL(unsigned long long content,
-                    unsigned long long src)
+virTestCompareToULL(unsigned long long expect,
+                    unsigned long long actual)
 {
-    char *strcontent = NULL;
-    char *strsrc = NULL;
-    int ret = -1;
+    VIR_AUTOFREE(char *) expectStr = NULL;
+    VIR_AUTOFREE(char *) actualStr = NULL;
 
-    if (virAsprintf(&strcontent, "%llu", content) < 0)
-        goto cleanup;
+    if (virAsprintf(&expectStr, "%llu", expect) < 0)
+        return -1;
 
-    if (virAsprintf(&strsrc, "%llu", src) < 0)
-        goto cleanup;
+    if (virAsprintf(&actualStr, "%llu", actual) < 0)
+        return -1;
 
-    ret = virTestCompareToString(strcontent, strsrc);
-
- cleanup:
-    VIR_FREE(strcontent);
-    VIR_FREE(strsrc);
-
-    return ret;
+    return virTestCompareToString(expectStr, actualStr);
 }
 
-/*
- * @param strcontent: String input content
- * @param strsrc: String source to compare strcontent against
- */
 int
-virTestCompareToString(const char *strcontent,
-                       const char *strsrc)
+virTestCompareToString(const char *expect,
+                       const char *actual)
 {
-    if (STRNEQ_NULLABLE(strcontent, strsrc)) {
-        virTestDifference(stderr, strcontent, strsrc);
+    if (STRNEQ_NULLABLE(expect, actual)) {
+        virTestDifference(stderr, expect, actual);
         return -1;
     }
 
@@ -1198,7 +1174,12 @@ virCapsPtr virTestGenericCapsInit(void)
 
     if (!virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_TEST, NULL, NULL, 0, NULL))
         goto error;
-
+    if (!virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_QEMU,
+                                       NULL, NULL, 0, NULL))
+        goto error;
+    if (!virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_KVM,
+                                       NULL, NULL, 0, NULL))
+        goto error;
 
     if ((guest = virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_HVM, VIR_ARCH_X86_64,
                                          "/usr/bin/acme-virt", NULL,
@@ -1206,6 +1187,12 @@ virCapsPtr virTestGenericCapsInit(void)
         goto error;
 
     if (!virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_TEST, NULL, NULL, 0, NULL))
+        goto error;
+    if (!virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_QEMU,
+                                       NULL, NULL, 0, NULL))
+        goto error;
+    if (!virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_KVM,
+                                       NULL, NULL, 0, NULL))
         goto error;
 
 
@@ -1226,6 +1213,57 @@ virCapsPtr virTestGenericCapsInit(void)
  error:
     virObjectUnref(caps);
     return NULL;
+}
+
+
+#define MAX_CELLS 4
+#define MAX_CPUS_IN_CELL 2
+#define MAX_MEM_IN_CELL 2097152
+
+/*
+ * Build NUMA topology with cell id starting from (0 + seq)
+ * for testing
+ */
+int
+virTestCapsBuildNUMATopology(virCapsPtr caps,
+                             int seq)
+{
+    virCapsHostNUMACellCPUPtr cell_cpus = NULL;
+    int core_id, cell_id;
+    int id;
+
+    id = 0;
+    for (cell_id = 0; cell_id < MAX_CELLS; cell_id++) {
+        if (VIR_ALLOC_N(cell_cpus, MAX_CPUS_IN_CELL) < 0)
+            goto error;
+
+        for (core_id = 0; core_id < MAX_CPUS_IN_CELL; core_id++) {
+            cell_cpus[core_id].id = id + core_id;
+            cell_cpus[core_id].socket_id = cell_id + seq;
+            cell_cpus[core_id].core_id = id + core_id;
+            if (!(cell_cpus[core_id].siblings =
+                  virBitmapNew(MAX_CPUS_IN_CELL)))
+                goto error;
+            ignore_value(virBitmapSetBit(cell_cpus[core_id].siblings, id));
+        }
+        id++;
+
+        if (virCapabilitiesAddHostNUMACell(caps, cell_id + seq,
+                                           MAX_MEM_IN_CELL,
+                                           MAX_CPUS_IN_CELL, cell_cpus,
+                                           VIR_ARCH_NONE, NULL,
+                                           VIR_ARCH_NONE, NULL) < 0)
+           goto error;
+
+        cell_cpus = NULL;
+    }
+
+    return 0;
+
+ error:
+    virCapabilitiesClearHostNUMACellCPUTopology(cell_cpus, MAX_CPUS_IN_CELL);
+    VIR_FREE(cell_cpus);
+    return -1;
 }
 
 static virDomainDefParserConfig virTestGenericDomainDefParserConfig = {

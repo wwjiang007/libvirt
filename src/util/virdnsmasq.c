@@ -23,12 +23,7 @@
 
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <stdarg.h>
-#include <string.h>
-#include <errno.h>
-#include <limits.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/types.h>
@@ -605,8 +600,9 @@ dnsmasqReload(pid_t pid ATTRIBUTE_UNUSED)
 #ifndef WIN32
     if (kill(pid, SIGHUP) != 0) {
         virReportSystemError(errno,
-            _("Failed to make dnsmasq (PID: %d) reload config files."),
-            pid);
+                             _("Failed to make dnsmasq (PID: %d)"
+                               " reload config files."),
+                             pid);
         return -1;
     }
 #endif /* WIN32 */
@@ -647,7 +643,7 @@ static int dnsmasqCapsOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(dnsmasqCaps)
+VIR_ONCE_GLOBAL_INIT(dnsmasqCaps);
 
 static void
 dnsmasqCapsSet(dnsmasqCapsPtr caps,
@@ -755,22 +751,16 @@ dnsmasqCapsRefreshInternal(dnsmasqCapsPtr caps, bool force)
     virCommandSetOutputBuffer(cmd, &version);
     virCommandAddEnvPassCommon(cmd);
     virCommandClearCaps(cmd);
-    if (virCommandRun(cmd, NULL) < 0) {
-        virReportSystemError(errno, _("failed to run '%s --version': %s"),
-                             caps->binaryPath, version);
+    if (virCommandRun(cmd, NULL) < 0)
         goto cleanup;
-    }
     virCommandFree(cmd);
 
     cmd = virCommandNewArgList(caps->binaryPath, "--help", NULL);
     virCommandSetOutputBuffer(cmd, &help);
     virCommandAddEnvPassCommon(cmd);
     virCommandClearCaps(cmd);
-    if (virCommandRun(cmd, NULL) < 0) {
-        virReportSystemError(errno, _("failed to run '%s --help': %s"),
-                             caps->binaryPath, help);
+    if (virCommandRun(cmd, NULL) < 0)
         goto cleanup;
-    }
 
     if (virAsprintf(&complete, "%s\n%s", version, help) < 0)
         goto cleanup;
@@ -885,6 +875,5 @@ dnsmasqCapsGetVersion(dnsmasqCapsPtr caps)
 bool
 dnsmasqCapsGet(dnsmasqCapsPtr caps, dnsmasqCapsFlags flag)
 {
-
     return caps && virBitmapIsBitSet(caps->flags, flag);
 }

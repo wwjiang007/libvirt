@@ -21,9 +21,7 @@
 
 #include <config.h>
 
-#include <stdio.h>
 #include <stdarg.h>
-#include <stdlib.h>
 #include <time.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -40,6 +38,7 @@
 #if HAVE_SYS_UN_H
 # include <sys/un.h>
 #endif
+#include <fnmatch.h>
 
 #include "virerror.h"
 #include "virlog.h"
@@ -77,8 +76,10 @@ static char virLogHostname[HOST_NAME_MAX+1];
     VIR_LOG_PID_REGEX ": " VIR_LOG_LEVEL_REGEX " : "
 
 VIR_ENUM_DECL(virLogDestination);
-VIR_ENUM_IMPL(virLogDestination, VIR_LOG_TO_OUTPUT_LAST,
-              "stderr", "syslog", "file", "journald");
+VIR_ENUM_IMPL(virLogDestination,
+              VIR_LOG_TO_OUTPUT_LAST,
+              "stderr", "syslog", "file", "journald",
+);
 
 /*
  * Filters are used to refine the rules on what to keep or drop
@@ -87,7 +88,7 @@ VIR_ENUM_IMPL(virLogDestination, VIR_LOG_TO_OUTPUT_LAST,
 struct _virLogFilter {
     char *match;
     virLogPriority priority;
-    unsigned int flags;
+    unsigned int flags; /* bitwise OR of virLogFilterFlags */
 };
 
 static int virLogFiltersSerial = 1;
@@ -224,11 +225,17 @@ virLogSetDefaultOutputToFile(const char *filename, bool privileged)
 int
 virLogSetDefaultOutput(const char *filename, bool godaemon, bool privileged)
 {
-    if (!godaemon)
-        return virLogSetDefaultOutputToStderr();
+    bool have_journald = access("/run/systemd/journal/socket", W_OK) >= 0;
 
-    if (access("/run/systemd/journal/socket", W_OK) >= 0)
-        return virLogSetDefaultOutputToJournald();
+    if (godaemon) {
+        if (have_journald)
+            return virLogSetDefaultOutputToJournald();
+    } else {
+        if (!isatty(STDIN_FILENO) && have_journald)
+            return virLogSetDefaultOutputToJournald();
+
+        return virLogSetDefaultOutputToStderr();
+    }
 
     return virLogSetDefaultOutputToFile(filename, privileged);
 }
@@ -283,8 +290,7 @@ virLogOnceInit(void)
      */
     r = gethostname(virLogHostname, sizeof(virLogHostname));
     if (r == -1) {
-        ignore_value(virStrcpy(virLogHostname,
-                               "(unknown)", sizeof(virLogHostname)));
+        ignore_value(virStrcpyStatic(virLogHostname, "(unknown)"));
     } else {
         NUL_TERMINATE(virLogHostname);
     }
@@ -293,7 +299,7 @@ virLogOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(virLog)
+VIR_ONCE_GLOBAL_INIT(virLog);
 
 
 /**
@@ -497,38 +503,6 @@ virLogHostnameString(char **rawmsg,
     return 0;
 }
 
-/* virLogFiltersFind:
- * @filters: haystack
- * @nfilters: haystack size
- * @key1: primary string 'needle'
- * @key2: secondary integer 'needle'
- *
- * Performs "first match" search on the input set of filters, using @key1
- * (string) and  @key2 (integer) as primary and secondary keys respectively.
- * Secondary key is only considered if primary key wasn't provided.
- *
- * Returns a pointer to the matched object or NULL if no match was found.
- */
-static virLogFilterPtr
-virLogFiltersFind(virLogFilterPtr *filters,
-                  size_t nfilters,
-                  const char *key1,
-                  unsigned int key2)
-{
-    size_t i;
-
-    if (!key1 && key2 == 0)
-        return NULL;
-
-    for (i = 0; i < nfilters; i++) {
-        if ((key1 && STREQ(key1, filters[i]->match)) ||
-            filters[i]->flags == key2)
-            return filters[i];
-    }
-
-    return NULL;
-}
-
 
 static void
 virLogSourceUpdate(virLogSourcePtr source)
@@ -540,7 +514,7 @@ virLogSourceUpdate(virLogSourcePtr source)
         size_t i;
 
         for (i = 0; i < virLogNbFilters; i++) {
-            if (strstr(source->name, virLogFilters[i]->match)) {
+            if (fnmatch(virLogFilters[i]->match, source->name, 0) == 0) {
                 priority = virLogFilters[i]->priority;
                 flags = virLogFilters[i]->flags;
                 break;
@@ -666,23 +640,23 @@ virLogVMessage(virLogSourcePtr source,
                 char *initmsg = NULL;
                 if (virLogVersionString(&rawinitmsg, &initmsg) >= 0)
                     virLogOutputs[i]->f(&virLogSelf, VIR_LOG_INFO,
-                                       __FILE__, __LINE__, __func__,
-                                       timestamp, NULL, 0, rawinitmsg, initmsg,
-                                       virLogOutputs[i]->data);
+                                        __FILE__, __LINE__, __func__,
+                                        timestamp, NULL, 0, rawinitmsg, initmsg,
+                                        virLogOutputs[i]->data);
                 VIR_FREE(initmsg);
                 if (virLogHostnameString(&hoststr, &initmsg) >= 0)
                     virLogOutputs[i]->f(&virLogSelf, VIR_LOG_INFO,
-                                       __FILE__, __LINE__, __func__,
-                                       timestamp, NULL, 0, hoststr, initmsg,
-                                       virLogOutputs[i]->data);
+                                        __FILE__, __LINE__, __func__,
+                                        timestamp, NULL, 0, hoststr, initmsg,
+                                        virLogOutputs[i]->data);
                 VIR_FREE(hoststr);
                 VIR_FREE(initmsg);
                 virLogOutputs[i]->logInitMessage = false;
             }
             virLogOutputs[i]->f(source, priority,
-                               filename, linenr, funcname,
-                               timestamp, metadata, filterflags,
-                               str, msg, virLogOutputs[i]->data);
+                                filename, linenr, funcname,
+                                timestamp, metadata, filterflags,
+                                str, msg, virLogOutputs[i]->data);
         }
     }
     if (virLogNbOutputs == 0) {
@@ -1058,7 +1032,7 @@ virLogOutputToJournald(virLogSourcePtr source,
 
     memset(&sa, 0, sizeof(sa));
     sa.sun_family = AF_UNIX;
-    if (!virStrcpy(sa.sun_path, "/run/systemd/journal/socket", sizeof(sa.sun_path)))
+    if (virStrcpyStatic(sa.sun_path, "/run/systemd/journal/socket") < 0)
         return;
 
     memset(&mh, 0, sizeof(mh));
@@ -1440,9 +1414,9 @@ virLogFilterNew(const char *match,
 {
     virLogFilterPtr ret = NULL;
     char *mdup = NULL;
+    size_t mlen = strlen(match);
 
-    virCheckFlags(VIR_LOG_STACK_TRACE |
-                  VIR_LOG_WILDCARD, NULL);
+    virCheckFlags(VIR_LOG_STACK_TRACE, NULL);
 
     if (priority < VIR_LOG_DEBUG || priority > VIR_LOG_ERROR) {
         virReportError(VIR_ERR_INVALID_ARG, _("Invalid log priority %d"),
@@ -1450,8 +1424,15 @@ virLogFilterNew(const char *match,
         return NULL;
     }
 
-    if (VIR_STRDUP_QUIET(mdup, match) < 0)
+    /* We must treat 'foo' as equiv to '*foo*' for fnmatch
+     * todo substring matches, so add 2 extra bytes
+     */
+    if (VIR_ALLOC_N_QUIET(mdup, mlen + 3) < 0)
         return NULL;
+
+    mdup[0] = '*';
+    memcpy(mdup + 1, match, mlen);
+    mdup[mlen + 1] = '*';
 
     if (VIR_ALLOC_QUIET(ret) < 0) {
         VIR_FREE(mdup);
@@ -1561,8 +1542,6 @@ virLogDefineOutputs(virLogOutputPtr *outputs, size_t noutputs)
 int
 virLogDefineFilters(virLogFilterPtr *filters, size_t nfilters)
 {
-    virLogFilterPtr rc;
-
     if (virLogInitialize() < 0)
         return -1;
 
@@ -1570,10 +1549,6 @@ virLogDefineFilters(virLogFilterPtr *filters, size_t nfilters)
     virLogResetFilters();
     virLogFilters = filters;
     virLogNbFilters = nfilters;
-
-    /* if there's a wildcard filter, update default priority */
-    if ((rc = virLogFiltersFind(filters, nfilters, NULL, VIR_LOG_WILDCARD)))
-        virLogDefaultPriority = rc->priority;
     virLogUnlock();
 
     return 0;
@@ -1748,9 +1723,6 @@ virLogParseFilter(const char *src)
         flags |= VIR_LOG_STACK_TRACE;
         match++;
     }
-
-    if (STREQ(match, "*"))
-        flags |= VIR_LOG_WILDCARD;
 
     /* match string cannot comprise just from a single '+' */
     if (!*match) {

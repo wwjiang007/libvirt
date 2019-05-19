@@ -17,12 +17,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_STORAGE_CONF_H__
-# define __VIR_STORAGE_CONF_H__
+#ifndef LIBVIRT_STORAGE_CONF_H
+# define LIBVIRT_STORAGE_CONF_H
 
 # include "internal.h"
 # include "virstorageencryption.h"
@@ -32,9 +30,38 @@
 # include "device_conf.h"
 # include "object_event.h"
 # include "storage_adapter_conf.h"
+# include "virautoclean.h"
+# include "virenum.h"
 
 # include <libxml/tree.h>
 
+/* Various callbacks needed to parse/create Storage Pool XML's using
+ * a private namespace */
+typedef int (*virStoragePoolDefNamespaceParse)(xmlXPathContextPtr, void **);
+typedef void (*virStoragePoolDefNamespaceFree)(void *);
+typedef int (*virStoragePoolDefNamespaceXMLFormat)(virBufferPtr, void *);
+typedef const char *(*virStoragePoolDefNamespaceHref)(void);
+
+typedef struct _virStoragePoolXMLNamespace virStoragePoolXMLNamespace;
+typedef virStoragePoolXMLNamespace *virStoragePoolXMLNamespacePtr;
+struct _virStoragePoolXMLNamespace {
+    virStoragePoolDefNamespaceParse parse;
+    virStoragePoolDefNamespaceFree free;
+    virStoragePoolDefNamespaceXMLFormat format;
+    virStoragePoolDefNamespaceHref href;
+};
+
+int
+virStoragePoolOptionsPoolTypeSetXMLNamespace(int type,
+                                             virStoragePoolXMLNamespacePtr ns);
+
+int
+virStoragePoolOptionsFormatPool(virBufferPtr buf,
+                                int type);
+
+int
+virStoragePoolOptionsFormatVolume(virBufferPtr buf,
+                                  int type);
 /*
  * How the volume's data is stored on underlying
  * physical devices - can potentially span many
@@ -58,6 +85,13 @@ struct _virStorageVolSource {
                    * backend for partition type creation */
 };
 
+typedef enum {
+    VIR_STORAGE_VOL_DEF_REFRESH_ALLOCATION_DEFAULT,  /* compute actual allocation */
+    VIR_STORAGE_VOL_DEF_REFRESH_ALLOCATION_CAPACITY, /* use logical capacity */
+    VIR_STORAGE_VOL_DEF_REFRESH_ALLOCATION_LAST,
+} virStorageVolDefRefreshAllocation;
+
+VIR_ENUM_DECL(virStorageVolDefRefreshAllocation);
 
 typedef struct _virStorageVolDef virStorageVolDef;
 typedef virStorageVolDef *virStorageVolDefPtr;
@@ -76,7 +110,7 @@ struct _virStorageVolDef {
 typedef struct _virStorageVolDefList virStorageVolDefList;
 typedef virStorageVolDefList *virStorageVolDefListPtr;
 
-VIR_ENUM_DECL(virStorageVol)
+VIR_ENUM_DECL(virStorageVol);
 
 typedef enum {
     VIR_STORAGE_POOL_DIR,      /* Local directory */
@@ -85,6 +119,7 @@ typedef enum {
     VIR_STORAGE_POOL_LOGICAL,  /* Logical volume groups / volumes */
     VIR_STORAGE_POOL_DISK,     /* Disk partitions */
     VIR_STORAGE_POOL_ISCSI,    /* iSCSI targets */
+    VIR_STORAGE_POOL_ISCSI_DIRECT, /* iSCSI targets using libiscsi */
     VIR_STORAGE_POOL_SCSI,     /* SCSI HBA */
     VIR_STORAGE_POOL_MPATH,    /* Multipath devices */
     VIR_STORAGE_POOL_RBD,      /* RADOS Block Device */
@@ -96,7 +131,7 @@ typedef enum {
     VIR_STORAGE_POOL_LAST,
 } virStoragePoolType;
 
-VIR_ENUM_DECL(virStoragePool)
+VIR_ENUM_DECL(virStoragePool);
 
 typedef enum {
     VIR_STORAGE_DEVICE_TYPE_DISK = 0x00,
@@ -137,11 +172,6 @@ struct _virStoragePoolSourceDeviceExtent {
     unsigned long long start;
     unsigned long long end;
     int type; /* virStorageFreeType */
-};
-
-typedef struct _virStoragePoolSourceInitiatorAttr virStoragePoolSourceInitiatorAttr;
-struct _virStoragePoolSourceInitiatorAttr {
-    char *iqn; /* Initiator IQN */
 };
 
 /*
@@ -188,7 +218,7 @@ struct _virStoragePoolSource {
     char *name;
 
     /* Initiator IQN */
-    virStoragePoolSourceInitiatorAttr initiator;
+    virStorageSourceInitiatorDef initiator;
 
     /* Authentication information */
     virStorageAuthDefPtr auth;
@@ -203,6 +233,9 @@ struct _virStoragePoolSource {
      * or lvm version, etc.
      */
     int format;
+
+    /* Protocol version value for netfs */
+    unsigned int protocolVer;
 };
 
 typedef struct _virStoragePoolTarget virStoragePoolTarget;
@@ -212,6 +245,21 @@ struct _virStoragePoolTarget {
     virStoragePerms perms; /* Default permissions for volumes */
 };
 
+
+typedef struct _virStorageVolDefRefresh virStorageVolDefRefresh;
+typedef virStorageVolDefRefresh *virStorageVolDefRefreshPtr;
+struct _virStorageVolDefRefresh {
+  int allocation; /* virStorageVolDefRefreshAllocation */
+};
+
+
+typedef struct _virStoragePoolDefRefresh virStoragePoolDefRefresh;
+typedef virStoragePoolDefRefresh *virStoragePoolDefRefreshPtr;
+struct _virStoragePoolDefRefresh {
+  virStorageVolDefRefresh volume;
+};
+
+
 typedef struct _virStoragePoolDef virStoragePoolDef;
 typedef virStoragePoolDef *virStoragePoolDefPtr;
 struct _virStoragePoolDef {
@@ -219,12 +267,18 @@ struct _virStoragePoolDef {
     unsigned char uuid[VIR_UUID_BUFLEN];
     int type; /* virStoragePoolType */
 
+    virStoragePoolDefRefreshPtr refresh;
+
     unsigned long long allocation; /* bytes */
     unsigned long long capacity; /* bytes */
     unsigned long long available; /* bytes */
 
     virStoragePoolSource source;
     virStoragePoolTarget target;
+
+    /* Pool backend specific XML namespace data */
+    void *namespaceData;
+    virStoragePoolXMLNamespace ns;
 };
 
 typedef struct _virStoragePoolSourceList virStoragePoolSourceList;
@@ -327,7 +381,7 @@ typedef enum {
     VIR_STORAGE_POOL_FS_OCFS2,
     VIR_STORAGE_POOL_FS_LAST,
 } virStoragePoolFormatFileSystem;
-VIR_ENUM_DECL(virStoragePoolFormatFileSystem)
+VIR_ENUM_DECL(virStoragePoolFormatFileSystem);
 
 typedef enum {
     VIR_STORAGE_POOL_NETFS_AUTO = 0,
@@ -336,7 +390,7 @@ typedef enum {
     VIR_STORAGE_POOL_NETFS_CIFS,
     VIR_STORAGE_POOL_NETFS_LAST,
 } virStoragePoolFormatFileSystemNet;
-VIR_ENUM_DECL(virStoragePoolFormatFileSystemNet)
+VIR_ENUM_DECL(virStoragePoolFormatFileSystemNet);
 
 typedef enum {
     VIR_STORAGE_POOL_DISK_UNKNOWN = 0,
@@ -350,14 +404,14 @@ typedef enum {
     VIR_STORAGE_POOL_DISK_LVM2,
     VIR_STORAGE_POOL_DISK_LAST,
 } virStoragePoolFormatDisk;
-VIR_ENUM_DECL(virStoragePoolFormatDisk)
+VIR_ENUM_DECL(virStoragePoolFormatDisk);
 
 typedef enum {
     VIR_STORAGE_POOL_LOGICAL_UNKNOWN = 0,
     VIR_STORAGE_POOL_LOGICAL_LVM2 = 1,
     VIR_STORAGE_POOL_LOGICAL_LAST,
 } virStoragePoolFormatLogical;
-VIR_ENUM_DECL(virStoragePoolFormatLogical)
+VIR_ENUM_DECL(virStoragePoolFormatLogical);
 
 /*
  * XXX: these are basically partition types.
@@ -379,7 +433,7 @@ typedef enum {
     VIR_STORAGE_VOL_DISK_EXTENDED,
     VIR_STORAGE_VOL_DISK_LAST,
 } virStorageVolFormatDisk;
-VIR_ENUM_DECL(virStorageVolFormatDisk)
+VIR_ENUM_DECL(virStorageVolFormatDisk);
 
 typedef enum {
     VIR_STORAGE_VOL_DISK_TYPE_NONE = 0,
@@ -404,7 +458,7 @@ typedef enum {
     VIR_STORAGE_PARTED_FS_TYPE_EXTENDED,
     VIR_STORAGE_PARTED_FS_TYPE_LAST,
 } virStoragePartedFsType;
-VIR_ENUM_DECL(virStoragePartedFs)
+VIR_ENUM_DECL(virStoragePartedFs);
 
 # define VIR_CONNECT_LIST_STORAGE_POOLS_FILTERS_ACTIVE \
                 (VIR_CONNECT_LIST_STORAGE_POOLS_ACTIVE | \
@@ -439,4 +493,8 @@ VIR_ENUM_DECL(virStoragePartedFs)
                  VIR_CONNECT_LIST_STORAGE_POOLS_FILTERS_AUTOSTART  | \
                  VIR_CONNECT_LIST_STORAGE_POOLS_FILTERS_POOL_TYPE)
 
-#endif /* __VIR_STORAGE_CONF_H__ */
+VIR_DEFINE_AUTOPTR_FUNC(virStoragePoolSource, virStoragePoolSourceFree);
+VIR_DEFINE_AUTOPTR_FUNC(virStoragePoolDef, virStoragePoolDefFree);
+VIR_DEFINE_AUTOPTR_FUNC(virStorageVolDef, virStorageVolDefFree);
+
+#endif /* LIBVIRT_STORAGE_CONF_H */

@@ -19,12 +19,13 @@
  *
  */
 
-#ifndef __VIRT_HOST_VALIDATE_COMMON_H__
-# define __VIRT_HOST_VALIDATE_COMMON_H__
+#ifndef LIBVIRT_VIRT_HOST_VALIDATE_COMMON_H
+# define LIBVIRT_VIRT_HOST_VALIDATE_COMMON_H
 
 # include "internal.h"
 # include "virutil.h"
 # include "virbitmap.h"
+# include "virenum.h"
 
 typedef enum {
     VIR_HOST_VALIDATE_FAIL,
@@ -77,12 +78,11 @@ int virHostValidateNamespace(const char *hvname,
                              virHostValidateLevel level,
                              const char *hint);
 
-int virHostValidateCGroupController(const char *hvname,
-                                    const char *cg_name,
-                                    virHostValidateLevel level,
-                                    const char *config_name);
+int virHostValidateCGroupControllers(const char *hvname,
+                                     int controllers,
+                                     virHostValidateLevel level);
 
 int virHostValidateIOMMU(const char *hvname,
                          virHostValidateLevel level);
 
-#endif /* __VIRT_HOST_VALIDATE_COMMON_H__ */
+#endif /* LIBVIRT_VIRT_HOST_VALIDATE_COMMON_H */

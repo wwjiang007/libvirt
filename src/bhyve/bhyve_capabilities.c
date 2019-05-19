@@ -23,7 +23,6 @@
 #include <config.h>
 #include <sys/utsname.h>
 #include <dirent.h>
-#include <stdio.h>
 #include <sys/types.h>
 
 #include "viralloc.h"
@@ -76,7 +75,10 @@ virBhyveDomainCapsFill(virDomainCapsPtr caps,
                        unsigned int bhyvecaps,
                        virDomainCapsStringValuesPtr firmwares)
 {
-    caps->disk.supported = true;
+    caps->disk.supported = VIR_TRISTATE_BOOL_YES;
+    caps->disk.diskDevice.report = true;
+    caps->disk.bus.report = true;
+    caps->disk.model.report = true;
     VIR_DOMAIN_CAPS_ENUM_SET(caps->disk.diskDevice,
                              VIR_DOMAIN_DISK_DEVICE_DISK,
                              VIR_DOMAIN_DISK_DEVICE_CDROM);
@@ -85,10 +87,13 @@ virBhyveDomainCapsFill(virDomainCapsPtr caps,
                              VIR_DOMAIN_DISK_BUS_SATA,
                              VIR_DOMAIN_DISK_BUS_VIRTIO);
 
-    caps->os.supported = true;
+    caps->os.supported = VIR_TRISTATE_BOOL_YES;
 
+    caps->os.loader.supported = VIR_TRISTATE_BOOL_NO;
     if (bhyvecaps & BHYVE_CAP_LPC_BOOTROM) {
-        caps->os.loader.supported = true;
+        caps->os.loader.type.report = true;
+        caps->os.loader.readonly.report = true;
+        caps->os.loader.supported = VIR_TRISTATE_BOOL_YES;
         VIR_DOMAIN_CAPS_ENUM_SET(caps->os.loader.type,
                                  VIR_DOMAIN_LOADER_TYPE_PFLASH);
         VIR_DOMAIN_CAPS_ENUM_SET(caps->os.loader.readonly,
@@ -99,12 +104,23 @@ virBhyveDomainCapsFill(virDomainCapsPtr caps,
     }
 
 
+    caps->graphics.supported = VIR_TRISTATE_BOOL_NO;
+    caps->video.supported = VIR_TRISTATE_BOOL_NO;
     if (bhyvecaps & BHYVE_CAP_FBUF) {
-        caps->graphics.supported = true;
-        caps->video.supported = true;
+        caps->graphics.supported = VIR_TRISTATE_BOOL_YES;
+        caps->graphics.type.report = true;
+        caps->video.supported = VIR_TRISTATE_BOOL_YES;
+        caps->video.modelType.report = true;
         VIR_DOMAIN_CAPS_ENUM_SET(caps->graphics.type, VIR_DOMAIN_GRAPHICS_TYPE_VNC);
         VIR_DOMAIN_CAPS_ENUM_SET(caps->video.modelType, VIR_DOMAIN_VIDEO_TYPE_GOP);
     }
+
+    caps->hostdev.supported = VIR_TRISTATE_BOOL_NO;
+    caps->iothreads = VIR_TRISTATE_BOOL_NO;
+    caps->vmcoreinfo = VIR_TRISTATE_BOOL_NO;
+    caps->genid = VIR_TRISTATE_BOOL_NO;
+    caps->gic.supported = VIR_TRISTATE_BOOL_NO;
+
     return 0;
 }
 
@@ -227,7 +243,7 @@ bhyveProbeCapsDeviceHelper(unsigned int *caps,
 }
 
 static int
-bhyveProbeCapsRTC_UTC(unsigned int *caps, char *binary)
+bhyveProbeCapsFromHelp(unsigned int *caps, char *binary)
 {
     char *help;
     virCommandPtr cmd = NULL;
@@ -243,6 +259,12 @@ bhyveProbeCapsRTC_UTC(unsigned int *caps, char *binary)
 
     if (strstr(help, "-u:") != NULL)
         *caps |= BHYVE_CAP_RTC_UTC;
+
+    /* "-c vcpus" was there before CPU topology support was introduced,
+     * then it became
+     * "-c [[cpus=]numcpus][,sockets=n][,cores=n][,threads=n] */
+    if (strstr(help, "-c vcpus") == NULL)
+        *caps |= BHYVE_CAP_CPUTOPOLOGY;
 
  out:
     VIR_FREE(help);
@@ -314,7 +336,7 @@ virBhyveProbeCaps(unsigned int *caps)
     if (binary == NULL)
         goto out;
 
-    if ((ret = bhyveProbeCapsRTC_UTC(caps, binary)))
+    if ((ret = bhyveProbeCapsFromHelp(caps, binary)))
         goto out;
 
     if ((ret = bhyveProbeCapsAHCI32Slot(caps, binary)))

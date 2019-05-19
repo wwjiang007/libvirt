@@ -16,9 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Michal Privoznik <mprivozn@redhat.com>
  */
 
 #include <config.h>
@@ -61,7 +58,7 @@ virDevMapperOnceInit(void)
 }
 
 
-VIR_ONCE_GLOBAL_INIT(virDevMapper)
+VIR_ONCE_GLOBAL_INIT(virDevMapper);
 
 
 static int
@@ -87,8 +84,14 @@ virDevMapperGetTargetsImpl(const char *path,
         return ret;
     }
 
-    if (!(dmt = dm_task_create(DM_DEVICE_DEPS)))
+    if (!(dmt = dm_task_create(DM_DEVICE_DEPS))) {
+        if (errno == ENOENT || errno == ENODEV) {
+            /* It's okay. Kernel is probably built without
+             * devmapper support. */
+            ret = 0;
+        }
         return ret;
+    }
 
     if (!dm_task_set_name(dmt, path)) {
         if (errno == ENOENT) {
@@ -101,8 +104,13 @@ virDevMapperGetTargetsImpl(const char *path,
 
     dm_task_no_open_count(dmt);
 
-    if (!dm_task_run(dmt))
+    if (!dm_task_run(dmt)) {
+        if (errno == ENXIO) {
+            /* If @path = "/dev/mapper/control" ENXIO is returned. */
+            ret = 0;
+        }
         goto cleanup;
+    }
 
     if (!dm_task_get_info(dmt, &info))
         goto cleanup;

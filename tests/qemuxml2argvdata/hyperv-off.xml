@@ -20,6 +20,11 @@
       <stimer state='off'/>
       <reset state='off'/>
       <vendor_id state='off'/>
+      <frequencies state='off'/>
+      <reenlightenment state='off'/>
+      <tlbflush state='off'/>
+      <ipi state='off'/>
+      <evmcs state='off'/>
     </hyperv>
   </features>
   <clock offset='utc'/>

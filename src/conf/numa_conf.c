@@ -16,8 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Martin Kletzander <mkletzan@redhat.com>
  */
 
 #include <config.h>
@@ -44,18 +42,22 @@ VIR_ENUM_IMPL(virDomainNumatuneMemMode,
               VIR_DOMAIN_NUMATUNE_MEM_LAST,
               "strict",
               "preferred",
-              "interleave");
+              "interleave",
+);
 
 VIR_ENUM_IMPL(virDomainNumatunePlacement,
               VIR_DOMAIN_NUMATUNE_PLACEMENT_LAST,
               "default",
               "static",
-              "auto");
+              "auto",
+);
 
-VIR_ENUM_IMPL(virDomainMemoryAccess, VIR_DOMAIN_MEMORY_ACCESS_LAST,
+VIR_ENUM_IMPL(virDomainMemoryAccess,
+              VIR_DOMAIN_MEMORY_ACCESS_LAST,
               "default",
               "shared",
-              "private")
+              "private",
+);
 
 typedef struct _virDomainNumaDistance virDomainNumaDistance;
 typedef virDomainNumaDistance *virDomainNumaDistancePtr;
@@ -77,6 +79,7 @@ struct _virDomainNuma {
         virBitmapPtr nodeset;   /* host memory nodes where this guest node resides */
         virDomainNumatuneMemMode mode;  /* memory mode selection */
         virDomainMemoryAccess memAccess; /* shared memory access configuration */
+        virTristateBool discard; /* discard-data for memory-backend-file */
 
         struct _virDomainNumaDistance {
             unsigned int value; /* locality value for node i->j or j->i */
@@ -947,6 +950,18 @@ virDomainNumaDefCPUParseXML(virDomainNumaPtr def,
             VIR_FREE(tmp);
         }
 
+        if ((tmp = virXMLPropString(nodes[i], "discard"))) {
+            if ((rc = virTristateBoolTypeFromString(tmp)) <= 0) {
+                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                               _("Invalid 'discard' attribute value '%s'"),
+                               tmp);
+                goto cleanup;
+            }
+
+            def->mem_nodes[cur_cell].discard = rc;
+            VIR_FREE(tmp);
+        }
+
         /* Parse NUMA distances info */
         if (virDomainNumaDefNodeDistanceParseXML(def, ctxt, cur_cell) < 0)
                 goto cleanup;
@@ -967,6 +982,7 @@ virDomainNumaDefCPUFormatXML(virBufferPtr buf,
                              virDomainNumaPtr def)
 {
     virDomainMemoryAccess memAccess;
+    virTristateBool discard;
     char *cpustr;
     size_t ncells = virDomainNumaGetNodeCount(def);
     size_t i;
@@ -980,6 +996,7 @@ virDomainNumaDefCPUFormatXML(virBufferPtr buf,
         int ndistances;
 
         memAccess = virDomainNumaGetNodeMemoryAccessMode(def, i);
+        discard = virDomainNumaGetNodeDiscard(def, i);
 
         if (!(cpustr = virBitmapFormat(virDomainNumaGetNodeCpumask(def, i))))
             return -1;
@@ -993,6 +1010,10 @@ virDomainNumaDefCPUFormatXML(virBufferPtr buf,
         if (memAccess)
             virBufferAsprintf(buf, " memAccess='%s'",
                               virDomainMemoryAccessTypeToString(memAccess));
+
+        if (discard)
+            virBufferAsprintf(buf, " discard='%s'",
+                              virTristateBoolTypeToString(discard));
 
         ndistances = def->mem_nodes[i].ndistances;
         if (ndistances == 0) {
@@ -1301,6 +1322,14 @@ virDomainNumaGetNodeMemoryAccessMode(virDomainNumaPtr numa,
                                      size_t node)
 {
     return numa->mem_nodes[node].memAccess;
+}
+
+
+virTristateBool
+virDomainNumaGetNodeDiscard(virDomainNumaPtr numa,
+                            size_t node)
+{
+    return numa->mem_nodes[node].discard;
 }
 
 

@@ -16,14 +16,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Sharadha Prabhakar <sharadha.prabhakar@citrix.com>
  */
 
 #include <config.h>
 
-#include <limits.h>
-#include <string.h>
 #include <curl/curl.h>
 #include <xen/api/xen_all.h>
 #include "internal.h"
@@ -152,32 +148,18 @@ xenapiConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
         goto error;
     }
 
-    if (auth == NULL) {
-        xenapiSessionErrorHandler(conn, VIR_ERR_AUTH_FAILED,
-                                  _("Authentication Credentials not found"));
-        goto error;
-    }
-
     if (conn->uri->user != NULL) {
         if (VIR_STRDUP(username, conn->uri->user) < 0)
             goto error;
     } else {
-        username = virAuthGetUsername(conn, auth, "xen", NULL, conn->uri->server);
-
-        if (username == NULL) {
-            xenapiSessionErrorHandler(conn, VIR_ERR_AUTH_FAILED,
-                                      _("Username request failed"));
+        if (!(username = virAuthGetUsername(conn, auth, "xen", NULL,
+                                            conn->uri->server)))
             goto error;
-        }
     }
 
-    password = virAuthGetPassword(conn, auth, "xen", username, conn->uri->server);
-
-    if (password == NULL) {
-        xenapiSessionErrorHandler(conn, VIR_ERR_AUTH_FAILED,
-                                  _("Password request failed"));
+    if (!(password = virAuthGetPassword(conn, auth, "xen", username,
+                                        conn->uri->server)))
         goto error;
-    }
 
     if (VIR_ALLOC(privP) < 0)
         goto error;
@@ -430,7 +412,9 @@ xenapiNodeGetInfo(virConnectPtr conn, virNodeInfoPtr info)
     if (xen_host_cpu_get_all(session, &host_cpu_set)) {
         host_cpu = host_cpu_set->contents[0];
         xen_host_cpu_get_modelname(session, &modelname, host_cpu);
-        if (!virStrncpy(info->model, modelname, LIBVIRT_MODELNAME_LEN - 1, LIBVIRT_MODELNAME_LEN)) {
+        if (virStrncpy(info->model, modelname,
+                       MIN(strlen(modelname), LIBVIRT_MODELNAME_LEN - 1),
+                       LIBVIRT_MODELNAME_LEN) < 0) {
             virReportOOMError();
             xen_host_cpu_set_free(host_cpu_set);
             VIR_FREE(modelname);
@@ -459,7 +443,6 @@ xenapiNodeGetInfo(virConnectPtr conn, virNodeInfoPtr info)
 static char *
 xenapiConnectGetCapabilities(virConnectPtr conn)
 {
-
     virCapsPtr caps = ((struct _xenapiPrivate *)(conn->privateData))->caps;
     if (caps)
         return virCapabilitiesFormatXML(caps);
@@ -1253,7 +1236,6 @@ xenapiDomainGetVcpus(virDomainPtr dom,
                      virVcpuInfoPtr info, int maxinfo,
                      unsigned char *cpumaps, int maplen)
 {
-
     xen_vm_set *vms = NULL;
     xen_vm vm = NULL;
     xen_string_string_map *vcpu_params = NULL;

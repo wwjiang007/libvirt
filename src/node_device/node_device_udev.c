@@ -16,8 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Dave Allan <dallan@redhat.com>
  */
 
 #include <config.h>
@@ -99,7 +97,7 @@ udevEventDataOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(udevEventData)
+VIR_ONCE_GLOBAL_INIT(udevEventData);
 
 static udevEventDataPtr
 udevEventDataNew(void)
@@ -320,43 +318,6 @@ udevGenerateDeviceName(struct udev_device *device,
 }
 
 
-#if HAVE_UDEV_LOGGING
-typedef void
-(*udevLogFunctionPtr)(struct udev *udev,
-                      int priority,
-                      const char *file,
-                      int line,
-                      const char *fn,
-                      const char *format,
-                      va_list args);
-
-static void
-ATTRIBUTE_FMT_PRINTF(6, 0)
-udevLogFunction(struct udev *udev ATTRIBUTE_UNUSED,
-                int priority,
-                const char *file,
-                int line,
-                const char *fn,
-                const char *fmt,
-                va_list args)
-{
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
-    char *format = NULL;
-
-    virBufferAdd(&buf, fmt, -1);
-    virBufferTrim(&buf, "\n", -1);
-
-    format = virBufferContentAndReset(&buf);
-
-    virLogVMessage(&virLogSelf,
-                   virLogPriorityFromSyslog(priority),
-                   file, line, fn, NULL, format ? format : fmt, args);
-
-    VIR_FREE(format);
-}
-#endif
-
-
 static int
 udevTranslatePCIIds(unsigned int vendor,
                     unsigned int product,
@@ -404,7 +365,8 @@ udevProcessPCI(struct udev_device *device,
     privileged = driver->privileged;
     nodeDeviceUnlock();
 
-    if (udevGetUintProperty(device, "PCI_CLASS", &pci_dev->class, 16) < 0)
+    pci_dev->klass = -1;
+    if (udevGetIntProperty(device, "PCI_CLASS", &pci_dev->klass, 16) < 0)
         goto cleanup;
 
     if ((p = strrchr(def->sysfs_path, '/')) == NULL ||
@@ -584,7 +546,7 @@ udevProcessUSBInterface(struct udev_device *device,
         return -1;
 
     if (udevGetUintSysfsAttr(device, "bInterfaceClass",
-                             &usb_if->_class, 16) < 0)
+                             &usb_if->klass, 16) < 0)
         return -1;
 
     if (udevGetUintSysfsAttr(device, "bInterfaceSubClass",
@@ -1297,8 +1259,7 @@ udevRemoveOneDevice(struct udev_device *device)
     virNodeDeviceObjListRemove(driver->devs, obj);
     virObjectUnref(obj);
 
-    if (event)
-        virObjectEventStateQueue(driver->nodeDeviceEventState, event);
+    virObjectEventStateQueue(driver->nodeDeviceEventState, event);
     return 0;
 }
 
@@ -1410,8 +1371,7 @@ udevAddOneDevice(struct udev_device *device)
     ret = 0;
 
  cleanup:
-    if (event)
-        virObjectEventStateQueue(driver->nodeDeviceEventState, event);
+    virObjectEventStateQueue(driver->nodeDeviceEventState, event);
 
     if (ret != 0) {
         VIR_DEBUG("Discarding device %d %p %s", ret, def,
@@ -1484,13 +1444,8 @@ udevEnumerateDevices(struct udev *udev)
     if (udevEnumerateAddMatches(udev_enumerate) < 0)
         goto cleanup;
 
-    ret = udev_enumerate_scan_devices(udev_enumerate);
-    if (ret != 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("udev scan devices returned %d"),
-                       ret);
-        goto cleanup;
-    }
+    if (udev_enumerate_scan_devices(udev_enumerate) < 0)
+        VIR_WARN("udev scan devices failed");
 
     udev_list_entry_foreach(list_entry,
                             udev_enumerate_get_list_entry(udev_enumerate)) {
@@ -1498,6 +1453,7 @@ udevEnumerateDevices(struct udev *udev)
         udevProcessDeviceListEntry(udev, list_entry);
     }
 
+    ret = 0;
  cleanup:
     udev_enumerate_unref(udev_enumerate);
     return ret;
@@ -1593,6 +1549,26 @@ udevEventMonitorSanityCheck(udevEventDataPtr priv,
 }
 
 
+/**
+ * udevEventHandleThread
+ * @opaque: unused
+ *
+ * Thread to handle the udevEventHandleCallback processing when udev
+ * tells us there's a device change for us (add, modify, delete, etc).
+ *
+ * Once notified there is data to be processed, the actual @device
+ * data retrieval by libudev may be delayed due to how threads are
+ * scheduled. In fact, the event loop could be scheduled earlier than
+ * the handler thread, thus potentially emitting the very same event
+ * the handler thread is currently trying to process, simply because
+ * the data hadn't been retrieved from the socket.
+ *
+ * NB: Some older distros, such as CentOS 6, libudev opens sockets
+ * without the NONBLOCK flag which might cause issues with event
+ * based algorithm. Although the issue can be mitigated by resetting
+ * priv->dataReady for each event found; however, the scheduler issues
+ * would still come into play.
+ */
 static void
 udevEventHandleThread(void *opaque ATTRIBUTE_UNUSED)
 {
@@ -1639,6 +1615,9 @@ udevEventHandleThread(void *opaque ATTRIBUTE_UNUSED)
                 return;
             }
 
+            /* Trying to move the reset of the @priv->dataReady flag to
+             * after the udev_monitor_receive_device wouldn't help much
+             * due to event mgmt and scheduler timing. */
             virObjectLock(priv);
             priv->dataReady = false;
             virObjectUnlock(priv);
@@ -1648,6 +1627,11 @@ udevEventHandleThread(void *opaque ATTRIBUTE_UNUSED)
 
         udevHandleOneDevice(device);
         udev_device_unref(device);
+
+        /* Instead of waiting for the next event after processing @device
+         * data, let's keep reading from the udev monitor and only wait
+         * for the next event once either a EAGAIN or a EWOULDBLOCK error
+         * is encountered. */
     }
 }
 
@@ -1782,7 +1766,10 @@ nodeStateInitializeEnumerate(void *opaque)
 
  error:
     virObjectLock(priv);
+    ignore_value(virEventRemoveHandle(priv->watch));
+    priv->watch = -1;
     priv->threadQuit = true;
+    virCondSignal(&priv->threadCond);
     virObjectUnlock(priv);
 }
 
@@ -1848,10 +1835,6 @@ nodeStateInitialize(bool privileged,
                        _("failed to create udev context"));
         goto cleanup;
     }
-#if HAVE_UDEV_LOGGING
-    /* cast to get rid of missing-format-attribute warning */
-    udev_set_log_fn(udev, (udevLogFunctionPtr) udevLogFunction);
-#endif
 
     virObjectLock(priv);
 
@@ -1864,14 +1847,12 @@ nodeStateInitialize(bool privileged,
 
     udev_monitor_enable_receiving(priv->udev_monitor);
 
-#if HAVE_UDEV_MONITOR_SET_RECEIVE_BUFFER_SIZE
     /* mimic udevd's behaviour and override the systems rmem_max limit in case
      * there's a significant number of device 'add' events
      */
     if (geteuid() == 0)
         udev_monitor_set_receive_buffer_size(priv->udev_monitor,
                                              128 * 1024 * 1024);
-#endif
 
     if (virThreadCreate(&priv->th, true, udevEventHandleThread, NULL) < 0) {
         virReportSystemError(errno, "%s",

@@ -16,12 +16,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Martin Kletzander <mkletzan@redhat.com>
  */
 
-#ifndef __NUMA_CONF_H__
-# define __NUMA_CONF_H__
+#ifndef LIBVIRT_NUMA_CONF_H
+# define LIBVIRT_NUMA_CONF_H
 
 # include <libxml/xpath.h>
 
@@ -29,6 +27,7 @@
 # include "virutil.h"
 # include "virbitmap.h"
 # include "virbuffer.h"
+# include "virenum.h"
 
 
 typedef struct _virDomainNuma virDomainNuma;
@@ -42,8 +41,8 @@ typedef enum {
     VIR_DOMAIN_NUMATUNE_PLACEMENT_LAST
 } virDomainNumatunePlacement;
 
-VIR_ENUM_DECL(virDomainNumatunePlacement)
-VIR_ENUM_DECL(virDomainNumatuneMemMode)
+VIR_ENUM_DECL(virDomainNumatunePlacement);
+VIR_ENUM_DECL(virDomainNumatuneMemMode);
 
 typedef enum {
     VIR_DOMAIN_MEMORY_ACCESS_DEFAULT = 0,  /*  No memory access defined */
@@ -52,7 +51,7 @@ typedef enum {
 
     VIR_DOMAIN_MEMORY_ACCESS_LAST,
 } virDomainMemoryAccess;
-VIR_ENUM_DECL(virDomainMemoryAccess)
+VIR_ENUM_DECL(virDomainMemoryAccess);
 
 
 virDomainNumaPtr virDomainNumaNew(void);
@@ -101,6 +100,9 @@ virBitmapPtr virDomainNumaGetNodeCpumask(virDomainNumaPtr numa,
     ATTRIBUTE_NONNULL(1);
 virDomainMemoryAccess virDomainNumaGetNodeMemoryAccessMode(virDomainNumaPtr numa,
                                                       size_t node)
+    ATTRIBUTE_NONNULL(1);
+virTristateBool virDomainNumaGetNodeDiscard(virDomainNumaPtr numa,
+                                            size_t node)
     ATTRIBUTE_NONNULL(1);
 unsigned long long virDomainNumaGetNodeMemorySize(virDomainNumaPtr numa,
                                                   size_t node)
@@ -185,4 +187,4 @@ int virDomainNumaDefCPUFormatXML(virBufferPtr buf, virDomainNumaPtr def);
 unsigned int virDomainNumaGetCPUCountTotal(virDomainNumaPtr numa);
 
 
-#endif /* __NUMA_CONF_H__ */
+#endif /* LIBVIRT_NUMA_CONF_H */

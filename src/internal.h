@@ -18,14 +18,16 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_INTERNAL_H__
-# define __VIR_INTERNAL_H__
+#ifndef LIBVIRT_INTERNAL_H
+# define LIBVIRT_INTERNAL_H
 
 # include <errno.h>
 # include <limits.h>
 # include <verify.h>
 # include <stdbool.h>
 # include <stdint.h>
+# include <stdio.h>
+# include <string.h>
 
 # if STATIC_ANALYSIS
 #  undef NDEBUG /* Don't let a prior NDEBUG definition cause trouble.  */
@@ -45,14 +47,13 @@
 /* The library itself needs to know enum sizes.  */
 # define VIR_ENUM_SENTINELS
 
-/* All uses of _() within the library should pick up translations from
- * libvirt's message files, rather than from the package that is
- * linking in the library.  Setting this macro before including
- * "gettext.h" means that gettext() (and _()) will properly expand to
- * dgettext.  */
-# define DEFAULT_TEXT_DOMAIN PACKAGE
-# include "gettext.h"
-# define _(str) gettext(str)
+# ifdef HAVE_LIBINTL_H
+#  define DEFAULT_TEXT_DOMAIN PACKAGE
+#  include <libintl.h>
+#  define _(str) dgettext(PACKAGE, str)
+# else /* HAVE_LIBINTL_H */
+#  define _(str) str
+# endif /* HAVE_LIBINTL_H */
 # define N_(str) str
 
 # include "libvirt/libvirt.h"
@@ -240,9 +241,19 @@
 # define NULLSTR(s) ((s) ? (s) : "<null>")
 
 /*
- * Similar to NULLSTR, but print '-' to make it more user friendly.
+ * Turn a NULL string into an empty string
  */
-# define EMPTYSTR(s) ((s) ? (s) : "-")
+# define NULLSTR_EMPTY(s) ((s) ? (s) : "")
+
+/*
+ * Turn a NULL string into a star
+ */
+# define NULLSTR_STAR(s) ((s) ? (s) : "*")
+
+/*
+ * Turn a NULL string into a minus sign
+ */
+# define NULLSTR_MINUS(s) ((s) ? (s) : "-")
 
 /**
  * SWAP:
@@ -266,6 +277,21 @@
     do { \
         (a) = (b); \
         (b) = NULL; \
+    } while (0)
+
+/**
+ * VIR_RETURN_PTR:
+ * @ret: pointer to return
+ *
+ * Returns value of @ret while clearing @ret. This ensures that pointers
+ * freed by using VIR_AUTOPTR can be easily passed back to the caller without
+ * any temporary variable. @ptr is evaluated more than once.
+ */
+# define VIR_RETURN_PTR(ptr) \
+    do { \
+        typeof(ptr) virTemporaryReturnPointer = (ptr); \
+        (ptr) = NULL; \
+        return virTemporaryReturnPointer; \
     } while (0)
 
 /**
@@ -512,4 +538,4 @@ enum {
 #  define ENODATA EIO
 # endif
 
-#endif                          /* __VIR_INTERNAL_H__ */
+#endif /* LIBVIRT_INTERNAL_H */

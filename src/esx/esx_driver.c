@@ -626,10 +626,7 @@ esxConnectToHost(esxPrivate *priv,
         ? esxVI_ProductLine_ESX
         : esxVI_ProductLine_GSX;
 
-    if (!vCenterIPAddress || *vCenterIPAddress) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Invalid argument"));
-        return -1;
-    }
+    ESX_VI_CHECK_ARG_LIST(vCenterIPAddress);
 
     if (esxUtil_ResolveHostname(conn->uri->server, ipAddress, NI_MAXHOST) < 0)
         return -1;
@@ -638,20 +635,14 @@ esxConnectToHost(esxPrivate *priv,
         if (VIR_STRDUP(username, conn->uri->user) < 0)
             goto cleanup;
     } else {
-        username = virAuthGetUsername(conn, auth, "esx", "root", conn->uri->server);
-
-        if (!username) {
-            virReportError(VIR_ERR_AUTH_FAILED, "%s", _("Username request failed"));
+        if (!(username = virAuthGetUsername(conn, auth, "esx", "root",
+                                            conn->uri->server)))
             goto cleanup;
-        }
     }
 
-    password = virAuthGetPassword(conn, auth, "esx", username, conn->uri->server);
-
-    if (!password) {
-        virReportError(VIR_ERR_AUTH_FAILED, "%s", _("Password request failed"));
+    if (!(password = virAuthGetPassword(conn, auth, "esx", username,
+                                        conn->uri->server)))
         goto cleanup;
-    }
 
     if (virAsprintf(&url, "%s://%s:%d/sdk", priv->parsedUri->transport,
                     conn->uri->server, conn->uri->port) < 0)
@@ -736,20 +727,13 @@ esxConnectToVCenter(esxPrivate *priv,
         if (VIR_STRDUP(username, conn->uri->user) < 0)
             goto cleanup;
     } else {
-        username = virAuthGetUsername(conn, auth, "esx", "administrator", hostname);
-
-        if (!username) {
-            virReportError(VIR_ERR_AUTH_FAILED, "%s", _("Username request failed"));
+        if (!(username = virAuthGetUsername(conn, auth, "esx", "administrator",
+                                            hostname)))
             goto cleanup;
-        }
     }
 
-    password = virAuthGetPassword(conn, auth, "esx", username, hostname);
-
-    if (!password) {
-        virReportError(VIR_ERR_AUTH_FAILED, "%s", _("Password request failed"));
+    if (!(password = virAuthGetPassword(conn, auth, "esx", username, hostname)))
         goto cleanup;
-    }
 
     if (virAsprintf(&url, "%s://%s:%d/sdk", priv->parsedUri->transport,
                     hostname, conn->uri->port) < 0)
@@ -857,20 +841,6 @@ esxConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
                  conn->uri->path, conn->uri->scheme);
     }
 
-    /* Require server part */
-    if (!conn->uri->server) {
-        virReportError(VIR_ERR_INVALID_ARG, "%s",
-                       _("URI is missing the server part"));
-        return VIR_DRV_OPEN_ERROR;
-    }
-
-    /* Require auth */
-    if (!auth || !auth->cb) {
-        virReportError(VIR_ERR_INVALID_ARG, "%s",
-                       _("Missing or invalid auth pointer"));
-        return VIR_DRV_OPEN_ERROR;
-    }
-
     /* Allocate per-connection private data */
     if (VIR_ALLOC(priv) < 0)
         goto cleanup;
@@ -924,8 +894,8 @@ esxConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
                     goto cleanup;
                 }
 
-                if (!virStrcpyStatic(vCenterIPAddress,
-                                     potentialVCenterIPAddress)) {
+                if (virStrcpyStatic(vCenterIPAddress,
+                                    potentialVCenterIPAddress) < 0) {
                     virReportError(VIR_ERR_INTERNAL_ERROR,
                                    _("vCenter IP address %s too big for destination"),
                                    potentialVCenterIPAddress);
@@ -1327,9 +1297,9 @@ esxNodeGetInfo(virConnectPtr conn, virNodeInfoPtr nodeinfo)
                 ++ptr;
             }
 
-            if (!virStrncpy(nodeinfo->model, dynamicProperty->val->string,
-                            sizeof(nodeinfo->model) - 1,
-                            sizeof(nodeinfo->model))) {
+            /* Make sure the string fits in mode */
+            dynamicProperty->val->string[sizeof(nodeinfo->model) - 1] = '\0';
+            if (virStrcpyStatic(nodeinfo->model, dynamicProperty->val->string) < 0) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
                                _("CPU Model %s too long for destination"),
                                dynamicProperty->val->string);
@@ -1577,12 +1547,7 @@ esxDomainLookupByName(virConnectPtr conn, const char *name)
                                            "config.uuid\0") < 0 ||
         esxVI_LookupVirtualMachineByName(priv->primary, name, propertyNameList,
                                          &virtualMachine,
-                                         esxVI_Occurrence_OptionalItem) < 0) {
-        goto cleanup;
-    }
-
-    if (!virtualMachine) {
-        virReportError(VIR_ERR_NO_DOMAIN, _("No domain with name '%s'"), name);
+                                         esxVI_Occurrence_RequiredItem) < 0) {
         goto cleanup;
     }
 
@@ -2488,10 +2453,7 @@ esxDomainSetVcpusFlags(virDomainPtr domain, unsigned int nvcpus,
     esxVI_TaskInfoState taskInfoState;
     char *taskInfoErrorMessage = NULL;
 
-    if (flags != VIR_DOMAIN_AFFECT_LIVE) {
-        virReportError(VIR_ERR_INVALID_ARG, _("unsupported flags: (0x%x)"), flags);
-        return -1;
-    }
+    virCheckFlags(VIR_DOMAIN_AFFECT_LIVE, -1);
 
     if (nvcpus < 1) {
         virReportError(VIR_ERR_INVALID_ARG, "%s",
@@ -2570,10 +2532,8 @@ esxDomainGetVcpusFlags(virDomainPtr domain, unsigned int flags)
     esxVI_ObjectContent *hostSystem = NULL;
     esxVI_DynamicProperty *dynamicProperty = NULL;
 
-    if (flags != (VIR_DOMAIN_AFFECT_LIVE | VIR_DOMAIN_VCPU_MAXIMUM)) {
-        virReportError(VIR_ERR_INVALID_ARG, _("unsupported flags: (0x%x)"), flags);
-        return -1;
-    }
+    virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
+                  VIR_DOMAIN_VCPU_MAXIMUM, -1);
 
     if (priv->maxVcpus > 0)
         return priv->maxVcpus;
@@ -2644,7 +2604,7 @@ esxDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     virDomainDefPtr def = NULL;
     char *xml = NULL;
 
-    /* Flags checked by virDomainDefFormat */
+    virCheckFlags(VIR_DOMAIN_XML_COMMON_FLAGS, NULL);
 
     memset(&data, 0, sizeof(data));
 
@@ -2750,7 +2710,7 @@ esxConnectDomainXMLFromNative(virConnectPtr conn, const char *nativeFormat,
 
     memset(&data, 0, sizeof(data));
 
-    if (STRNEQ(nativeFormat, "vmware-vmx")) {
+    if (STRNEQ(nativeFormat, VMX_CONFIG_FORMAT_ARGV)) {
         virReportError(VIR_ERR_INVALID_ARG,
                        _("Unsupported config format '%s'"), nativeFormat);
         return NULL;
@@ -2795,7 +2755,7 @@ esxConnectDomainXMLToNative(virConnectPtr conn, const char *nativeFormat,
 
     memset(&data, 0, sizeof(data));
 
-    if (STRNEQ(nativeFormat, "vmware-vmx")) {
+    if (STRNEQ(nativeFormat, VMX_CONFIG_FORMAT_ARGV)) {
         virReportError(VIR_ERR_INVALID_ARG,
                        _("Unsupported config format '%s'"), nativeFormat);
         return NULL;
@@ -3118,7 +3078,7 @@ esxDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int flags)
         goto cleanup;
     }
 
-    if (! virFileHasSuffix(src, ".vmdk")) {
+    if (!virStringHasCaseSuffix(src, ".vmdk")) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Expecting source '%s' of first file-based harddisk to "
                          "be a VMDK image"), src);
@@ -3408,7 +3368,10 @@ esxDomainSetAutostart(virDomainPtr domain, int autostart)
     if (esxVI_AutoStartPowerInfo_Alloc(&newPowerInfo) < 0 ||
         esxVI_Int_Alloc(&newPowerInfo->startOrder) < 0 ||
         esxVI_Int_Alloc(&newPowerInfo->startDelay) < 0 ||
-        esxVI_Int_Alloc(&newPowerInfo->stopDelay) < 0) {
+        esxVI_Int_Alloc(&newPowerInfo->stopDelay) < 0 ||
+        esxVI_AutoStartPowerInfo_AppendToList(&spec->powerInfo,
+                                              newPowerInfo) < 0) {
+        esxVI_AutoStartPowerInfo_Free(&newPowerInfo);
         goto cleanup;
     }
 
@@ -3419,13 +3382,6 @@ esxDomainSetAutostart(virDomainPtr domain, int autostart)
     newPowerInfo->startAction = autostart ? (char *)"powerOn" : (char *)"none";
     newPowerInfo->stopDelay->value = -1; /* use system default */
     newPowerInfo->stopAction = (char *)"none";
-
-    if (esxVI_AutoStartPowerInfo_AppendToList(&spec->powerInfo,
-                                              newPowerInfo) < 0) {
-        goto cleanup;
-    }
-
-    newPowerInfo = NULL;
 
     if (esxVI_ReconfigureAutostart
           (priv->primary,
@@ -3447,8 +3403,6 @@ esxDomainSetAutostart(virDomainPtr domain, int autostart)
     esxVI_HostAutoStartManagerConfig_Free(&spec);
     esxVI_AutoStartDefaults_Free(&defaults);
     esxVI_AutoStartPowerInfo_Free(&powerInfoList);
-
-    esxVI_AutoStartPowerInfo_Free(&newPowerInfo);
 
     return result;
 }
@@ -3981,7 +3935,7 @@ esxNodeGetFreeMemory(virConnectPtr conn)
         goto cleanup;
     }
 
-    usageBytes = (unsigned long long) (memoryUsage->value) * 1048576;
+    usageBytes = (unsigned long long)(memoryUsage->value) * 1048576;
     result = memorySize->value - usageBytes;
 
  cleanup:
@@ -4000,11 +3954,7 @@ esxConnectIsEncrypted(virConnectPtr conn)
 {
     esxPrivate *priv = conn->privateData;
 
-    if (STRCASEEQ(priv->parsedUri->transport, "https")) {
-        return 1;
-    } else {
-        return 0;
-    }
+    return STRCASEEQ(priv->parsedUri->transport, "https");
 }
 
 
@@ -4014,11 +3964,7 @@ esxConnectIsSecure(virConnectPtr conn)
 {
     esxPrivate *priv = conn->privateData;
 
-    if (STRCASEEQ(priv->parsedUri->transport, "https")) {
-        return 1;
-    } else {
-        return 0;
-    }
+    return STRCASEEQ(priv->parsedUri->transport, "https");
 }
 
 
@@ -4135,7 +4081,6 @@ esxDomainSnapshotCreateXML(virDomainPtr domain, const char *xmlDesc,
                            unsigned int flags)
 {
     esxPrivate *priv = domain->conn->privateData;
-    virDomainSnapshotDefPtr def = NULL;
     esxVI_ObjectContent *virtualMachine = NULL;
     esxVI_VirtualMachineSnapshotTree *rootSnapshotList = NULL;
     esxVI_VirtualMachineSnapshotTree *snapshotTree = NULL;
@@ -4145,6 +4090,7 @@ esxDomainSnapshotCreateXML(virDomainPtr domain, const char *xmlDesc,
     virDomainSnapshotPtr snapshot = NULL;
     bool diskOnly = (flags & VIR_DOMAIN_SNAPSHOT_CREATE_DISK_ONLY) != 0;
     bool quiesce = (flags & VIR_DOMAIN_SNAPSHOT_CREATE_QUIESCE) != 0;
+    VIR_AUTOUNREF(virDomainSnapshotDefPtr) def = NULL;
 
     /* ESX supports disk-only and quiesced snapshots; libvirt tracks no
      * snapshot metadata so supporting that flag is trivial.  */
@@ -4156,7 +4102,7 @@ esxDomainSnapshotCreateXML(virDomainPtr domain, const char *xmlDesc,
         return NULL;
 
     def = virDomainSnapshotDefParseString(xmlDesc, priv->caps,
-                                          priv->xmlopt, 0);
+                                          priv->xmlopt, NULL, 0);
 
     if (!def)
         return NULL;
@@ -4172,7 +4118,7 @@ esxDomainSnapshotCreateXML(virDomainPtr domain, const char *xmlDesc,
            priv->parsedUri->autoAnswer) < 0 ||
         esxVI_LookupRootSnapshotTreeList(priv->primary, domain->uuid,
                                          &rootSnapshotList) < 0 ||
-        esxVI_GetSnapshotTreeByName(rootSnapshotList, def->name,
+        esxVI_GetSnapshotTreeByName(rootSnapshotList, def->parent.name,
                                     &snapshotTree, NULL,
                                     esxVI_Occurrence_OptionalItem) < 0) {
         goto cleanup;
@@ -4180,12 +4126,12 @@ esxDomainSnapshotCreateXML(virDomainPtr domain, const char *xmlDesc,
 
     if (snapshotTree) {
         virReportError(VIR_ERR_OPERATION_INVALID,
-                       _("Snapshot '%s' already exists"), def->name);
+                       _("Snapshot '%s' already exists"), def->parent.name);
         goto cleanup;
     }
 
     if (esxVI_CreateSnapshot_Task(priv->primary, virtualMachine->obj,
-                                  def->name, def->description,
+                                  def->parent.name, def->parent.description,
                                   diskOnly ? esxVI_Boolean_False : esxVI_Boolean_True,
                                   quiesce ? esxVI_Boolean_True : esxVI_Boolean_False,
                                   &task) < 0 ||
@@ -4202,10 +4148,9 @@ esxDomainSnapshotCreateXML(virDomainPtr domain, const char *xmlDesc,
         goto cleanup;
     }
 
-    snapshot = virGetDomainSnapshot(domain, def->name);
+    snapshot = virGetDomainSnapshot(domain, def->parent.name);
 
  cleanup:
-    virDomainSnapshotDefFree(def);
     esxVI_ObjectContent_Free(&virtualMachine);
     esxVI_VirtualMachineSnapshotTree_Free(&rootSnapshotList);
     esxVI_ManagedObjectReference_Free(&task);
@@ -4243,12 +4188,12 @@ esxDomainSnapshotGetXMLDesc(virDomainSnapshotPtr snapshot,
         goto cleanup;
     }
 
-    def.name = snapshot->name;
-    def.description = snapshotTree->description;
-    def.parent = snapshotTreeParent ? snapshotTreeParent->name : NULL;
+    def.parent.name = snapshot->name;
+    def.parent.description = snapshotTree->description;
+    def.parent.parent_name = snapshotTreeParent ? snapshotTreeParent->name : NULL;
 
     if (esxVI_DateTime_ConvertToCalendarTime(snapshotTree->createTime,
-                                             &def.creationTime) < 0) {
+                                             &def.parent.creationTime) < 0) {
         goto cleanup;
     }
 
@@ -4258,7 +4203,6 @@ esxDomainSnapshotGetXMLDesc(virDomainSnapshotPtr snapshot,
     virUUIDFormat(snapshot->domain->uuid, uuid_string);
 
     xml = virDomainSnapshotDefFormat(uuid_string, &def, priv->caps, priv->xmlopt,
-                                     virDomainDefFormatConvertXMLFlags(flags),
                                      0);
 
  cleanup:
@@ -5234,6 +5178,7 @@ static virHypervisorDriver esxHypervisorDriver = {
 
 
 static virConnectDriver esxConnectDriver = {
+    .remoteOnly = true,
     .uriSchemes = (const char *[]){ "vpx", "esx", "gsx", NULL },
     .hypervisorDriver = &esxHypervisorDriver,
     .interfaceDriver = &esxInterfaceDriver,

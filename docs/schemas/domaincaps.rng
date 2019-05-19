@@ -29,6 +29,9 @@
           <ref name='vcpu'/>
         </optional>
         <optional>
+          <ref name='iothreads'/>
+        </optional>
+        <optional>
           <ref name='os'/>
         </optional>
         <optional>
@@ -53,6 +56,13 @@
     </element>
   </define>
 
+  <define name='iothreads'>
+    <element name='iothreads'>
+      <ref name='supported'/>
+      <empty/>
+    </element>
+  </define>
+
   <define name='loader'>
     <element name='loader'>
       <ref name='supported'/>
@@ -67,6 +77,7 @@
     <element name='os'>
       <interleave>
         <ref name='supported'/>
+        <ref name='enum'/>
         <optional>
           <ref name='loader'/>
         </optional>
@@ -132,12 +143,18 @@
 
   <define name='devices'>
     <element name='devices'>
-      <interleave>
+      <optional>
         <ref name='disk'/>
+      </optional>
+      <optional>
         <ref name='graphics'/>
+      </optional>
+      <optional>
         <ref name='video'/>
+      </optional>
+      <optional>
         <ref name='hostdev'/>
-      </interleave>
+      </optional>
     </element>
   </define>
 
@@ -171,9 +188,18 @@
 
   <define name='features'>
     <element name='features'>
-      <interleave>
+      <optional>
         <ref name='gic'/>
-      </interleave>
+      </optional>
+      <optional>
+        <ref name='vmcoreinfo'/>
+      </optional>
+      <optional>
+        <ref name='vmgenid'/>
+      </optional>
+      <optional>
+        <ref name='sev'/>
+      </optional>
     </element>
   </define>
 
@@ -181,6 +207,32 @@
     <element name='gic'>
       <ref name='supported'/>
       <ref name='enum'/>
+    </element>
+  </define>
+
+  <define name='vmcoreinfo'>
+    <element name='vmcoreinfo'>
+      <ref name='supported'/>
+    </element>
+  </define>
+
+  <define name='vmgenid'>
+    <element name='genid'>
+      <ref name='supported'/>
+    </element>
+  </define>
+
+  <define name='sev'>
+    <element name='sev'>
+      <ref name='supported'/>
+      <optional>
+        <element name='cbitpos'>
+          <data type='unsignedInt'/>
+        </element>
+        <element name='reducedPhysBits'>
+          <data type='unsignedInt'/>
+        </element>
+      </optional>
     </element>
   </define>
 

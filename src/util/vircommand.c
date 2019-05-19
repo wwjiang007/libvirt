@@ -25,7 +25,6 @@
 #include <regex.h>
 #include <signal.h>
 #include <stdarg.h>
-#include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <fcntl.h>
@@ -42,9 +41,9 @@
 # include <sys/apparmor.h>
 #endif
 
-#define __VIR_COMMAND_PRIV_H_ALLOW__
-#include "vircommandpriv.h"
+#define LIBVIRT_VIRCOMMANDPRIV_H_ALLOW
 #include "viralloc.h"
+#include "vircommandpriv.h"
 #include "virerror.h"
 #include "virutil.h"
 #include "virlog.h"
@@ -508,11 +507,11 @@ virExec(virCommandPtr cmd)
     int childout = -1;
     int childerr = -1;
     int tmpfd;
-    char *binarystr = NULL;
+    VIR_AUTOFREE(char *) binarystr = NULL;
     const char *binary = NULL;
     int ret;
     struct sigaction waxon, waxoff;
-    gid_t *groups = NULL;
+    VIR_AUTOFREE(gid_t *) groups = NULL;
     int ngroups;
 
     if (cmd->args[0][0] != '/') {
@@ -604,9 +603,6 @@ virExec(virCommandPtr cmd)
         }
 
         cmd->pid = pid;
-
-        VIR_FREE(groups);
-        VIR_FREE(binarystr);
 
         return 0;
     }
@@ -797,9 +793,6 @@ virExec(virCommandPtr cmd)
     /* This is cleanup of parent process only - child
        should never jump here on error */
 
-    VIR_FREE(binarystr);
-    VIR_FREE(groups);
-
     /* NB we don't virReportError() on any failures here
        because the code which jumped here already raised
        an error condition which we must not overwrite */
@@ -829,12 +822,9 @@ virExec(virCommandPtr cmd)
 int
 virRun(const char *const*argv, int *status)
 {
-    int ret;
-    virCommandPtr cmd = virCommandNewArgs(argv);
+    VIR_AUTOPTR(virCommand) cmd = virCommandNewArgs(argv);
 
-    ret = virCommandRun(cmd, status);
-    virCommandFree(cmd);
-    return ret;
+    return virCommandRun(cmd, status);
 }
 
 #else /* WIN32 */
@@ -1043,6 +1033,9 @@ int
 virCommandPassFDGetFDIndex(virCommandPtr cmd, int fd)
 {
     size_t i = 0;
+
+    if (!cmd || cmd->has_error)
+        return -1;
 
     while (i < cmd->npassfd) {
         if (cmd->passfd[i].fd == fd)
@@ -1494,6 +1487,27 @@ virCommandAddEnvPassCommon(virCommandPtr cmd)
     virCommandAddEnvPassBlockSUID(cmd, "TMPDIR", NULL);
 }
 
+
+void
+virCommandAddEnvXDG(virCommandPtr cmd, const char *baseDir)
+{
+    if (!cmd || cmd->has_error)
+        return;
+
+    if (VIR_RESIZE_N(cmd->env, cmd->maxenv, cmd->nenv, 3) < 0) {
+        cmd->has_error = ENOMEM;
+        return;
+    }
+
+    virCommandAddEnvFormat(cmd, "XDG_DATA_HOME=%s/%s",
+                           baseDir, ".local/share");
+    virCommandAddEnvFormat(cmd, "XDG_CACHE_HOME=%s/%s",
+                           baseDir, ".cache");
+    virCommandAddEnvFormat(cmd, "XDG_CONFIG_HOME=%s/%s",
+                           baseDir, ".config");
+}
+
+
 /**
  * virCommandAddArg:
  * @cmd: the command to modify
@@ -1508,6 +1522,12 @@ virCommandAddArg(virCommandPtr cmd, const char *val)
 
     if (!cmd || cmd->has_error)
         return;
+
+    if (val == NULL) {
+        cmd->has_error = EINVAL;
+        abort();
+        return;
+    }
 
     if (VIR_STRDUP_QUIET(arg, val) < 0) {
         cmd->has_error = ENOMEM;
@@ -1606,6 +1626,10 @@ virCommandAddArgFormat(virCommandPtr cmd, const char *format, ...)
 void
 virCommandAddArgPair(virCommandPtr cmd, const char *name, const char *val)
 {
+    if (name == NULL || val == NULL) {
+        cmd->has_error = EINVAL;
+        return;
+    }
     virCommandAddArgFormat(cmd, "%s=%s", name, val);
 }
 
@@ -1961,6 +1985,7 @@ virCommandWriteArgLog(virCommandPtr cmd, int logfd)
 /**
  * virCommandToString:
  * @cmd: the command to convert
+ * @linebreaks: true to break line after each env var or option
  *
  * Call after adding all arguments and environment settings, but
  * before Run/RunAsync, to return a string representation of the
@@ -1970,10 +1995,11 @@ virCommandWriteArgLog(virCommandPtr cmd, int logfd)
  * Caller is responsible for freeing the resulting string.
  */
 char *
-virCommandToString(virCommandPtr cmd)
+virCommandToString(virCommandPtr cmd, bool linebreaks)
 {
     size_t i;
     virBuffer buf = VIR_BUFFER_INITIALIZER;
+    bool prevopt = false;
 
     /* Cannot assume virCommandRun will be called; so report the error
      * now.  If virCommandRun is called, it will report the same error. */
@@ -2002,11 +2028,22 @@ virCommandToString(virCommandPtr cmd)
         virBufferAdd(&buf, cmd->env[i], eq - cmd->env[i]);
         virBufferEscapeShell(&buf, eq);
         virBufferAddChar(&buf, ' ');
+        if (linebreaks)
+            virBufferAddLit(&buf, "\\\n");
     }
     virBufferEscapeShell(&buf, cmd->args[0]);
     for (i = 1; i < cmd->nargs; i++) {
         virBufferAddChar(&buf, ' ');
+        if (linebreaks) {
+            /* Line break if this is a --arg or if
+             * the previous arg was a positional option
+             */
+            if (cmd->args[i][0] == '-' ||
+                !prevopt)
+                virBufferAddLit(&buf, "\\\n");
+        }
         virBufferEscapeShell(&buf, cmd->args[i]);
+        prevopt = (cmd->args[i][0] == '-');
     }
 
     if (virBufferCheckError(&buf) < 0)
@@ -2043,12 +2080,14 @@ virCommandProcessIO(virCommandPtr cmd)
      * results accumulated over a prior run of the same command.  */
     if (cmd->outbuf) {
         outfd = cmd->outfd;
-        if (VIR_REALLOC_N(*cmd->outbuf, 1) < 0)
+        VIR_FREE(*cmd->outbuf);
+        if (VIR_ALLOC_N(*cmd->outbuf, 1) < 0)
             ret = -1;
     }
     if (cmd->errbuf) {
         errfd = cmd->errfd;
-        if (VIR_REALLOC_N(*cmd->errbuf, 1) < 0)
+        VIR_FREE(*cmd->errbuf);
+        if (VIR_ALLOC_N(*cmd->errbuf, 1) < 0)
             ret = -1;
     }
     if (ret == -1)
@@ -2387,7 +2426,7 @@ int
 virCommandRunAsync(virCommandPtr cmd, pid_t *pid)
 {
     int ret = -1;
-    char *str = NULL;
+    VIR_AUTOFREE(char *) str = NULL;
     size_t i;
     bool synchronous = false;
     int infd[2] = {-1, -1};
@@ -2449,7 +2488,7 @@ virCommandRunAsync(virCommandPtr cmd, pid_t *pid)
         goto cleanup;
     }
 
-    str = virCommandToString(cmd);
+    str = virCommandToString(cmd, false);
     if (dryRunBuffer || dryRunCallback) {
         dryRunStatus = 0;
         if (!str) {
@@ -2512,7 +2551,6 @@ virCommandRunAsync(virCommandPtr cmd, pid_t *pid)
         VIR_FORCE_CLOSE(cmd->infd);
         VIR_FORCE_CLOSE(cmd->inpipe);
     }
-    VIR_FREE(str);
     return ret;
 }
 
@@ -2553,6 +2591,8 @@ virCommandWait(virCommandPtr cmd, int *exitstatus)
                   dryRunStatus);
         if (exitstatus)
             *exitstatus = dryRunStatus;
+        else if (dryRunStatus)
+            return -1;
         return 0;
     }
 
@@ -2589,8 +2629,8 @@ virCommandWait(virCommandPtr cmd, int *exitstatus)
         if (exitstatus && (cmd->rawStatus || WIFEXITED(status))) {
             *exitstatus = cmd->rawStatus ? status : WEXITSTATUS(status);
         } else if (status) {
-            char *str = virCommandToString(cmd);
-            char *st = virProcessTranslateStatus(status);
+            VIR_AUTOFREE(char *) str = virCommandToString(cmd, false);
+            VIR_AUTOFREE(char *) st = virProcessTranslateStatus(status);
             bool haveErrMsg = cmd->errbuf && *cmd->errbuf && (*cmd->errbuf)[0];
 
             virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -2598,8 +2638,6 @@ virCommandWait(virCommandPtr cmd, int *exitstatus)
                            str ? str : cmd->args[0], NULLSTR(st),
                            haveErrMsg ? ": " : "",
                            haveErrMsg ? *cmd->errbuf : "");
-            VIR_FREE(str);
-            VIR_FREE(st);
             return -1;
         }
     }
@@ -2719,7 +2757,7 @@ int virCommandHandshakeWait(virCommandPtr cmd)
         return -1;
     }
     if (c != '1') {
-        char *msg;
+        VIR_AUTOFREE(char *) msg = NULL;
         ssize_t len;
         if (VIR_ALLOC_N(msg, 1024) < 0) {
             VIR_FORCE_CLOSE(cmd->handshakeWait[0]);
@@ -2732,7 +2770,6 @@ int virCommandHandshakeWait(virCommandPtr cmd)
 
         if ((len = saferead(cmd->handshakeWait[0], msg, 1024)) < 0) {
             VIR_FORCE_CLOSE(cmd->handshakeWait[0]);
-            VIR_FREE(msg);
             virReportSystemError(errno, "%s",
                                  _("No error message from child failure"));
             return -1;
@@ -2740,7 +2777,6 @@ int virCommandHandshakeWait(virCommandPtr cmd)
         VIR_FORCE_CLOSE(cmd->handshakeWait[0]);
         msg[len-1] = '\0';
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s", msg);
-        VIR_FREE(msg);
         return -1;
     }
     VIR_FORCE_CLOSE(cmd->handshakeWait[0]);
@@ -2854,8 +2890,8 @@ virCommandFree(virCommandPtr cmd)
  * This requests asynchronous string IO on @cmd. It is useful in
  * combination with virCommandRunAsync():
  *
- *      virCommandPtr cmd = virCommandNew*(...);
- *      char *buf = NULL;
+ *      VIR_AUTOPTR(virCommand) cmd = virCommandNew*(...);
+ *      VIR_AUTOFREE(char *) buf = NULL;
  *
  *      ...
  *
@@ -2863,21 +2899,18 @@ virCommandFree(virCommandPtr cmd)
  *      virCommandDoAsyncIO(cmd);
  *
  *      if (virCommandRunAsync(cmd, NULL) < 0)
- *          goto cleanup;
+ *          return;
  *
  *      ...
  *
  *      if (virCommandWait(cmd, NULL) < 0)
- *          goto cleanup;
+ *          return;
  *
  *      // @buf now contains @cmd's stdout
  *      VIR_DEBUG("STDOUT: %s", NULLSTR(buf));
  *
  *      ...
  *
- *  cleanup:
- *      VIR_FREE(buf);
- *      virCommandFree(cmd);
  *
  * The libvirt's event loop is used for handling stdios of @cmd.
  * Since current implementation uses strlen to determine length
@@ -2888,10 +2921,10 @@ virCommandFree(virCommandPtr cmd)
 void
 virCommandDoAsyncIO(virCommandPtr cmd)
 {
-   if (!cmd || cmd->has_error)
-       return;
+    if (!cmd || cmd->has_error)
+        return;
 
-   cmd->flags |= VIR_EXEC_ASYNC_IO | VIR_EXEC_NONBLOCK;
+    cmd->flags |= VIR_EXEC_ASYNC_IO | VIR_EXEC_NONBLOCK;
 }
 
 /**
@@ -2970,12 +3003,12 @@ virCommandRunRegex(virCommandPtr cmd,
 {
     int err;
     regex_t *reg;
-    regmatch_t *vars = NULL;
+    VIR_AUTOFREE(regmatch_t *) vars = NULL;
     size_t i, j, k;
     int totgroups = 0, ngroup = 0, maxvars = 0;
     char **groups;
-    char *outbuf = NULL;
-    char **lines = NULL;
+    VIR_AUTOFREE(char *) outbuf = NULL;
+    VIR_AUTOSTRINGLIST lines = NULL;
     int ret = -1;
 
     /* Compile all regular expressions */
@@ -3054,14 +3087,11 @@ virCommandRunRegex(virCommandPtr cmd,
 
     ret = 0;
  cleanup:
-    virStringListFree(lines);
-    VIR_FREE(outbuf);
     if (groups) {
         for (j = 0; j < totgroups; j++)
             VIR_FREE(groups[j]);
         VIR_FREE(groups);
     }
-    VIR_FREE(vars);
 
     for (i = 0; i < nregex; i++)
         regfree(&reg[i]);

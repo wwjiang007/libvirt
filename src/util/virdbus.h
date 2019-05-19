@@ -19,8 +19,8 @@
  *
  */
 
-#ifndef __VIR_DBUS_H__
-# define __VIR_DBUS_H__
+#ifndef LIBVIRT_VIRDBUS_H
+# define LIBVIRT_VIRDBUS_H
 
 # ifdef WITH_DBUS
 #  undef interface /* Work around namespace pollution in mingw's rpc.h */
@@ -67,12 +67,12 @@ int virDBusCallMethod(DBusConnection *conn,
                       const char *iface,
                       const char *member,
                       const char *types, ...);
-int virDBusMessageRead(DBusMessage *msg,
-                       const char *types, ...);
+int virDBusMessageDecode(DBusMessage *msg,
+                         const char *types, ...);
 void virDBusMessageUnref(DBusMessage *msg);
 
 int virDBusIsServiceEnabled(const char *name);
 int virDBusIsServiceRegistered(const char *name);
 
 bool virDBusErrorIsUnknownMethod(virErrorPtr err);
-#endif /* __VIR_DBUS_H__ */
+#endif /* LIBVIRT_VIRDBUS_H */

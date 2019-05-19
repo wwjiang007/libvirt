@@ -16,8 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Red Hat Author: Miloslav Trmač <mitr@redhat.com>
  */
 
 #include <config.h>
@@ -149,11 +147,7 @@ secretXMLParseNode(xmlDocPtr xml, xmlNodePtr root)
 
     prop = virXPathString("string(./@ephemeral)", ctxt);
     if (prop != NULL) {
-        if (STREQ(prop, "yes")) {
-            def->isephemeral = true;
-        } else if (STREQ(prop, "no")) {
-            def->isephemeral = false;
-        } else {
+        if (virStringParseYesNo(prop, &def->isephemeral) < 0) {
             virReportError(VIR_ERR_XML_ERROR, "%s",
                            _("invalid value of 'ephemeral'"));
             goto cleanup;
@@ -163,11 +157,7 @@ secretXMLParseNode(xmlDocPtr xml, xmlNodePtr root)
 
     prop = virXPathString("string(./@private)", ctxt);
     if (prop != NULL) {
-        if (STREQ(prop, "yes")) {
-            def->isprivate = true;
-        } else if (STREQ(prop, "no")) {
-            def->isprivate = false;
-        } else {
+        if (virStringParseYesNo(prop, &def->isprivate) < 0) {
             virReportError(VIR_ERR_XML_ERROR, "%s",
                            _("invalid value of 'private'"));
             goto cleanup;
@@ -177,7 +167,7 @@ secretXMLParseNode(xmlDocPtr xml, xmlNodePtr root)
 
     uuidstr = virXPathString("string(./uuid)", ctxt);
     if (!uuidstr) {
-        if (virUUIDGenerate(def->uuid)) {
+        if (virUUIDGenerate(def->uuid) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            "%s", _("Failed to generate UUID"));
             goto cleanup;
@@ -195,8 +185,7 @@ secretXMLParseNode(xmlDocPtr xml, xmlNodePtr root)
     if (virXPathNode("./usage", ctxt) != NULL
         && virSecretDefParseUsage(ctxt, def) < 0)
         goto cleanup;
-    ret = def;
-    def = NULL;
+    VIR_STEAL_PTR(ret, def);
 
  cleanup:
     VIR_FREE(prop);

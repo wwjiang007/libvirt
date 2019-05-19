@@ -16,18 +16,14 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Martin Kletzander <mkletzan@redhat.com>
  */
 
-#ifndef __VIR_NET_DAEMON_H__
-# define __VIR_NET_DAEMON_H__
+#ifndef LIBVIRT_VIRNETDAEMON_H
+# define LIBVIRT_VIRNETDAEMON_H
 
 # include <signal.h>
 
-# ifdef WITH_GNUTLS
-#  include "virnettlscontext.h"
-# endif
+# include "virnettlscontext.h"
 # include "virobject.h"
 # include "virjson.h"
 # include "virnetserverprogram.h"
@@ -86,4 +82,4 @@ ssize_t virNetDaemonGetServers(virNetDaemonPtr dmn, virNetServerPtr **servers);
 bool virNetDaemonHasServer(virNetDaemonPtr dmn,
                            const char *serverName);
 
-#endif /* __VIR_NET_DAEMON_H__ */
+#endif /* LIBVIRT_VIRNETDAEMON_H */

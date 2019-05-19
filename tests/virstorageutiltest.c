@@ -16,7 +16,6 @@
 
 #include <config.h>
 
-#include <stdlib.h>
 
 #include "testutils.h"
 #include "virerror.h"
@@ -46,9 +45,9 @@ testGlusterExtractPoolSources(const void *opaque)
                                       .sources = NULL
                                     };
     size_t i;
-    char *srcxmldata = NULL;
-    char *actual = NULL;
     int ret = -1;
+    VIR_AUTOFREE(char *) srcxmldata = NULL;
+    VIR_AUTOFREE(char *) actual = NULL;
 
     if (virTestLoadFile(data->srcxml, &srcxmldata) < 0)
         goto cleanup;
@@ -63,9 +62,6 @@ testGlusterExtractPoolSources(const void *opaque)
     ret = virTestCompareToFile(actual, data->dstxml);
 
  cleanup:
-    VIR_FREE(srcxmldata);
-    VIR_FREE(actual);
-
     for (i = 0; i < list.nsources; i++)
         virStoragePoolSourceClear(&list.sources[i]);
     VIR_FREE(list.sources);

@@ -18,8 +18,8 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_DRIVER_STORAGE_H__
-# define __VIR_DRIVER_STORAGE_H__
+#ifndef LIBVIRT_DRIVER_STORAGE_H
+# define LIBVIRT_DRIVER_STORAGE_H
 
 # ifndef __VIR_DRIVER_H_INCLUDES___
 #  error "Don't include this file directly, only use driver.h"
@@ -51,6 +51,10 @@ typedef char *
                                        const char *type,
                                        const char *srcSpec,
                                        unsigned int flags);
+
+typedef char *
+(*virDrvConnectGetStoragePoolCapabilities)(virConnectPtr conn,
+                                           unsigned int flags);
 
 typedef virStoragePoolPtr
 (*virDrvStoragePoolLookupByName)(virConnectPtr conn,
@@ -237,6 +241,7 @@ struct _virStorageDriver {
     virDrvConnectFindStoragePoolSources connectFindStoragePoolSources;
     virDrvConnectStoragePoolEventRegisterAny connectStoragePoolEventRegisterAny;
     virDrvConnectStoragePoolEventDeregisterAny connectStoragePoolEventDeregisterAny;
+    virDrvConnectGetStoragePoolCapabilities connectGetStoragePoolCapabilities;
     virDrvStoragePoolLookupByName storagePoolLookupByName;
     virDrvStoragePoolLookupByUUID storagePoolLookupByUUID;
     virDrvStoragePoolLookupByVolume storagePoolLookupByVolume;
@@ -276,4 +281,4 @@ struct _virStorageDriver {
 };
 
 
-#endif /* __VIR_DRIVER_STORAGE_H__ */
+#endif /* LIBVIRT_DRIVER_STORAGE_H */

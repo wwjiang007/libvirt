@@ -18,14 +18,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: David F. Lively <dlively@virtualiron.com>
  */
 
 #include <config.h>
 
 #include <unistd.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <time.h>
 
@@ -38,6 +35,7 @@
 #include "node_device_event.h"
 #include "node_device_driver.h"
 #include "node_device_hal.h"
+#include "node_device_util.h"
 #include "virvhba.h"
 #include "viraccessapicheck.h"
 #include "virnetdev.h"

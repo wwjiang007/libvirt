@@ -37,6 +37,8 @@ struct _virNodeDeviceObj {
     virObjectLockable parent;
 
     virNodeDeviceDefPtr def;            /* device definition */
+    bool skipUpdateCaps;                /* whether to skip checking host caps,
+                                           used by testdriver */
 };
 
 struct _virNodeDeviceObjList {
@@ -67,7 +69,7 @@ virNodeDeviceObjOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(virNodeDeviceObj)
+VIR_ONCE_GLOBAL_INIT(virNodeDeviceObj);
 
 
 static void
@@ -205,7 +207,8 @@ virNodeDeviceObjListFindBySysfsPathCallback(const void *payload,
     int want = 0;
 
     virObjectLock(obj);
-    if (STREQ_NULLABLE(obj->def->sysfs_path, sysfs_path))
+    if (obj->def->sysfs_path &&
+        STREQ_NULLABLE(obj->def->sysfs_path, sysfs_path))
         want = 1;
     virObjectUnlock(obj);
     return want;
@@ -802,11 +805,12 @@ virNodeDeviceObjListGetNames(virNodeDeviceObjListPtr devs,
 #define MATCH(FLAG) ((flags & (VIR_CONNECT_LIST_NODE_DEVICES_CAP_ ## FLAG)) && \
                      virNodeDeviceObjHasCap(obj, VIR_NODE_DEV_CAP_ ## FLAG))
 static bool
-virNodeDeviceMatch(virNodeDeviceObjPtr obj,
-                   unsigned int flags)
+virNodeDeviceObjMatch(virNodeDeviceObjPtr obj,
+                      unsigned int flags)
 {
     /* Refresh the capabilities first, e.g. due to a driver change */
-    if (virNodeDeviceUpdateCaps(obj->def) < 0)
+    if (!obj->skipUpdateCaps &&
+        virNodeDeviceUpdateCaps(obj->def) < 0)
         return false;
 
     /* filter by cap type */
@@ -835,7 +839,9 @@ virNodeDeviceMatch(virNodeDeviceObjPtr obj,
 #undef MATCH
 
 
-struct virNodeDeviceObjListExportData {
+typedef struct _virNodeDeviceObjListExportData virNodeDeviceObjListExportData;
+typedef virNodeDeviceObjListExportData *virNodeDeviceObjListExportDataPtr;
+struct _virNodeDeviceObjListExportData {
     virConnectPtr conn;
     virNodeDeviceObjListFilter filter;
     unsigned int flags;
@@ -851,7 +857,7 @@ virNodeDeviceObjListExportCallback(void *payload,
 {
     virNodeDeviceObjPtr obj = payload;
     virNodeDeviceDefPtr def;
-    struct virNodeDeviceObjListExportData *data = opaque;
+    virNodeDeviceObjListExportDataPtr data = opaque;
     virNodeDevicePtr device = NULL;
 
     if (data->error)
@@ -861,7 +867,7 @@ virNodeDeviceObjListExportCallback(void *payload,
     def = obj->def;
 
     if ((!data->filter || data->filter(data->conn, def)) &&
-        virNodeDeviceMatch(obj, data->flags)) {
+        virNodeDeviceObjMatch(obj, data->flags)) {
         if (data->devices) {
             if (!(device = virGetNodeDevice(data->conn, def->name)) ||
                 VIR_STRDUP(device->parentName, def->parent) < 0) {
@@ -887,7 +893,7 @@ virNodeDeviceObjListExport(virConnectPtr conn,
                            virNodeDeviceObjListFilter filter,
                            unsigned int flags)
 {
-    struct virNodeDeviceObjListExportData data = {
+    virNodeDeviceObjListExportData data = {
         .conn = conn, .filter = filter, .flags = flags,
         .devices = NULL, .ndevices = 0, .error = false };
 
@@ -914,4 +920,12 @@ virNodeDeviceObjListExport(virConnectPtr conn,
  cleanup:
     virObjectListFree(data.devices);
     return -1;
+}
+
+
+void
+virNodeDeviceObjSetSkipUpdateCaps(virNodeDeviceObjPtr obj,
+                                  bool skipUpdateCaps)
+{
+    obj->skipUpdateCaps = skipUpdateCaps;
 }

@@ -4,8 +4,6 @@
 
 #ifdef WITH_VMX
 
-# include <stdio.h>
-# include <string.h>
 # include <unistd.h>
 
 # include "internal.h"
@@ -279,6 +277,7 @@ mymain(void)
     DO_TEST("esx-in-the-wild-5", "esx-in-the-wild-5", 4);
     DO_TEST("esx-in-the-wild-6", "esx-in-the-wild-6", 4);
     DO_TEST("esx-in-the-wild-7", "esx-in-the-wild-7", 4);
+    DO_TEST("esx-in-the-wild-9", "esx-in-the-wild-9", 10);
 
     DO_TEST("gsx-in-the-wild-1", "gsx-in-the-wild-1", 4);
     DO_TEST("gsx-in-the-wild-2", "gsx-in-the-wild-2", 4);
@@ -295,6 +294,8 @@ mymain(void)
     DO_TEST("smbios", "smbios", 4);
 
     DO_TEST("svga", "svga", 4);
+
+    DO_TEST("firmware-efi", "firmware-efi", 4);
 
     DO_TEST("datacenterpath", "datacenterpath", 4);
 

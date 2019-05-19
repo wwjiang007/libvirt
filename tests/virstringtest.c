@@ -14,13 +14,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
 
-#include <stdlib.h>
 
 #include "testutils.h"
 #include "verify.h"
@@ -179,12 +176,8 @@ static int testAdd(const void *args)
     size_t i;
 
     for (i = 0; data->tokens[i]; i++) {
-        char **tmp = virStringListAdd((const char **)list, data->tokens[i]);
-        if (!tmp)
+        if (virStringListAdd(&list, data->tokens[i]) < 0)
             goto cleanup;
-        virStringListFree(list);
-        list = tmp;
-        tmp = NULL;
     }
 
     if (!list &&

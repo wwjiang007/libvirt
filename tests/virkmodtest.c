@@ -22,8 +22,7 @@
 
 #ifdef __linux__
 
-# include <stdlib.h>
-# define __VIR_COMMAND_PRIV_H_ALLOW__
+# define LIBVIRT_VIRCOMMANDPRIV_H_ALLOW
 # include "vircommandpriv.h"
 # include "virkmod.h"
 # include "virstring.h"
@@ -47,7 +46,12 @@ testKModConfig(const void *args ATTRIBUTE_UNUSED)
      */
     outbuf = virKModConfig();
     if (!outbuf) {
-        fprintf(stderr, "Failed to get config\n");
+        if (virFileIsExecutable(MODPROBE)) {
+            fprintf(stderr, "Failed to get config\n");
+        } else {
+            /* modprobe doesn't exist, do not claim error. */
+            ret = 0;
+        }
         goto cleanup;
     }
     ret = 0;

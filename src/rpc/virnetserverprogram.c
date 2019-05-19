@@ -17,8 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -57,7 +55,7 @@ static int virNetServerProgramOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(virNetServerProgram)
+VIR_ONCE_GLOBAL_INIT(virNetServerProgram);
 
 
 virNetServerProgramPtr virNetServerProgramNew(unsigned program,
@@ -575,7 +573,7 @@ int virNetServerProgramSendStreamHole(virNetServerProgramPtr prog,
         return -1;
 
     if (virNetMessageEncodePayload(msg,
-                                   (xdrproc_t) xdr_virNetStreamHole,
+                                   (xdrproc_t)xdr_virNetStreamHole,
                                    &data) < 0)
         return -1;
 

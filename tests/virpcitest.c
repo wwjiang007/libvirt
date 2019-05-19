@@ -14,8 +14,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Michal Privoznik <mprivozn@redhat.com>
  */
 
 #include <config.h>
@@ -24,8 +22,6 @@
 
 #ifdef __linux__
 
-# include <stdlib.h>
-# include <stdio.h>
 # include <sys/types.h>
 # include <sys/stat.h>
 # include <fcntl.h>

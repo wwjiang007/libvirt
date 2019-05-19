@@ -14,8 +14,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Michal Privoznik <mprivozn@redhat.com>
  */
 
 #include <config.h>
@@ -24,7 +22,6 @@
 
 #ifdef NSS
 
-# include <stdbool.h>
 # include <arpa/inet.h>
 # include "libvirt_nss.h"
 # include "virsocketaddr.h"

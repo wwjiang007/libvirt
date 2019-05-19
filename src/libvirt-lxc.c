@@ -17,8 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -306,7 +304,7 @@ int virDomainLxcEnterCGroup(virDomainPtr domain,
     if (virCgroupNewDetect(domain->id, -1, &cgroup) < 0)
         goto error;
 
-    if (virCgroupAddTask(cgroup, getpid()) < 0)
+    if (virCgroupAddProcess(cgroup, getpid()) < 0)
         goto error;
 
     virCgroupFree(&cgroup);

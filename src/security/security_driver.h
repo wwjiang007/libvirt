@@ -14,13 +14,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     James Morris <jmorris@namei.org>
- *
  */
-#ifndef __VIR_SECURITY_H__
-# define __VIR_SECURITY_H__
+
+#ifndef LIBVIRT_SECURITY_DRIVER_H
+# define LIBVIRT_SECURITY_DRIVER_H
 
 # include "internal.h"
 # include "domain_conf.h"
@@ -53,21 +50,16 @@ typedef int (*virSecurityDriverPreFork) (virSecurityManagerPtr mgr);
 
 typedef int (*virSecurityDriverTransactionStart) (virSecurityManagerPtr mgr);
 typedef int (*virSecurityDriverTransactionCommit) (virSecurityManagerPtr mgr,
-                                                   pid_t pid);
+                                                   pid_t pid,
+                                                   bool lock);
 typedef void (*virSecurityDriverTransactionAbort) (virSecurityManagerPtr mgr);
 
-typedef int (*virSecurityDomainRestoreDiskLabel) (virSecurityManagerPtr mgr,
-                                                  virDomainDefPtr def,
-                                                  virDomainDiskDefPtr disk);
 typedef int (*virSecurityDomainSetDaemonSocketLabel)(virSecurityManagerPtr mgr,
                                                      virDomainDefPtr vm);
 typedef int (*virSecurityDomainSetSocketLabel) (virSecurityManagerPtr mgr,
                                                 virDomainDefPtr def);
 typedef int (*virSecurityDomainClearSocketLabel)(virSecurityManagerPtr mgr,
                                                 virDomainDefPtr def);
-typedef int (*virSecurityDomainSetDiskLabel) (virSecurityManagerPtr mgr,
-                                              virDomainDefPtr def,
-                                              virDomainDiskDefPtr disk);
 typedef int (*virSecurityDomainRestoreHostdevLabel) (virSecurityManagerPtr mgr,
                                                      virDomainDefPtr def,
                                                      virDomainHostdevDefPtr dev,
@@ -119,12 +111,15 @@ typedef char *(*virSecurityDomainGetMountOptions) (virSecurityManagerPtr mgr,
 typedef int (*virSecurityDomainSetHugepages) (virSecurityManagerPtr mgr,
                                               virDomainDefPtr def,
                                               const char *path);
+
 typedef int (*virSecurityDomainSetImageLabel) (virSecurityManagerPtr mgr,
                                                virDomainDefPtr def,
-                                               virStorageSourcePtr src);
+                                               virStorageSourcePtr src,
+                                               virSecurityDomainImageLabelFlags flags);
 typedef int (*virSecurityDomainRestoreImageLabel) (virSecurityManagerPtr mgr,
                                                    virDomainDefPtr def,
-                                                   virStorageSourcePtr src);
+                                                   virStorageSourcePtr src,
+                                                   virSecurityDomainImageLabelFlags flags);
 typedef int (*virSecurityDomainSetMemoryLabel) (virSecurityManagerPtr mgr,
                                                 virDomainDefPtr def,
                                                 virDomainMemoryDefPtr mem);
@@ -149,6 +144,10 @@ typedef int (*virSecurityDomainRestoreChardevLabel) (virSecurityManagerPtr mgr,
                                                      virDomainDefPtr def,
                                                      virDomainChrSourceDefPtr dev_source,
                                                      bool chardevStdioLogd);
+typedef int (*virSecurityDomainSetTPMLabels) (virSecurityManagerPtr mgr,
+                                              virDomainDefPtr def);
+typedef int (*virSecurityDomainRestoreTPMLabels) (virSecurityManagerPtr mgr,
+                                                  virDomainDefPtr def);
 
 
 struct _virSecurityDriver {
@@ -168,9 +167,6 @@ struct _virSecurityDriver {
     virSecurityDriverTransactionAbort transactionAbort;
 
     virSecurityDomainSecurityVerify domainSecurityVerify;
-
-    virSecurityDomainSetDiskLabel domainSetSecurityDiskLabel;
-    virSecurityDomainRestoreDiskLabel domainRestoreSecurityDiskLabel;
 
     virSecurityDomainSetImageLabel domainSetSecurityImageLabel;
     virSecurityDomainRestoreImageLabel domainRestoreSecurityImageLabel;
@@ -213,9 +209,12 @@ struct _virSecurityDriver {
 
     virSecurityDomainSetChardevLabel domainSetSecurityChardevLabel;
     virSecurityDomainRestoreChardevLabel domainRestoreSecurityChardevLabel;
+
+    virSecurityDomainSetTPMLabels domainSetSecurityTPMLabels;
+    virSecurityDomainRestoreTPMLabels domainRestoreSecurityTPMLabels;
 };
 
 virSecurityDriverPtr virSecurityDriverLookup(const char *name,
                                              const char *virtDriver);
 
-#endif /* __VIR_SECURITY_H__ */
+#endif /* LIBVIRT_SECURITY_DRIVER_H */

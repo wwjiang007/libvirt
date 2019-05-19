@@ -16,9 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel Veillard <veillard@redhat.com>
- *         Laine Stump <laine@redhat.com>
  */
 
 #include <config.h>
@@ -36,7 +33,8 @@
 
 VIR_ENUM_IMPL(virInterface,
               VIR_INTERFACE_TYPE_LAST,
-              "ethernet", "bridge", "bond", "vlan")
+              "ethernet", "bridge", "bond", "vlan",
+);
 
 static virInterfaceDefPtr
 virInterfaceDefParseXML(xmlXPathContextPtr ctxt, int parentIfType);

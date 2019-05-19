@@ -21,12 +21,8 @@
 
 #include <config.h>
 
-#include <stdlib.h>
 #include <stdint.h>
 #include <unistd.h>
-#include <string.h>
-#include <stdio.h>
-#include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -221,8 +217,8 @@ virLockManagerSanlockSetupLockspace(virLockManagerSanlockDriverPtr driver)
                     VIR_LOCK_MANAGER_SANLOCK_AUTO_DISK_LOCKSPACE) < 0)
         goto error;
 
-    if (!virStrcpyStatic(ls.name,
-                         VIR_LOCK_MANAGER_SANLOCK_AUTO_DISK_LOCKSPACE)) {
+    if (virStrcpyStatic(ls.name,
+                        VIR_LOCK_MANAGER_SANLOCK_AUTO_DISK_LOCKSPACE) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Lockspace path '%s' exceeded %d characters"),
                        VIR_LOCK_MANAGER_SANLOCK_AUTO_DISK_LOCKSPACE,
@@ -231,7 +227,7 @@ virLockManagerSanlockSetupLockspace(virLockManagerSanlockDriverPtr driver)
     }
     ls.host_id = 0; /* Doesn't matter for initialization */
     ls.flags = 0;
-    if (!virStrcpy(ls.host_id_disk.path, path, SANLK_PATH_LEN)) {
+    if (virStrcpy(ls.host_id_disk.path, path, SANLK_PATH_LEN) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Lockspace path '%s' exceeded %d characters"),
                        path, SANLK_PATH_LEN);
@@ -583,7 +579,7 @@ static int virLockManagerSanlockAddLease(virLockManagerPtr lock,
 
     res->flags = shared ? SANLK_RES_SHARED : 0;
     res->num_disks = 1;
-    if (!virStrcpy(res->name, name, SANLK_NAME_LEN)) {
+    if (virStrcpy(res->name, name, SANLK_NAME_LEN) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Resource name '%s' exceeds %d characters"),
                        name, SANLK_NAME_LEN);
@@ -592,7 +588,7 @@ static int virLockManagerSanlockAddLease(virLockManagerPtr lock,
 
     for (i = 0; i < nparams; i++) {
         if (STREQ(params[i].key, "path")) {
-            if (!virStrcpy(res->disks[0].path, params[i].value.str, SANLK_PATH_LEN)) {
+            if (virStrcpy(res->disks[0].path, params[i].value.str, SANLK_PATH_LEN) < 0) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
                                _("Lease path '%s' exceeds %d characters"),
                                params[i].value.str, SANLK_PATH_LEN);
@@ -601,7 +597,7 @@ static int virLockManagerSanlockAddLease(virLockManagerPtr lock,
         } else if (STREQ(params[i].key, "offset")) {
             res->disks[0].offset = params[i].value.ul;
         } else if (STREQ(params[i].key, "lockspace")) {
-            if (!virStrcpy(res->lockspace_name, params[i].value.str, SANLK_NAME_LEN)) {
+            if (virStrcpy(res->lockspace_name, params[i].value.str, SANLK_NAME_LEN) < 0) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
                                _("Resource lockspace '%s' exceeds %d characters"),
                                params[i].value.str, SANLK_NAME_LEN);
@@ -651,7 +647,7 @@ virLockManagerSanlockAddDisk(virLockManagerSanlockDriverPtr driver,
     res->num_disks = 1;
     if (virCryptoHashString(VIR_CRYPTO_HASH_MD5, name, &hash) < 0)
         goto cleanup;
-    if (!virStrcpy(res->name, hash, SANLK_NAME_LEN)) {
+    if (virStrcpy(res->name, hash, SANLK_NAME_LEN) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("MD5 hash '%s' unexpectedly larger than %d characters"),
                        hash, (SANLK_NAME_LEN - 1));
@@ -661,16 +657,16 @@ virLockManagerSanlockAddDisk(virLockManagerSanlockDriverPtr driver,
     if (virAsprintf(&path, "%s/%s",
                     driver->autoDiskLeasePath, res->name) < 0)
         goto cleanup;
-    if (!virStrcpy(res->disks[0].path, path, SANLK_PATH_LEN)) {
+    if (virStrcpy(res->disks[0].path, path, SANLK_PATH_LEN) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Lease path '%s' exceeds %d characters"),
                        path, SANLK_PATH_LEN);
         goto cleanup;
     }
 
-    if (!virStrcpy(res->lockspace_name,
-                   VIR_LOCK_MANAGER_SANLOCK_AUTO_DISK_LOCKSPACE,
-                   SANLK_NAME_LEN)) {
+    if (virStrcpy(res->lockspace_name,
+                  VIR_LOCK_MANAGER_SANLOCK_AUTO_DISK_LOCKSPACE,
+                  SANLK_NAME_LEN) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Resource lockspace '%s' exceeds %d characters"),
                        VIR_LOCK_MANAGER_SANLOCK_AUTO_DISK_LOCKSPACE, SANLK_NAME_LEN);
@@ -829,8 +825,10 @@ static int virLockManagerSanlockAddResource(virLockManagerPtr lock,
         break;
 
     default:
-        /* Ignore other resources, without error */
-        break;
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Unknown lock manager object type %d for domain lock object"),
+                       type);
+        return -1;
     }
 
     return 0;
@@ -1004,7 +1002,8 @@ static int virLockManagerSanlockAcquire(virLockManagerPtr lock,
     /* sanlock doesn't use owner_name for anything, so it's safe to take just
      * the first SANLK_NAME_LEN - 1 characters from vm_name */
     ignore_value(virStrncpy(opt->owner_name, priv->vm_name,
-                            SANLK_NAME_LEN - 1, SANLK_NAME_LEN));
+                            MIN(strlen(priv->vm_name), SANLK_NAME_LEN - 1),
+                            SANLK_NAME_LEN));
 
     if (state && STRNEQ(state, "")) {
         if ((rv = sanlock_state_to_args((char *)state,

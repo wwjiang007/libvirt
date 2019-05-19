@@ -35,6 +35,8 @@
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
+#define VIR_PORT_ALLOCATOR_NUM_PORTS 65536
+
 typedef struct _virPortAllocator virPortAllocator;
 typedef virPortAllocator *virPortAllocatorPtr;
 struct _virPortAllocator {
@@ -68,7 +70,7 @@ virPortAllocatorNew(void)
     if (!(pa = virObjectLockableNew(virPortAllocatorClass)))
         return NULL;
 
-    if (!(pa->bitmap = virBitmapNew(USHRT_MAX)))
+    if (!(pa->bitmap = virBitmapNew(VIR_PORT_ALLOCATOR_NUM_PORTS)))
         goto error;
 
     return pa;
@@ -89,7 +91,7 @@ virPortAllocatorOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(virPortAllocator)
+VIR_ONCE_GLOBAL_INIT(virPortAllocator);
 
 virPortAllocatorRangePtr
 virPortAllocatorRangeNew(const char *name,
@@ -291,6 +293,9 @@ virPortAllocatorSetUsed(unsigned short port)
 
     if (!pa)
         return -1;
+
+    if (!port)
+        return 0;
 
     virObjectLock(pa);
 

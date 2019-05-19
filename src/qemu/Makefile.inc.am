@@ -1,3 +1,5 @@
+# vim: filetype=automake
+
 QEMU_DRIVER_SOURCES = \
 	qemu/qemu_agent.c \
 	qemu/qemu_agent.h \
@@ -19,6 +21,10 @@ QEMU_DRIVER_SOURCES = \
 	qemu/qemu_domain_address.h \
 	qemu/qemu_cgroup.c \
 	qemu/qemu_cgroup.h \
+	qemu/qemu_extdevice.c \
+	qemu/qemu_extdevice.h \
+	qemu/qemu_firmware.c \
+	qemu/qemu_firmware.h \
 	qemu/qemu_hostdev.c \
 	qemu/qemu_hostdev.h \
 	qemu/qemu_hotplug.c \
@@ -33,11 +39,12 @@ QEMU_DRIVER_SOURCES = \
 	qemu/qemu_migration.h \
 	qemu/qemu_migration_cookie.c \
 	qemu/qemu_migration_cookie.h \
-        qemu/qemu_migration_params.c \
-        qemu/qemu_migration_params.h \
-        qemu/qemu_migration_paramspriv.h \
+	qemu/qemu_migration_params.c \
+	qemu/qemu_migration_params.h \
+	qemu/qemu_migration_paramspriv.h \
 	qemu/qemu_monitor.c \
 	qemu/qemu_monitor.h \
+	qemu/qemu_monitor_priv.h \
 	qemu/qemu_monitor_text.c \
 	qemu/qemu_monitor_text.h \
 	qemu/qemu_monitor_json.c \
@@ -51,6 +58,8 @@ QEMU_DRIVER_SOURCES = \
 	qemu/qemu_security.h \
 	qemu/qemu_qapi.c \
 	qemu/qemu_qapi.h \
+	qemu/qemu_tpm.c \
+	qemu/qemu_tpm.h \
 	$(NULL)
 
 
@@ -129,12 +138,18 @@ install-data-qemu:
 	$(MKDIR_P) "$(DESTDIR)$(localstatedir)/run/libvirt/qemu"
 	$(MKDIR_P) "$(DESTDIR)$(localstatedir)/cache/libvirt/qemu"
 	$(MKDIR_P) "$(DESTDIR)$(localstatedir)/log/libvirt/qemu"
+	$(MKDIR_P) "$(DESTDIR)$(localstatedir)/lib/libvirt/swtpm"
+	$(MKDIR_P) "$(DESTDIR)$(localstatedir)/run/libvirt/qemu/swtpm"
+	$(MKDIR_P) "$(DESTDIR)$(localstatedir)/log/swtpm/libvirt/qemu"
 
 uninstall-data-qemu:
 	rmdir "$(DESTDIR)$(localstatedir)/lib/libvirt/qemu" ||:
 	rmdir "$(DESTDIR)$(localstatedir)/run/libvirt/qemu" ||:
 	rmdir "$(DESTDIR)$(localstatedir)/cache/libvirt/qemu" ||:
 	rmdir "$(DESTDIR)$(localstatedir)/log/libvirt/qemu" ||:
+	rmdir "$(DESTDIR)$(localstatedir)/lib/libvirt/swtpm"
+	rmdir "$(DESTDIR)$(localstatedir)/run/libvirt/qemu/swtpm" ||:
+	rmdir "$(DESTDIR)$(localstatedir)/log/swtpm/libvirt/qemu" ||:
 
 endif WITH_QEMU
 

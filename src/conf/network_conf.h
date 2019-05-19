@@ -17,12 +17,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __NETWORK_CONF_H__
-# define __NETWORK_CONF_H__
+#ifndef LIBVIRT_NETWORK_CONF_H
+# define LIBVIRT_NETWORK_CONF_H
 
 # define DNS_RECORD_LENGTH_SRV  (512 - 30)  /* Limit minus overhead as mentioned in RFC-2782 */
 
@@ -42,6 +40,7 @@
 # include "networkcommon_conf.h"
 # include "virobject.h"
 # include "virmacmap.h"
+# include "virenum.h"
 
 typedef enum {
     VIR_NETWORK_FORWARD_NONE   = 0,
@@ -65,7 +64,7 @@ typedef enum {
    VIR_NETWORK_BRIDGE_MAC_TABLE_MANAGER_LAST,
 } virNetworkBridgeMACTableManagerType;
 
-VIR_ENUM_DECL(virNetworkBridgeMACTableManager)
+VIR_ENUM_DECL(virNetworkBridgeMACTableManager);
 
 typedef enum {
     VIR_NETWORK_FORWARD_HOSTDEV_DEVICE_NONE = 0,
@@ -88,7 +87,7 @@ typedef enum {
     VIR_NETWORK_FORWARD_DRIVER_NAME_LAST
 } virNetworkForwardDriverNameType;
 
-VIR_ENUM_DECL(virNetworkForwardDriverName)
+VIR_ENUM_DECL(virNetworkForwardDriverName);
 
 typedef struct _virNetworkDHCPHostDef virNetworkDHCPHostDef;
 typedef virNetworkDHCPHostDef *virNetworkDHCPHostDefPtr;
@@ -237,6 +236,7 @@ struct _virNetworkDef {
     int   connections; /* # of guest interfaces connected to this network */
 
     char *bridge;       /* Name of bridge device */
+    char *bridgeZone;  /* name of firewalld zone for bridge */
     int  macTableManager; /* enum virNetworkBridgeMACTableManager */
     char *domain;
     int domainLocalOnly; /* enum virTristateBool: yes disables dns forwarding */
@@ -356,7 +356,7 @@ virNetworkConfigFile(const char *dir,
 void
 virNetworkSetBridgeMacAddr(virNetworkDefPtr def);
 
-VIR_ENUM_DECL(virNetworkForward)
+VIR_ENUM_DECL(virNetworkForward);
 
 # define VIR_CONNECT_LIST_NETWORKS_FILTERS_ACTIVE \
                 (VIR_CONNECT_LIST_NETWORKS_ACTIVE | \
@@ -384,5 +384,5 @@ virNetworkDefUpdateSection(virNetworkDefPtr def,
                            const char *xml,
                            unsigned int flags);  /* virNetworkUpdateFlags */
 
-VIR_ENUM_DECL(virNetworkTaint)
-#endif /* __NETWORK_CONF_H__ */
+VIR_ENUM_DECL(virNetworkTaint);
+#endif /* LIBVIRT_NETWORK_CONF_H */

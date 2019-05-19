@@ -17,16 +17,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_NET_SERVER_H__
-# define __VIR_NET_SERVER_H__
+#ifndef LIBVIRT_VIRNETSERVER_H
+# define LIBVIRT_VIRNETSERVER_H
 
-# ifdef WITH_GNUTLS
-#  include "virnettlscontext.h"
-# endif
+# include "virnettlscontext.h"
 # include "virnetserverprogram.h"
 # include "virnetserverclient.h"
 # include "virnetserverservice.h"
@@ -71,10 +67,8 @@ int virNetServerAddService(virNetServerPtr srv,
 int virNetServerAddProgram(virNetServerPtr srv,
                            virNetServerProgramPtr prog);
 
-# if WITH_GNUTLS
 int virNetServerSetTLSContext(virNetServerPtr srv,
                               virNetTLSContextPtr tls);
-# endif
 
 
 int virNetServerAddClient(virNetServerPtr srv,
@@ -119,4 +113,4 @@ int virNetServerSetClientLimits(virNetServerPtr srv,
                                 long long int maxClients,
                                 long long int maxClientsUnauth);
 
-#endif /* __VIR_NET_SERVER_H__ */
+#endif /* LIBVIRT_VIRNETSERVER_H */

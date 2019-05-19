@@ -33,7 +33,6 @@
 #if HAVE_DLFCN_H
 # include <dlfcn.h>
 #endif
-#include <stdlib.h>
 #include <unistd.h>
 
 #include "configmake.h"
@@ -142,7 +141,7 @@ virLockManagerPluginPtr virLockManagerPluginNew(const char *name,
         if (!(modfile = virFileFindResourceFull(name,
                                                 NULL,
                                                 ".so",
-                                                abs_topbuilddir "/src/.libs",
+                                                abs_top_builddir "/src/.libs",
                                                 LIBDIR "/libvirt/lock-driver",
                                                 "LIBVIRT_LOCK_MANAGER_PLUGIN_DIR")))
             goto cleanup;

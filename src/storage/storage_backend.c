@@ -17,13 +17,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
 
-#include <string.h>
 #include <sys/stat.h>
 
 #include "datatypes.h"
@@ -33,6 +30,7 @@
 #include "virstoragefile.h"
 #include "storage_backend.h"
 #include "virlog.h"
+#include "virmodule.h"
 #include "virfile.h"
 #include "configmake.h"
 
@@ -41,6 +39,9 @@
 #endif
 #if WITH_STORAGE_ISCSI
 # include "storage_backend_iscsi.h"
+#endif
+#if WITH_STORAGE_ISCSI_DIRECT
+# include "storage_backend_iscsi_direct.h"
 #endif
 #if WITH_STORAGE_SCSI
 # include "storage_backend_scsi.h"
@@ -86,29 +87,17 @@ virStorageDriverLoadBackendModule(const char *name,
                                   const char *regfunc,
                                   bool forceload)
 {
-    char *modfile = NULL;
-    int ret;
+    VIR_AUTOFREE(char *) modfile = NULL;
 
     if (!(modfile = virFileFindResourceFull(name,
                                             "libvirt_storage_backend_",
                                             ".so",
-                                            abs_topbuilddir "/src/.libs",
+                                            abs_top_builddir "/src/.libs",
                                             STORAGE_BACKEND_MODULE_DIR,
                                             "LIBVIRT_STORAGE_BACKEND_DIR")))
-        return 1;
+        return -1;
 
-    if ((ret = virDriverLoadModuleFull(modfile, regfunc, NULL)) != 0) {
-        if (forceload) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("failed to load storage backend module '%s'"),
-                           name);
-            ret = -1;
-        }
-    }
-
-    VIR_FREE(modfile);
-
-    return ret;
+    return virModuleLoad(modfile, regfunc, forceload);
 }
 
 
@@ -127,6 +116,9 @@ virStorageBackendDriversRegister(bool allbackends ATTRIBUTE_UNUSED)
 #endif
 #if WITH_STORAGE_ISCSI
     VIR_STORAGE_BACKEND_REGISTER(virStorageBackendISCSIRegister, "iscsi");
+#endif
+#if WITH_STORAGE_ISCSI_DIRECT
+    VIR_STORAGE_BACKEND_REGISTER(virStorageBackendISCSIDirectRegister, "iscsi-direct");
 #endif
 #if WITH_STORAGE_SCSI
     VIR_STORAGE_BACKEND_REGISTER(virStorageBackendSCSIRegister, "scsi");
@@ -189,4 +181,20 @@ virStorageBackendForType(int type)
                    _("missing backend for pool type %d (%s)"),
                    type, NULLSTR(virStoragePoolTypeToString(type)));
     return NULL;
+}
+
+
+virCapsPtr
+virStorageBackendGetCapabilities(void)
+{
+    virCapsPtr caps;
+    size_t i;
+
+    if (!(caps = virCapabilitiesNew(VIR_ARCH_NONE, false, false)))
+        return NULL;
+
+    for (i = 0; i < virStorageBackendsCount; i++)
+        virCapabilitiesAddStoragePool(caps, virStorageBackends[i]->type);
+
+    return caps;
 }

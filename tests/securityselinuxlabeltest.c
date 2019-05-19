@@ -21,14 +21,11 @@
 
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <time.h>
 
 #include <selinux/selinux.h>
 #include <selinux/context.h>
-#include <attr/xattr.h>
+#include <sys/xattr.h>
 
 #include "internal.h"
 #include "testutils.h"
@@ -284,7 +281,7 @@ testSELinuxCheckLabels(testSELinuxFile *files, size_t nfiles)
         }
         if (STRNEQ_NULLABLE(files[i].context, ctx)) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           "File %s context '%s' did not match epected '%s'",
+                           "File %s context '%s' did not match expected '%s'",
                            files[i].file, ctx, files[i].context);
             VIR_FREE(ctx);
             return -1;

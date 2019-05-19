@@ -557,7 +557,7 @@ elsif ($mode eq "server") {
                 if ($args_member =~ m/^remote_nonnull_string name;/ and $has_node_device) {
                     # ignore the name arg for node devices
                     next
-                } elsif ($args_member =~ m/^remote_nonnull_(domain|network|storage_pool|storage_vol|interface|secret|nwfilter) (\S+);/) {
+                } elsif ($args_member =~ m/^remote_nonnull_(domain|network|storage_pool|storage_vol|interface|secret|nwfilter|nwfilter_binding) (\S+);/) {
                     my $type_name = name_to_TypeName($1);
 
                     push(@vars_list, "vir${type_name}Ptr $2 = NULL");
@@ -722,7 +722,7 @@ elsif ($mode eq "server") {
                         if (!$modern_ret_as_list) {
                             push(@ret_list, "ret->$3 = tmp.$3;");
                         }
-                    } elsif ($ret_member =~ m/(?:admin|remote)_nonnull_(secret|nwfilter|node_device|interface|network|storage_vol|storage_pool|domain_snapshot|domain|server|client) (\S+)<(\S+)>;/) {
+                    } elsif ($ret_member =~ m/(?:admin|remote)_nonnull_(secret|nwfilter|nwfilter_binding|node_device|interface|network|storage_vol|storage_pool|domain_snapshot|domain|server|client) (\S+)<(\S+)>;/) {
                         $modern_ret_struct_name = $1;
                         $single_ret_list_error_msg_type = $1;
                         $single_ret_list_name = $2;
@@ -780,18 +780,18 @@ elsif ($mode eq "server") {
                     $single_ret_var = $1;
                     $single_ret_by_ref = 0;
                     $single_ret_check = " == NULL";
-                } elsif ($ret_member =~ m/^remote_nonnull_(domain|network|storage_pool|storage_vol|interface|node_device|secret|nwfilter|domain_snapshot) (\S+);/) {
+                } elsif ($ret_member =~ m/^remote_nonnull_(domain|network|storage_pool|storage_vol|interface|node_device|secret|nwfilter|nwfilter_binding|domain_snapshot) (\S+);/) {
                     my $type_name = name_to_TypeName($1);
 
                     if ($call->{ProcName} eq "DomainCreateWithFlags") {
                         # SPECIAL: virDomainCreateWithFlags updates the given
                         #          domain object instead of returning a new one
-                        push(@ret_list, "make_nonnull_$1(&ret->$2, $2);");
+                        push(@ret_list, "if (make_nonnull_$1(&ret->$2, $2) < 0)\n        goto cleanup;\n");
                         $single_ret_var = undef;
                         $single_ret_by_ref = 1;
                     } else {
                         push(@vars_list, "vir${type_name}Ptr $2 = NULL");
-                        push(@ret_list, "make_nonnull_$1(&ret->$2, $2);");
+                        push(@ret_list, "if (make_nonnull_$1(&ret->$2, $2) < 0)\n        goto cleanup;\n");
                         push(@free_list,
                              "    virObjectUnref($2);");
                         $single_ret_var = $2;
@@ -907,11 +907,11 @@ elsif ($mode eq "server") {
 
                     if ($1 eq "client") {
                         push(@vars_list, "virNetServer${type_name}Ptr $2 = NULL");
-                        push(@ret_list, "make_nonnull_$1(&ret->$2, $2);");
-                        push(@ret_list, "make_nonnull_server(&ret->$2.srv, srv);");
+                        push(@ret_list, "if (make_nonnull_$1(&ret->$2, $2) < 0)\n        goto cleanup;\n");
+                        push(@ret_list, "if (make_nonnull_server(&ret->$2.srv, srv) < 0)\n        goto cleanup;\n");
                     } else {
                         push(@vars_list, "virNet${type_name}Ptr $2 = NULL");
-                        push(@ret_list, "make_nonnull_$1(&ret->$2, $2);");
+                        push(@ret_list, "if (make_nonnull_$1(&ret->$2, $2) < 0)\n        goto cleanup;\n");
                     }
 
                     push(@free_list,
@@ -1175,12 +1175,15 @@ elsif ($mode eq "server") {
             print "        ret->$single_ret_list_name.${single_ret_list_name}_len = nresults;\n";
             if ($modern_ret_is_nested) {
                 print "        for (i = 0; i < nresults; i++) {\n";
-                print "            make_nonnull_$modern_ret_struct_name(ret->$single_ret_list_name.${single_ret_list_name}_val + i, result[i]);\n";
-                print "            make_nonnull_$modern_ret_nested_struct_name(&ret->$single_ret_list_name.${single_ret_list_name}_val[i].srv, srv);\n";
+                print "            if (make_nonnull_$modern_ret_struct_name(ret->$single_ret_list_name.${single_ret_list_name}_val + i, result[i]) < 0)\n";
+                print "                goto cleanup;\n";
+                print "            if (make_nonnull_$modern_ret_nested_struct_name(&ret->$single_ret_list_name.${single_ret_list_name}_val[i].srv, srv) < 0)\n";
+                print "                goto cleanup;\n";
                 print "        }\n";
             } else {
                 print "        for (i = 0; i < nresults; i++)\n";
-                print "            make_nonnull_$modern_ret_struct_name(ret->$single_ret_list_name.${single_ret_list_name}_val + i, result[i]);\n";
+                print "            if (make_nonnull_$modern_ret_struct_name(ret->$single_ret_list_name.${single_ret_list_name}_val + i, result[i]) < 0)\n";
+                print "                goto cleanup;\n";
             }
             print "    } else {\n";
             print "        ret->$single_ret_list_name.${single_ret_list_name}_len = 0;\n";
@@ -1325,7 +1328,7 @@ elsif ($mode eq "client") {
                     $priv_src = "dev->conn";
                     push(@args_list, "virNodeDevicePtr dev");
                     push(@setters_list, "args.name = dev->name;");
-                } elsif ($args_member =~ m/^remote_nonnull_(domain|network|storage_pool|storage_vol|interface|secret|nwfilter|domain_snapshot) (\S+);/) {
+                } elsif ($args_member =~ m/^remote_nonnull_(domain|network|storage_pool|storage_vol|interface|secret|nwfilter|nwfilter_binding|domain_snapshot) (\S+);/) {
                     my $name = $1;
                     my $arg_name = $2;
                     my $type_name = name_to_TypeName($name);
@@ -1518,7 +1521,7 @@ elsif ($mode eq "client") {
                         }
 
                         push(@ret_list, "memcpy(result->$3, ret.$3, sizeof(result->$3));");
-                    } elsif ($ret_member =~ m/(?:admin|remote)_nonnull_(secret|nwfilter|node_device|interface|network|storage_vol|storage_pool|domain_snapshot|domain|server|client) (\S+)<(\S+)>;/) {
+                    } elsif ($ret_member =~ m/(?:admin|remote)_nonnull_(secret|nwfilter|nwfilter_binding|node_device|interface|network|storage_vol|storage_pool|domain_snapshot|domain|server|client) (\S+)<(\S+)>;/) {
                         my $proc_name = name_to_TypeName($1);
 
                         if ($structprefix eq "admin") {
@@ -1571,7 +1574,7 @@ elsif ($mode eq "client") {
                     push(@ret_list, "VIR_FREE(ret.$1);");
                     $single_ret_var = "char *rv = NULL";
                     $single_ret_type = "char *";
-                } elsif ($ret_member =~ m/^remote_nonnull_(domain|network|storage_pool|storage_vol|node_device|interface|secret|nwfilter|domain_snapshot) (\S+);/) {
+                } elsif ($ret_member =~ m/^remote_nonnull_(domain|network|storage_pool|storage_vol|node_device|interface|secret|nwfilter|nwfilter_binding|domain_snapshot) (\S+);/) {
                     my $name = $1;
                     my $arg_name = $2;
                     my $type_name = name_to_TypeName($name);
@@ -1801,7 +1804,7 @@ elsif ($mode eq "client") {
 
         if ($call->{streamflag} ne "none") {
             print "\n";
-            print "    if (!(netst = virNetClientStreamNew(st, priv->remoteProgram, $call->{constname}, priv->counter, sparse)))\n";
+            print "    if (!(netst = virNetClientStreamNew(priv->remoteProgram, $call->{constname}, priv->counter, sparse)))\n";
             print "        goto done;\n";
             print "\n";
             print "    if (virNetClientAddStream(priv->client, netst) < 0) {\n";
@@ -1811,6 +1814,7 @@ elsif ($mode eq "client") {
             print "\n";
             print "    st->driver = &remoteStreamDrv;\n";
             print "    st->privateData = netst;\n";
+            print "    st->ff = virObjectFreeCallback;\n";
         }
 
         if ($call->{ProcName} eq "SupportsFeature") {
@@ -2033,7 +2037,8 @@ elsif ($mode eq "client") {
             "storage_conf.h",
             "nwfilter_conf.h",
             "node_device_conf.h",
-            "interface_conf.h"
+            "interface_conf.h",
+            "virnwfilterbindingdef.h",
             );
         foreach my $hdr (@headers) {
             print "#include \"$hdr\"\n";
@@ -2198,7 +2203,8 @@ elsif ($mode eq "client") {
                     print "        virObjectUnref(mgr);\n";
                     if ($action eq "Ensure") {
                         print "        if (rv == 0)\n";
-                        print "            virReportError(VIR_ERR_ACCESS_DENIED, NULL);\n";
+                        print "            virReportError(VIR_ERR_ACCESS_DENIED,\n";
+                        print"                            _(\"'%s' denied access\"), conn->driver->name);\n";
                         print "        return $fail;\n";
                     } else {
                         print "        virResetLastError();\n";

@@ -1,7 +1,7 @@
 /*
  * vsh.c: common data to be used by clients to exercise the libvirt API
  *
- * Copyright (C) 2005, 2007-2015 Red Hat, Inc.
+ * Copyright (C) 2005-2019 Red Hat, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,27 +16,18 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Daniel Veillard <veillard@redhat.com>
- * Karel Zak <kzak@redhat.com>
- * Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
 #include "vsh.h"
 
 #include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <stdarg.h>
 #include <unistd.h>
-#include <errno.h>
 #include <sys/time.h>
 #include "c-ctype.h"
 #include <fcntl.h>
 #include <time.h>
-#include <limits.h>
 #include <sys/stat.h>
 #include <inttypes.h>
 #include <signal.h>
@@ -266,7 +257,7 @@ vshSaveLibvirtHelperError(void)
     if (last_error)
         return;
 
-    if (!virGetLastError())
+    if (virGetLastErrorCode() == VIR_ERR_OK)
         return;
 
     vshSaveLibvirtError();
@@ -281,6 +272,7 @@ vshResetLibvirtError(void)
 {
     virFreeError(last_error);
     last_error = NULL;
+    virResetLastError();
 }
 
 /*
@@ -339,21 +331,26 @@ vshCmddefGetInfo(const vshCmdDef * cmd, const char *name)
 
 /* Check if the internal command definitions are correct */
 static int
-vshCmddefCheckInternals(const vshCmdDef *cmd)
+vshCmddefCheckInternals(vshControl *ctl,
+                        const vshCmdDef *cmd)
 {
     size_t i;
     const char *help = NULL;
 
     /* in order to perform the validation resolve the alias first */
     if (cmd->flags & VSH_CMD_FLAG_ALIAS) {
-        if (!cmd->alias)
+        if (!cmd->alias) {
+            vshError(ctl, _("command '%s' has inconsistent alias"), cmd->name);
             return -1;
+        }
         cmd = vshCmddefSearch(cmd->alias);
     }
 
     /* Each command has to provide a non-empty help string. */
-    if (!(help = vshCmddefGetInfo(cmd, "help")) || !*help)
+    if (!(help = vshCmddefGetInfo(cmd, "help")) || !*help) {
+        vshError(ctl, _("command '%s' lacks help"), cmd->name);
         return -1;
+    }
 
     if (!cmd->opts)
         return 0;
@@ -361,14 +358,19 @@ vshCmddefCheckInternals(const vshCmdDef *cmd)
     for (i = 0; cmd->opts[i].name; i++) {
         const vshCmdOptDef *opt = &cmd->opts[i];
 
-        if (i > 63)
+        if (i > 63) {
+            vshError(ctl, _("command '%s' has too many options"), cmd->name);
             return -1; /* too many options */
+        }
 
         switch (opt->type) {
         case VSH_OT_STRING:
         case VSH_OT_BOOL:
-            if (opt->flags & VSH_OFLAG_REQ)
-                return -1; /* nor bool nor string options can't be mandatory */
+            if (opt->flags & VSH_OFLAG_REQ) {
+                vshError(ctl, _("command '%s' misused VSH_OFLAG_REQ"),
+                         cmd->name);
+                return -1; /* neither bool nor string options can be mandatory */
+            }
             break;
 
         case VSH_OT_ALIAS: {
@@ -376,11 +378,14 @@ vshCmddefCheckInternals(const vshCmdDef *cmd)
             char *name = (char *)opt->help; /* cast away const */
             char *p;
 
-            if (opt->flags || !opt->help)
+            if (opt->flags || !opt->help) {
+                vshError(ctl, _("command '%s' has incorrect alias option"),
+                         cmd->name);
                 return -1; /* alias options are tracked by the original name */
+            }
             if ((p = strchr(name, '=')) &&
                 VIR_STRNDUP(name, name, p - name) < 0)
-                return -1;
+                vshErrorOOM();
             for (j = i + 1; cmd->opts[j].name; j++) {
                 if (STREQ(name, cmd->opts[j].name) &&
                     cmd->opts[j].type != VSH_OT_ALIAS)
@@ -389,21 +394,33 @@ vshCmddefCheckInternals(const vshCmdDef *cmd)
             if (name != opt->help) {
                 VIR_FREE(name);
                 /* If alias comes with value, replacement must not be bool */
-                if (cmd->opts[j].type == VSH_OT_BOOL)
+                if (cmd->opts[j].type == VSH_OT_BOOL) {
+                    vshError(ctl, _("command '%s' has mismatched alias type"),
+                             cmd->name);
                     return -1;
+                }
             }
-            if (!cmd->opts[j].name)
+            if (!cmd->opts[j].name) {
+                vshError(ctl, _("command '%s' has missing alias option"),
+                         cmd->name);
                 return -1; /* alias option must map to a later option name */
+            }
         }
             break;
         case VSH_OT_ARGV:
-            if (cmd->opts[i + 1].name)
+            if (cmd->opts[i + 1].name) {
+                vshError(ctl, _("command '%s' does not list argv option last"),
+                         cmd->name);
                 return -1; /* argv option must be listed last */
+            }
             break;
 
         case VSH_OT_DATA:
-            if (!(opt->flags & VSH_OFLAG_REQ))
+            if (!(opt->flags & VSH_OFLAG_REQ)) {
+                vshError(ctl, _("command '%s' has non-required VSH_OT_DATA"),
+                         cmd->name);
                 return -1; /* OT_DATA should always be required. */
+            }
             break;
 
         case VSH_OT_INT:
@@ -1420,8 +1437,15 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
             }
 
             if (cmd == NULL) {
-                /* first token must be command name */
-                if (!(cmd = vshCmddefSearch(tkdata))) {
+                /* first token must be command name or comment */
+                if (*tkdata == '#') {
+                    do {
+                        VIR_FREE(tkdata);
+                        tk = parser->getNextArg(ctl, parser, &tkdata, false);
+                    } while (tk == VSH_TK_ARG);
+                    VIR_FREE(tkdata);
+                    break;
+                } else if (!(cmd = vshCmddefSearch(tkdata))) {
                     if (!partial)
                         vshError(ctl, _("unknown command: '%s'"), tkdata);
                     goto syntaxError;   /* ... or ignore this command only? */
@@ -1667,20 +1691,26 @@ vshCommandStringGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
 
     *res = q;
 
-    while (*p && (*p == ' ' || *p == '\t'))
-        p++;
+    while (*p == ' ' || *p == '\t' || (*p == '\\' && p[1] == '\n'))
+        p += 1 + (*p == '\\');
 
     if (*p == '\0')
         return VSH_TK_END;
-    if (*p == ';') {
+    if (*p == ';' || *p == '\n') {
         parser->pos = ++p;             /* = \0 or begin of next command */
+        return VSH_TK_SUBCMD_END;
+    }
+    if (*p == '#') { /* Argument starting with # is comment to end of line */
+        while (*p && *p != '\n')
+            p++;
+        parser->pos = p + !!*p;
         return VSH_TK_SUBCMD_END;
     }
 
     while (*p) {
         /* end of token is blank space or ';' */
         if (!double_quote && !single_quote &&
-            (*p == ' ' || *p == '\t' || *p == ';'))
+            (*p == ' ' || *p == '\t' || *p == ';' || *p == '\n'))
             break;
 
         if (!double_quote && *p == '\'') { /* single quote */
@@ -1689,7 +1719,7 @@ vshCommandStringGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
             continue;
         } else if (!single_quote && *p == '\\') { /* escape */
             /*
-             * The same as the bash, a \ in "" is an escaper,
+             * The same as in shell, a \ in "" is an escaper,
              * but a \ in '' is not an escaper.
              */
             p++;
@@ -1697,6 +1727,10 @@ vshCommandStringGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
                 if (report)
                     vshError(ctl, "%s", _("dangling \\"));
                 return VSH_TK_ERROR;
+            } else if (*p == '\n') {
+                /* Elide backslash-newline entirely */
+                p++;
+                continue;
             }
         } else if (!single_quote && *p == '"') { /* double quote */
             double_quote = !double_quote;
@@ -2685,7 +2719,7 @@ vshReadlineOptionsGenerator(const char *text,
         }
 
         while (opt) {
-            if (STREQ(opt->def->name, name)) {
+            if (STREQ(opt->def->name, name) && opt->def->type != VSH_OT_ARGV) {
                 exists = true;
                 break;
             }
@@ -2824,7 +2858,9 @@ vshReadlineParse(const char *text, int state)
         if (!cmd) {
             list = vshReadlineCommandGenerator(text);
         } else {
-            if (!opt || (opt->type != VSH_OT_DATA && opt->type != VSH_OT_STRING))
+            if (!opt || (opt->type != VSH_OT_DATA &&
+                         opt->type != VSH_OT_STRING &&
+                         opt->type != VSH_OT_ARGV))
                 list = vshReadlineOptionsGenerator(text, cmd, partial);
 
             if (opt && opt->completer) {
@@ -2909,32 +2945,15 @@ vshReadlineInit(vshControl *ctl)
     /* Opaque data for autocomplete callbacks. */
     autoCompleteOpaque = ctl;
 
-    /* Allow conditional parsing of the ~/.inputrc file.
-     * Work around ancient readline 4.1 (hello Mac OS X),
-     * which declared it as 'char *' instead of 'const char *'.
-     */
-# if defined(RL_READLINE_VERSION) && RL_READLINE_VERSION > 0x0402
     rl_readline_name = ctl->name;
-# else
-    rl_readline_name = (char *) ctl->name;
-# endif
 
     /* Tell the completer that we want a crack first. */
     rl_attempted_completion_function = vshReadlineCompletion;
 
-# if defined(RL_READLINE_VERSION) && RL_READLINE_VERSION > 0x0402
     rl_basic_word_break_characters = break_characters;
-# else
-    rl_basic_word_break_characters = (char *) break_characters;
-# endif
 
-# if defined(RL_READLINE_VERSION) && RL_READLINE_VERSION > 0x0402
     rl_completer_quote_characters = quote_characters;
     rl_char_is_quoted_p = vshReadlineCharIsQuoted;
-# else
-    rl_completer_quote_characters = (char *) quote_characters;
-    rl_char_is_quoted_p = (Function *) vshReadlineCharIsQuoted;
-# endif
 
     if (virAsprintf(&histsize_env, "%s_HISTSIZE", ctl->env_prefix) < 0)
         goto cleanup;
@@ -3260,6 +3279,10 @@ const vshCmdOptDef opts_echo[] = {
      .type = VSH_OT_BOOL,
      .help = N_("escape for XML use")
     },
+    {.name = "err",
+     .type = VSH_OT_BOOL,
+     .help = N_("output to stderr"),
+    },
     {.name = "str",
      .type = VSH_OT_ALIAS,
      .help = "string"
@@ -3293,6 +3316,7 @@ cmdEcho(vshControl *ctl, const vshCmd *cmd)
 {
     bool shell = false;
     bool xml = false;
+    bool err = false;
     int count = 0;
     const vshCmdOpt *opt = NULL;
     char *arg;
@@ -3302,6 +3326,8 @@ cmdEcho(vshControl *ctl, const vshCmd *cmd)
         shell = true;
     if (vshCommandOptBool(cmd, "xml"))
         xml = true;
+    if (vshCommandOptBool(cmd, "err"))
+        err = true;
 
     while ((opt = vshCommandOptArgv(ctl, cmd, opt))) {
         char *str;
@@ -3336,8 +3362,12 @@ cmdEcho(vshControl *ctl, const vshCmd *cmd)
         return false;
     }
     arg = virBufferContentAndReset(&buf);
-    if (arg)
-        vshPrint(ctl, "%s", arg);
+    if (arg) {
+        if (err)
+            vshError(ctl, "%s", arg);
+        else
+            vshPrint(ctl, "%s", arg);
+    }
     VIR_FREE(arg);
     return true;
 }
@@ -3407,7 +3437,7 @@ const vshCmdInfo info_selftest[] = {
  * That runs vshCmddefOptParse which validates
  * the per-command options structure. */
 bool
-cmdSelfTest(vshControl *ctl ATTRIBUTE_UNUSED,
+cmdSelfTest(vshControl *ctl,
             const vshCmd *cmd ATTRIBUTE_UNUSED)
 {
     const vshCmdGrp *grp;
@@ -3415,7 +3445,7 @@ cmdSelfTest(vshControl *ctl ATTRIBUTE_UNUSED,
 
     for (grp = cmdGroups; grp->name; grp++) {
         for (def = grp->commands; def->name; def++) {
-            if (vshCmddefCheckInternals(def) < 0)
+            if (vshCmddefCheckInternals(ctl, def) < 0)
                 return false;
         }
     }
@@ -3493,8 +3523,11 @@ cmdComplete(vshControl *ctl, const vshCmd *cmd)
     if (!(matches = vshReadlineCompletion(arg, 0, 0)))
         goto cleanup;
 
-    for (iter = matches; *iter; iter++)
+    for (iter = matches; *iter; iter++) {
+        if (iter == matches && matches[1])
+            continue;
         printf("%s\n", *iter);
+    }
 
     ret = true;
  cleanup:

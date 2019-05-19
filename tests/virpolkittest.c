@@ -14,8 +14,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -24,7 +22,6 @@
 
 #if defined(__ELF__)
 
-# include <stdlib.h>
 # include <dbus/dbus.h>
 
 # include "virpolkit.h"
@@ -75,18 +72,18 @@ VIR_MOCK_WRAP_RET_ARGS(dbus_connection_send_with_reply_and_block,
         int is_authorized = 1;
         int is_challenge = 0;
 
-        if (virDBusMessageRead(message,
-                               "(sa{sv})sa&{ss}us",
-                               &type,
-                               3,
-                               &pidkey, "u", &pidval,
-                               &timekey, "t", &timeval,
-                               &uidkey, "i", &uidval,
-                               &actionid,
-                               &detailslen,
-                               &details,
-                               &allowInteraction,
-                               &cancellationId) < 0)
+        if (virDBusMessageDecode(message,
+                                 "(sa{sv})sa&{ss}us",
+                                 &type,
+                                 3,
+                                 &pidkey, "u", &pidval,
+                                 &timekey, "t", &timeval,
+                                 &uidkey, "i", &uidval,
+                                 &actionid,
+                                 &detailslen,
+                                 &details,
+                                 &allowInteraction,
+                                 &cancellationId) < 0)
             goto error;
 
         if (STREQ(actionid, "org.libvirt.test.success")) {

@@ -17,8 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -27,10 +25,243 @@
 #include "virlog.h"
 #include "virstring.h"
 #include "domain_addr.h"
+#include "virhashcode.h"
 
 #define VIR_FROM_THIS VIR_FROM_DOMAIN
 
 VIR_LOG_INIT("conf.domain_addr");
+
+static int
+virDomainZPCIAddressReserveId(virHashTablePtr set,
+                              unsigned int id,
+                              const char *name)
+{
+    if (virHashLookup(set, &id)) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("zPCI %s %o is already reserved"),
+                       name, id);
+        return -1;
+    }
+
+    if (virHashAddEntry(set, &id, (void*)1) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Failed to reserve %s %o"),
+                       name, id);
+        return -1;
+    }
+
+    return 0;
+}
+
+
+static int
+virDomainZPCIAddressReserveUid(virHashTablePtr set,
+                               virZPCIDeviceAddressPtr addr)
+{
+    return virDomainZPCIAddressReserveId(set, addr->uid, "uid");
+}
+
+
+static int
+virDomainZPCIAddressReserveFid(virHashTablePtr set,
+                               virZPCIDeviceAddressPtr addr)
+{
+    return virDomainZPCIAddressReserveId(set, addr->fid, "fid");
+}
+
+
+static int
+virDomainZPCIAddressAssignId(virHashTablePtr set,
+                             unsigned int *id,
+                             unsigned int min,
+                             unsigned int max,
+                             const char *name)
+{
+    while (virHashLookup(set, &min)) {
+        if (min == max) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("There is no more free %s."),
+                           name);
+            return -1;
+        }
+        ++min;
+    }
+    *id = min;
+
+    return 0;
+}
+
+
+static int
+virDomainZPCIAddressAssignUid(virHashTablePtr set,
+                              virZPCIDeviceAddressPtr addr)
+{
+    return virDomainZPCIAddressAssignId(set, &addr->uid, 1,
+                                        VIR_DOMAIN_DEVICE_ZPCI_MAX_UID, "uid");
+}
+
+
+static int
+virDomainZPCIAddressAssignFid(virHashTablePtr set,
+                              virZPCIDeviceAddressPtr addr)
+{
+    return virDomainZPCIAddressAssignId(set, &addr->fid, 0,
+                                        VIR_DOMAIN_DEVICE_ZPCI_MAX_FID, "fid");
+}
+
+
+static void
+virDomainZPCIAddressReleaseId(virHashTablePtr set,
+                              unsigned int *id,
+                              const char *name)
+{
+    if (virHashRemoveEntry(set, id) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Release %s %o failed"),
+                       name, *id);
+    }
+
+    *id = 0;
+}
+
+
+static void
+virDomainZPCIAddressReleaseUid(virHashTablePtr set,
+                               virZPCIDeviceAddressPtr addr)
+{
+    virDomainZPCIAddressReleaseId(set, &addr->uid, "uid");
+}
+
+
+static void
+virDomainZPCIAddressReleaseFid(virHashTablePtr set,
+                               virZPCIDeviceAddressPtr addr)
+{
+    virDomainZPCIAddressReleaseId(set, &addr->fid, "fid");
+}
+
+
+static void
+virDomainZPCIAddressReleaseIds(virDomainZPCIAddressIdsPtr zpciIds,
+                               virZPCIDeviceAddressPtr addr)
+{
+    if (!zpciIds || virZPCIDeviceAddressIsEmpty(addr))
+        return;
+
+    virDomainZPCIAddressReleaseUid(zpciIds->uids, addr);
+
+    virDomainZPCIAddressReleaseFid(zpciIds->fids, addr);
+}
+
+
+static int
+virDomainZPCIAddressReserveNextUid(virHashTablePtr uids,
+                                   virZPCIDeviceAddressPtr zpci)
+{
+    if (virDomainZPCIAddressAssignUid(uids, zpci) < 0)
+        return -1;
+
+    if (virDomainZPCIAddressReserveUid(uids, zpci) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+static int
+virDomainZPCIAddressReserveNextFid(virHashTablePtr fids,
+                                   virZPCIDeviceAddressPtr zpci)
+{
+    if (virDomainZPCIAddressAssignFid(fids, zpci) < 0)
+        return -1;
+
+    if (virDomainZPCIAddressReserveFid(fids, zpci) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+static int
+virDomainZPCIAddressReserveAddr(virDomainZPCIAddressIdsPtr zpciIds,
+                                virZPCIDeviceAddressPtr addr)
+{
+    if (virDomainZPCIAddressReserveUid(zpciIds->uids, addr) < 0)
+        return -1;
+
+    if (virDomainZPCIAddressReserveFid(zpciIds->fids, addr) < 0) {
+        virDomainZPCIAddressReleaseUid(zpciIds->uids, addr);
+        return -1;
+    }
+
+    return 0;
+}
+
+
+static int
+virDomainZPCIAddressReserveNextAddr(virDomainZPCIAddressIdsPtr zpciIds,
+                                    virZPCIDeviceAddressPtr addr)
+{
+    if (virDomainZPCIAddressReserveNextUid(zpciIds->uids, addr) < 0)
+        return -1;
+
+    if (virDomainZPCIAddressReserveNextFid(zpciIds->fids, addr) < 0) {
+        virDomainZPCIAddressReleaseUid(zpciIds->uids, addr);
+        return -1;
+    }
+
+    return 0;
+}
+
+
+int
+virDomainPCIAddressExtensionReserveAddr(virDomainPCIAddressSetPtr addrs,
+                                        virPCIDeviceAddressPtr addr)
+{
+    if (addr->extFlags & VIR_PCI_ADDRESS_EXTENSION_ZPCI) {
+        /* Reserve uid/fid to ZPCI device which has defined uid/fid
+         * in the domain.
+         */
+        return virDomainZPCIAddressReserveAddr(addrs->zpciIds, &addr->zpci);
+    }
+
+    return 0;
+}
+
+
+int
+virDomainPCIAddressExtensionReserveNextAddr(virDomainPCIAddressSetPtr addrs,
+                                            virPCIDeviceAddressPtr addr)
+{
+    if (addr->extFlags & VIR_PCI_ADDRESS_EXTENSION_ZPCI) {
+        virZPCIDeviceAddress zpci = { 0 };
+
+        if (virDomainZPCIAddressReserveNextAddr(addrs->zpciIds, &zpci) < 0)
+            return -1;
+
+        if (!addrs->dryRun)
+            addr->zpci = zpci;
+    }
+
+    return 0;
+}
+
+static int
+virDomainPCIAddressExtensionEnsureAddr(virDomainPCIAddressSetPtr addrs,
+                                       virPCIDeviceAddressPtr addr)
+{
+    if (addr->extFlags & VIR_PCI_ADDRESS_EXTENSION_ZPCI) {
+        virZPCIDeviceAddressPtr zpci = &addr->zpci;
+
+        if (virZPCIDeviceAddressIsEmpty(zpci))
+            return virDomainZPCIAddressReserveNextAddr(addrs->zpciIds, zpci);
+        else
+            return virDomainZPCIAddressReserveAddr(addrs->zpciIds, zpci);
+    }
+
+    return 0;
+}
+
 
 virDomainPCIConnectFlags
 virDomainPCIControllerModelToConnectType(virDomainControllerModelPCI model)
@@ -158,9 +389,9 @@ virDomainPCIAddressFlagsCompatible(virPCIDeviceAddressPtr addr,
         } else if (devFlags & VIR_PCI_CONNECT_TYPE_PCIE_ROOT_PORT) {
             connectStr = "pcie-root-port";
         } else if (devFlags & VIR_PCI_CONNECT_TYPE_PCIE_SWITCH_UPSTREAM_PORT) {
-            connectStr = "pci-switch-upstream-port";
+            connectStr = "pcie-switch-upstream-port";
         } else if (devFlags & VIR_PCI_CONNECT_TYPE_PCIE_SWITCH_DOWNSTREAM_PORT) {
-            connectStr = "pci-switch-downstream-port";
+            connectStr = "pcie-switch-downstream-port";
         } else if (devFlags & VIR_PCI_CONNECT_TYPE_DMI_TO_PCI_BRIDGE) {
             connectStr = "dmi-to-pci-bridge";
         } else if (devFlags & VIR_PCI_CONNECT_TYPE_PCIE_TO_PCI_BRIDGE) {
@@ -343,7 +574,7 @@ virDomainPCIAddressBusSetModel(virDomainPCIAddressBusPtr bus,
         bus->maxSlot = 0;
         break;
     case VIR_DOMAIN_CONTROLLER_MODEL_PCIE_SWITCH_UPSTREAM_PORT:
-        /* 32 slots, can only accept pcie-switch-downstrean-ports,
+        /* 32 slots, can only accept pcie-switch-downstream-ports,
          * no hotplug
          */
         bus->flags = VIR_PCI_CONNECT_TYPE_PCIE_SWITCH_DOWNSTREAM_PORT;
@@ -386,7 +617,7 @@ virDomainPCIAddressBusIsFullyReserved(virDomainPCIAddressBusPtr bus)
 }
 
 
-bool
+static bool ATTRIBUTE_NONNULL(1)
 virDomainPCIAddressBusIsEmpty(virDomainPCIAddressBusPtr bus)
 {
     size_t i;
@@ -440,7 +671,7 @@ virDomainPCIAddressSetGrow(virDomainPCIAddressSetPtr addrs,
              * pci-bridge, but we need one for the device's PCI address
              * to make sense, it means the guest only has a PCIe topology
              * configured so far, and we need to create a traditional PCI
-             * topology to accomodate the new device.
+             * topology to accommodate the new device.
              */
             needDMIToPCIBridge = true;
             needPCIeToPCIBridge = true;
@@ -573,20 +804,6 @@ virDomainPCIAddressSetGrow(virDomainPCIAddressSetPtr addrs,
 }
 
 
-char *
-virDomainPCIAddressAsString(virPCIDeviceAddressPtr addr)
-{
-    char *str;
-
-    ignore_value(virAsprintf(&str, "%.4x:%.2x:%.2x.%.1x",
-                             addr->domain,
-                             addr->bus,
-                             addr->slot,
-                             addr->function));
-    return str;
-}
-
-
 /*
  * Check if the PCI slot is used by another device.
  */
@@ -618,7 +835,7 @@ virDomainPCIAddressReserveAddrInternal(virDomainPCIAddressSetPtr addrs,
     virErrorNumber errType = (fromConfig
                               ? VIR_ERR_XML_ERROR : VIR_ERR_INTERNAL_ERROR);
 
-    if (!(addrStr = virDomainPCIAddressAsString(addr)))
+    if (!(addrStr = virPCIDeviceAddressAsString(addr)))
         goto cleanup;
 
     /* Add an extra bus if necessary */
@@ -703,10 +920,10 @@ virDomainPCIAddressEnsureAddr(virDomainPCIAddressSetPtr addrs,
     if (!flags)
        return 0;
 
-    if (!(addrStr = virDomainPCIAddressAsString(&dev->addr.pci)))
+    if (!(addrStr = virPCIDeviceAddressAsString(&dev->addr.pci)))
         goto cleanup;
 
-    if (virDeviceInfoPCIAddressPresent(dev)) {
+    if (virDeviceInfoPCIAddressIsPresent(dev)) {
         /* We do not support hotplug multi-function PCI device now, so we should
          * reserve the whole slot. The function of the PCI device must be 0.
          */
@@ -721,16 +938,34 @@ virDomainPCIAddressEnsureAddr(virDomainPCIAddressSetPtr addrs,
                                          addrStr, flags, true))
             goto cleanup;
 
-        ret = virDomainPCIAddressReserveAddrInternal(addrs, &dev->addr.pci,
-                                                     flags, dev->isolationGroup,
-                                                     true);
+        if (virDomainPCIAddressReserveAddrInternal(addrs, &dev->addr.pci,
+                                                   flags, dev->isolationGroup,
+                                                   true) < 0) {
+            goto cleanup;
+        }
     } else {
-        ret = virDomainPCIAddressReserveNextAddr(addrs, dev, flags, -1);
+        if (virDomainPCIAddressReserveNextAddr(addrs, dev, flags, -1) < 0)
+            goto cleanup;
     }
+
+    dev->addr.pci.extFlags = dev->pciAddrExtFlags;
+    if (virDomainPCIAddressExtensionEnsureAddr(addrs, &dev->addr.pci) < 0)
+        goto cleanup;
+
+    ret = 0;
 
  cleanup:
     VIR_FREE(addrStr);
     return ret;
+}
+
+
+void
+virDomainPCIAddressExtensionReleaseAddr(virDomainPCIAddressSetPtr addrs,
+                                        virPCIDeviceAddressPtr addr)
+{
+    if (addr->extFlags & VIR_PCI_ADDRESS_EXTENSION_ZPCI)
+        virDomainZPCIAddressReleaseIds(addrs->zpciIds, &addr->zpci);
 }
 
 
@@ -741,8 +976,93 @@ virDomainPCIAddressReleaseAddr(virDomainPCIAddressSetPtr addrs,
     addrs->buses[addr->bus].slot[addr->slot].functions &= ~(1 << addr->function);
 }
 
+
+static uint32_t
+virZPCIAddrKeyCode(const void *name,
+                   uint32_t seed)
+{
+    unsigned int value = *((unsigned int *)name);
+    return virHashCodeGen(&value, sizeof(value), seed);
+}
+
+
+static bool
+virZPCIAddrKeyEqual(const void *namea,
+                    const void *nameb)
+{
+    return *((unsigned int *)namea) == *((unsigned int *)nameb);
+}
+
+
+static void *
+virZPCIAddrKeyCopy(const void *name)
+{
+    unsigned int *copy;
+
+    if (VIR_ALLOC(copy) < 0)
+        return NULL;
+
+    *copy = *((unsigned int *)name);
+    return (void *)copy;
+}
+
+
+static void
+virZPCIAddrKeyFree(void *name)
+{
+    VIR_FREE(name);
+}
+
+
+static void
+virDomainPCIAddressSetExtensionFree(virDomainPCIAddressSetPtr addrs)
+{
+    if (!addrs || !addrs->zpciIds)
+        return;
+
+    virHashFree(addrs->zpciIds->uids);
+    virHashFree(addrs->zpciIds->fids);
+    VIR_FREE(addrs->zpciIds);
+}
+
+
+static int
+virDomainPCIAddressSetExtensionAlloc(virDomainPCIAddressSetPtr addrs,
+                                     virPCIDeviceAddressExtensionFlags extFlags)
+{
+    if (extFlags & VIR_PCI_ADDRESS_EXTENSION_ZPCI) {
+        if (addrs->zpciIds)
+            return 0;
+
+        if (VIR_ALLOC(addrs->zpciIds) < 0)
+            return -1;
+
+        if (!(addrs->zpciIds->uids = virHashCreateFull(10, NULL,
+                                                       virZPCIAddrKeyCode,
+                                                       virZPCIAddrKeyEqual,
+                                                       virZPCIAddrKeyCopy,
+                                                       virZPCIAddrKeyFree)))
+            goto error;
+
+        if (!(addrs->zpciIds->fids = virHashCreateFull(10, NULL,
+                                                       virZPCIAddrKeyCode,
+                                                       virZPCIAddrKeyEqual,
+                                                       virZPCIAddrKeyCopy,
+                                                       virZPCIAddrKeyFree)))
+            goto error;
+    }
+
+    return 0;
+
+ error:
+    virDomainPCIAddressSetExtensionFree(addrs);
+    return -1;
+}
+
+
 virDomainPCIAddressSetPtr
-virDomainPCIAddressSetAlloc(unsigned int nbuses)
+virDomainPCIAddressSetAlloc(unsigned int nbuses,
+                            virPCIDeviceAddressExtensionFlags extFlags)
 {
     virDomainPCIAddressSetPtr addrs;
 
@@ -753,6 +1073,10 @@ virDomainPCIAddressSetAlloc(unsigned int nbuses)
         goto error;
 
     addrs->nbuses = nbuses;
+
+    if (virDomainPCIAddressSetExtensionAlloc(addrs, extFlags) < 0)
+        goto error;
+
     return addrs;
 
  error:
@@ -767,6 +1091,7 @@ virDomainPCIAddressSetFree(virDomainPCIAddressSetPtr addrs)
     if (!addrs)
         return;
 
+    virDomainPCIAddressSetExtensionFree(addrs);
     VIR_FREE(addrs->buses);
     VIR_FREE(addrs);
 }
@@ -784,7 +1109,7 @@ virDomainPCIAddressFindUnusedFunctionOnBus(virDomainPCIAddressBusPtr bus,
 
     *found = false;
 
-    if (!(addrStr = virDomainPCIAddressAsString(searchAddr)))
+    if (!(addrStr = virPCIDeviceAddressAsString(searchAddr)))
         goto cleanup;
 
     if (!virDomainPCIAddressFlagsCompatible(searchAddr, addrStr, bus->flags,
@@ -963,6 +1288,9 @@ virDomainPCIAddressReserveNextAddr(virDomainPCIAddressSetPtr addrs,
                                                dev->isolationGroup, false) < 0)
         return -1;
 
+    addr.extFlags = dev->addr.pci.extFlags;
+    addr.zpci = dev->addr.pci.zpci;
+
     if (!addrs->dryRun) {
         dev->type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_PCI;
         dev->addr.pci = addr;
@@ -1134,7 +1462,7 @@ virDomainCCWAddressAssign(virDomainDeviceInfoPtr dev,
     return ret;
 }
 
-int
+static int ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(4)
 virDomainCCWAddressAllocate(virDomainDefPtr def ATTRIBUTE_UNUSED,
                             virDomainDeviceDefPtr dev ATTRIBUTE_UNUSED,
                             virDomainDeviceInfoPtr info,
@@ -1143,37 +1471,13 @@ virDomainCCWAddressAllocate(virDomainDefPtr def ATTRIBUTE_UNUSED,
     return virDomainCCWAddressAssign(info, data, true);
 }
 
-int
+static int ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(4)
 virDomainCCWAddressValidate(virDomainDefPtr def ATTRIBUTE_UNUSED,
                             virDomainDeviceDefPtr dev ATTRIBUTE_UNUSED,
                             virDomainDeviceInfoPtr info,
                             void *data)
 {
     return virDomainCCWAddressAssign(info, data, false);
-}
-
-int
-virDomainCCWAddressReleaseAddr(virDomainCCWAddressSetPtr addrs,
-                               virDomainDeviceInfoPtr dev)
-{
-    char *addr;
-    int ret;
-
-    addr = virDomainCCWAddressAsString(&(dev->addr.ccw));
-    if (!addr)
-        return -1;
-
-    if ((ret = virHashRemoveEntry(addrs->defined, addr)) == 0 &&
-        dev->addr.ccw.cssid == addrs->next.cssid &&
-        dev->addr.ccw.ssid == addrs->next.ssid &&
-        dev->addr.ccw.devno < addrs->next.devno) {
-        addrs->next.devno = dev->addr.ccw.devno;
-        addrs->next.assigned = false;
-    }
-
-    VIR_FREE(addr);
-
-    return ret;
 }
 
 void virDomainCCWAddressSetFree(virDomainCCWAddressSetPtr addrs)
@@ -1185,7 +1489,7 @@ void virDomainCCWAddressSetFree(virDomainCCWAddressSetPtr addrs)
     VIR_FREE(addrs);
 }
 
-virDomainCCWAddressSetPtr
+static virDomainCCWAddressSetPtr
 virDomainCCWAddressSetCreate(void)
 {
     virDomainCCWAddressSetPtr addrs = NULL;
@@ -1209,6 +1513,30 @@ virDomainCCWAddressSetCreate(void)
 }
 
 
+virDomainCCWAddressSetPtr
+virDomainCCWAddressSetCreateFromDomain(virDomainDefPtr def)
+{
+    virDomainCCWAddressSetPtr addrs = NULL;
+
+    if (!(addrs = virDomainCCWAddressSetCreate()))
+        goto error;
+
+    if (virDomainDeviceInfoIterate(def, virDomainCCWAddressValidate,
+                                   addrs) < 0)
+        goto error;
+
+    if (virDomainDeviceInfoIterate(def, virDomainCCWAddressAllocate,
+                                   addrs) < 0)
+        goto error;
+
+    return addrs;
+
+ error:
+    virDomainCCWAddressSetFree(addrs);
+    return NULL;
+}
+
+
 #define VIR_DOMAIN_DEFAULT_VIRTIO_SERIAL_PORTS 31
 
 
@@ -1216,7 +1544,7 @@ virDomainCCWAddressSetCreate(void)
  *
  * Allocates an address set for virtio serial addresses
  */
-virDomainVirtioSerialAddrSetPtr
+static virDomainVirtioSerialAddrSetPtr
 virDomainVirtioSerialAddrSetCreate(void)
 {
     virDomainVirtioSerialAddrSetPtr ret = NULL;
@@ -1318,7 +1646,7 @@ virDomainVirtioSerialAddrSetAddController(virDomainVirtioSerialAddrSetPtr addrs,
  * Adds virtio serial ports of controllers present in the domain definition
  * to the address set.
  */
-int
+static int ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2)
 virDomainVirtioSerialAddrSetAddControllers(virDomainVirtioSerialAddrSetPtr addrs,
                                            virDomainDefPtr def)
 {
@@ -1346,14 +1674,73 @@ virDomainVirtioSerialAddrSetFree(virDomainVirtioSerialAddrSetPtr addrs)
     }
 }
 
+/* virDomainVirtioSerialAddrReserve
+ *
+ * Reserve the virtio serial address of the device
+ *
+ * For use with virDomainDeviceInfoIterate,
+ * opaque should be the address set
+ */
+static int ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(4)
+virDomainVirtioSerialAddrReserve(virDomainDefPtr def ATTRIBUTE_UNUSED,
+                                 virDomainDeviceDefPtr dev ATTRIBUTE_UNUSED,
+                                 virDomainDeviceInfoPtr info,
+                                 void *data)
+{
+    virDomainVirtioSerialAddrSetPtr addrs = data;
+    char *str = NULL;
+    int ret = -1;
+    virBitmapPtr map = NULL;
+    bool b;
+    ssize_t i;
+
+    if (!virDomainVirtioSerialAddrIsComplete(info))
+        return 0;
+
+    VIR_DEBUG("Reserving virtio serial %u %u", info->addr.vioserial.controller,
+              info->addr.vioserial.port);
+
+    i = virDomainVirtioSerialAddrFindController(addrs, info->addr.vioserial.controller);
+    if (i < 0) {
+        virReportError(VIR_ERR_XML_ERROR,
+                       _("virtio serial controller %u is missing"),
+                       info->addr.vioserial.controller);
+        goto cleanup;
+    }
+
+    map = addrs->controllers[i]->ports;
+    if (virBitmapGetBit(map, info->addr.vioserial.port, &b) < 0) {
+        virReportError(VIR_ERR_XML_ERROR,
+                       _("virtio serial controller %u does not have port %u"),
+                       info->addr.vioserial.controller,
+                       info->addr.vioserial.port);
+        goto cleanup;
+    }
+
+    if (b) {
+        virReportError(VIR_ERR_XML_ERROR,
+                       _("virtio serial port %u on controller %u is already occupied"),
+                       info->addr.vioserial.port,
+                       info->addr.vioserial.controller);
+        goto cleanup;
+    }
+
+    ignore_value(virBitmapSetBit(map, info->addr.vioserial.port));
+
+    ret = 0;
+
+ cleanup:
+    VIR_FREE(str);
+    return ret;
+}
 
 /* virDomainVirtioSerialAddrSetCreateFromDomain
-+ *
-+ * @def: Domain def to introspect
-+ *
-+ * Inspect the domain definition and return an address set containing
-+ * every virtio serial address we find
-+ */
+ *
+ * @def: Domain def to introspect
+ *
+ * Inspect the domain definition and return an address set containing
+ * every virtio serial address we find
+ */
 virDomainVirtioSerialAddrSetPtr
 virDomainVirtioSerialAddrSetCreateFromDomain(virDomainDefPtr def)
 {
@@ -1370,8 +1757,7 @@ virDomainVirtioSerialAddrSetCreateFromDomain(virDomainDefPtr def)
                                    addrs) < 0)
         goto cleanup;
 
-    ret = addrs;
-    addrs = NULL;
+    VIR_STEAL_PTR(ret, addrs);
  cleanup:
     virDomainVirtioSerialAddrSetFree(addrs);
     return ret;
@@ -1487,6 +1873,38 @@ virDomainVirtioSerialAddrNextFromController(virDomainVirtioSerialAddrSetPtr addr
     return 0;
 }
 
+static int ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
+virDomainVirtioSerialAddrAssign(virDomainDefPtr def,
+                                virDomainVirtioSerialAddrSetPtr addrs,
+                                virDomainDeviceInfoPtr info,
+                                bool allowZero,
+                                bool portOnly)
+{
+    int ret = -1;
+    virDomainDeviceInfo nfo = { 0 };
+    virDomainDeviceInfoPtr ptr = allowZero ? &nfo : info;
+
+    ptr->type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_SERIAL;
+
+    if (portOnly) {
+        if (virDomainVirtioSerialAddrNextFromController(addrs,
+                                                        &ptr->addr.vioserial) < 0)
+            goto cleanup;
+    } else {
+        if (virDomainVirtioSerialAddrNext(def, addrs, &ptr->addr.vioserial,
+                                          allowZero) < 0)
+            goto cleanup;
+    }
+
+    if (virDomainVirtioSerialAddrReserve(NULL, NULL, ptr, addrs) < 0)
+        goto cleanup;
+
+    ret = 0;
+
+ cleanup:
+    return ret;
+}
+
 /* virDomainVirtioSerialAddrAutoAssign
  *
  * reserve a virtio serial address of the device (if it has one)
@@ -1528,38 +1946,6 @@ virDomainVirtioSerialAddrAutoAssign(virDomainDefPtr def,
 }
 
 
-int
-virDomainVirtioSerialAddrAssign(virDomainDefPtr def,
-                                virDomainVirtioSerialAddrSetPtr addrs,
-                                virDomainDeviceInfoPtr info,
-                                bool allowZero,
-                                bool portOnly)
-{
-    int ret = -1;
-    virDomainDeviceInfo nfo = { 0 };
-    virDomainDeviceInfoPtr ptr = allowZero ? &nfo : info;
-
-    ptr->type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_SERIAL;
-
-    if (portOnly) {
-        if (virDomainVirtioSerialAddrNextFromController(addrs,
-                                                        &ptr->addr.vioserial) < 0)
-            goto cleanup;
-    } else {
-        if (virDomainVirtioSerialAddrNext(def, addrs, &ptr->addr.vioserial,
-                                          allowZero) < 0)
-            goto cleanup;
-    }
-
-    if (virDomainVirtioSerialAddrReserve(NULL, NULL, ptr, addrs) < 0)
-        goto cleanup;
-
-    ret = 0;
-
- cleanup:
-    return ret;
-}
-
 /* virDomainVirtioSerialAddrIsComplete
  *
  * Check if the address is complete, or it needs auto-assignment
@@ -1569,110 +1955,6 @@ virDomainVirtioSerialAddrIsComplete(virDomainDeviceInfoPtr info)
 {
     return info->type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_SERIAL &&
         info->addr.vioserial.port != 0;
-}
-
-/* virDomainVirtioSerialAddrReserve
- *
- * Reserve the virtio serial address of the device
- *
- * For use with virDomainDeviceInfoIterate,
- * opaque should be the address set
- */
-int
-virDomainVirtioSerialAddrReserve(virDomainDefPtr def ATTRIBUTE_UNUSED,
-                                 virDomainDeviceDefPtr dev ATTRIBUTE_UNUSED,
-                                 virDomainDeviceInfoPtr info,
-                                 void *data)
-{
-    virDomainVirtioSerialAddrSetPtr addrs = data;
-    char *str = NULL;
-    int ret = -1;
-    virBitmapPtr map = NULL;
-    bool b;
-    ssize_t i;
-
-    if (!virDomainVirtioSerialAddrIsComplete(info))
-        return 0;
-
-    VIR_DEBUG("Reserving virtio serial %u %u", info->addr.vioserial.controller,
-              info->addr.vioserial.port);
-
-    i = virDomainVirtioSerialAddrFindController(addrs, info->addr.vioserial.controller);
-    if (i < 0) {
-        virReportError(VIR_ERR_XML_ERROR,
-                       _("virtio serial controller %u is missing"),
-                       info->addr.vioserial.controller);
-        goto cleanup;
-    }
-
-    map = addrs->controllers[i]->ports;
-    if (virBitmapGetBit(map, info->addr.vioserial.port, &b) < 0) {
-        virReportError(VIR_ERR_XML_ERROR,
-                       _("virtio serial controller %u does not have port %u"),
-                       info->addr.vioserial.controller,
-                       info->addr.vioserial.port);
-        goto cleanup;
-    }
-
-    if (b) {
-        virReportError(VIR_ERR_XML_ERROR,
-                       _("virtio serial port %u on controller %u is already occupied"),
-                       info->addr.vioserial.port,
-                       info->addr.vioserial.controller);
-        goto cleanup;
-    }
-
-    ignore_value(virBitmapSetBit(map, info->addr.vioserial.port));
-
-    ret = 0;
-
- cleanup:
-    VIR_FREE(str);
-    return ret;
-}
-
-/* virDomainVirtioSerialAddrRelease
- *
- * Release the virtio serial address of the device
- */
-int
-virDomainVirtioSerialAddrRelease(virDomainVirtioSerialAddrSetPtr addrs,
-                                 virDomainDeviceInfoPtr info)
-{
-    virBitmapPtr map;
-    char *str = NULL;
-    int ret = -1;
-    ssize_t i;
-
-    if (info->type != VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_SERIAL ||
-        info->addr.vioserial.port == 0)
-        return 0;
-
-    VIR_DEBUG("Releasing virtio serial %u %u", info->addr.vioserial.controller,
-              info->addr.vioserial.port);
-
-    i = virDomainVirtioSerialAddrFindController(addrs, info->addr.vioserial.controller);
-    if (i < 0) {
-        virReportError(VIR_ERR_XML_ERROR,
-                       _("virtio serial controller %u is missing"),
-                       info->addr.vioserial.controller);
-        goto cleanup;
-    }
-
-    map = addrs->controllers[i]->ports;
-    if (virBitmapClearBit(map, info->addr.vioserial.port) < 0) {
-        virReportError(VIR_ERR_XML_ERROR,
-                       _("virtio serial controller %u does not have port %u"),
-                       info->addr.vioserial.controller,
-                       info->addr.vioserial.port);
-        goto cleanup;
-    }
-
-    ret = 0;
-
- cleanup:
-    VIR_FREE(str);
-    return ret;
 }
 
 
@@ -1698,7 +1980,7 @@ virDomainUSBAddressPortFormatBuf(virBufferPtr buf,
 }
 
 
-char *
+static char * ATTRIBUTE_NONNULL(1)
 virDomainUSBAddressPortFormat(unsigned int *port)
 {
     virBuffer buf = VIR_BUFFER_INITIALIZER;
@@ -1812,8 +2094,7 @@ virDomainUSBAddressHubNew(size_t nports)
         goto cleanup;
     hub->nports = nports;
 
-    ret = hub;
-    hub = NULL;
+    VIR_STEAL_PTR(ret, hub);
  cleanup:
     virDomainUSBAddressHubFree(hub);
     return ret;

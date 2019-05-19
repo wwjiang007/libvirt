@@ -14,12 +14,9 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Jan Tomko <jtomko@redhat.com>
  */
 
 #include <config.h>
-#include <stdlib.h>
 
 #include "viralloc.h"
 #include "virerror.h"
@@ -173,7 +170,7 @@ testUSBList(const void *opaque ATTRIBUTE_UNUSED)
         dev = virUSBDeviceListGet(devlist, 0);
         dev = virUSBDeviceListSteal(devlist, dev);
 
-        if (virUSBDeviceListAdd(list, dev) < 0)
+        if (virUSBDeviceListAdd(list, &dev) < 0)
             goto cleanup;
         dev = NULL;
     }
@@ -196,7 +193,7 @@ testUSBList(const void *opaque ATTRIBUTE_UNUSED)
         dev = virUSBDeviceListGet(devlist, 0);
         dev = virUSBDeviceListSteal(devlist, dev);
 
-        if (virUSBDeviceListAdd(list, dev) < 0)
+        if (virUSBDeviceListAdd(list, &dev) < 0)
             goto cleanup;
         dev = NULL;
     }

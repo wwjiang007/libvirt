@@ -31,7 +31,8 @@
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
-VIR_ENUM_IMPL(virTypedParameter, VIR_TYPED_PARAM_LAST,
+VIR_ENUM_IMPL(virTypedParameter,
+              VIR_TYPED_PARAM_LAST,
               "unknown",
               "int",
               "uint",
@@ -39,7 +40,8 @@ VIR_ENUM_IMPL(virTypedParameter, VIR_TYPED_PARAM_LAST,
               "ullong",
               "double",
               "boolean",
-              "string")
+              "string",
+);
 
 /* When editing this file, ensure that public exported functions
  * (those in libvirt_public.syms) either trigger no errors, or else
@@ -86,7 +88,7 @@ virTypedParamsValidate(virTypedParameterPtr params, int nparams, ...)
         if (VIR_RESIZE_N(keys, nkeysalloc, nkeys, 1) < 0)
             goto cleanup;
 
-        if (virStrcpyStatic(keys[nkeys].field, name) == NULL) {
+        if (virStrcpyStatic(keys[nkeys].field, name) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("Field name '%s' too long"), name);
             goto cleanup;
@@ -222,7 +224,7 @@ virTypedParameterAssign(virTypedParameterPtr param, const char *name,
 
     va_start(ap, type);
 
-    if (virStrcpyStatic(param->field, name) == NULL) {
+    if (virStrcpyStatic(param->field, name) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, _("Field name '%s' too long"),
                        name);
         goto cleanup;
@@ -279,7 +281,7 @@ virTypedParameterAssignFromStr(virTypedParameterPtr param, const char *name,
         goto cleanup;
     }
 
-    if (virStrcpyStatic(param->field, name) == NULL) {
+    if (virStrcpyStatic(param->field, name) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, _("Field name '%s' too long"),
                        name);
         goto cleanup;
@@ -1413,7 +1415,7 @@ virTypedParamsDeserialize(virTypedParameterRemotePtr remote_params,
         virTypedParameterRemotePtr remote_param = remote_params + i;
 
         if (virStrcpyStatic(param->field,
-                            remote_param->field) == NULL) {
+                            remote_param->field) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("parameter %s too big for destination"),
                            remote_param->field);
@@ -1467,6 +1469,7 @@ virTypedParamsDeserialize(virTypedParameterRemotePtr remote_params,
         } else {
             virTypedParamsFree(*params, i);
             *params = NULL;
+            *nparams = 0;
         }
     }
     return rv;
@@ -1501,8 +1504,8 @@ virTypedParamsSerialize(virTypedParameterPtr params,
     size_t j;
     int rv = -1;
     virTypedParameterRemotePtr params_val;
+    int params_len = nparams;
 
-    *remote_params_len = nparams;
     if (VIR_ALLOC_N(params_val, nparams) < 0)
         goto cleanup;
 
@@ -1515,7 +1518,7 @@ virTypedParamsSerialize(virTypedParameterPtr params,
         if (!param->type ||
             (!(flags & VIR_TYPED_PARAM_STRING_OKAY) &&
              param->type == VIR_TYPED_PARAM_STRING)) {
-            --*remote_params_len;
+            --params_len;
             continue;
         }
 
@@ -1556,6 +1559,7 @@ virTypedParamsSerialize(virTypedParameterPtr params,
     }
 
     *remote_params_val = params_val;
+    *remote_params_len = params_len;
     params_val = NULL;
     rv = 0;
 

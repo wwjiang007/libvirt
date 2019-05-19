@@ -14,8 +14,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
@@ -41,7 +39,7 @@ static int testDriverModule(const void *args)
     const struct testDriverModuleData *data = args;
 
     /* coverity[leaked_storage] */
-    if (virDriverLoadModule(data->module, data->regfunc) != 0)
+    if (virDriverLoadModule(data->module, data->regfunc, true) != 0)
         return -1;
 
     return 0;
@@ -90,9 +88,6 @@ mymain(void)
 #endif
 #ifdef WITH_LXC
     TEST("lxc");
-#endif
-#ifdef WITH_UML
-    TEST("uml");
 #endif
 #ifdef WITH_VBOX
     TEST("vbox");

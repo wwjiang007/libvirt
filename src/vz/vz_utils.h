@@ -20,14 +20,15 @@
  *
  */
 
-#ifndef PARALLELS_UTILS_H
-# define PARALLELS_UTILS_H
+#ifndef LIBVIRT_VZ_UTILS_H
+# define LIBVIRT_VZ_UTILS_H
 
 # include <Parallels.h>
 
 # include "driver.h"
 # include "conf/domain_conf.h"
 # include "conf/snapshot_conf.h"
+# include "conf/virdomainsnapshotobjlist.h"
 # include "conf/virdomainobjlist.h"
 # include "conf/domain_event.h"
 # include "virthread.h"
@@ -48,7 +49,7 @@
     } while (0)
 
 # define PARALLELS_DOMAIN_ROUTED_NETWORK_NAME   "host-routed"
-# define VIRTUOZZO_VER_7 ((unsigned long) 7000000)
+# define VIRTUOZZO_VER_7 ((unsigned long)7000000)
 
 struct _vzCapabilities {
     virStorageFileFormat vmDiskFormat;
@@ -120,7 +121,6 @@ void* vzDomObjAlloc(void *opaque);
 void vzDomObjFree(void *p);
 
 virDomainObjPtr vzDomObjFromDomain(virDomainPtr domain);
-virDomainObjPtr vzDomObjFromDomainRef(virDomainPtr domain);
 
 char * vzGetOutput(const char *binary, ...)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_SENTINEL;
@@ -152,11 +152,11 @@ int vzCheckUnsupportedGraphics(virDomainGraphicsDefPtr gr);
     OP(wr_req, VIR_DOMAIN_BLOCK_STATS_WRITE_REQ, "write_requests") \
     OP(wr_bytes, VIR_DOMAIN_BLOCK_STATS_WRITE_BYTES, "write_total")
 
-#endif
-
 int
 vzDomainObjBeginJob(virDomainObjPtr dom);
 void
 vzDomainObjEndJob(virDomainObjPtr dom);
 int
 vzDomainJobUpdateTime(vzDomainJobObjPtr job);
+
+#endif /* LIBVIRT_VZ_UTILS_H */

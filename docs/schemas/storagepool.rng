@@ -18,6 +18,7 @@
         <ref name='poollogical'/>
         <ref name='pooldisk'/>
         <ref name='pooliscsi'/>
+        <ref name='pooliscsidirect'/>
         <ref name='poolscsi'/>
         <ref name='poolmpath'/>
         <ref name='poolrbd'/>
@@ -51,6 +52,9 @@
       <ref name='sourcefs'/>
       <ref name='target'/>
     </interleave>
+    <optional>
+      <ref name='fs_mount_opts'/>
+    </optional>
   </define>
 
   <define name='poolnetfs'>
@@ -63,6 +67,9 @@
       <ref name='sourcenetfs'/>
       <ref name='target'/>
     </interleave>
+    <optional>
+      <ref name='fs_mount_opts'/>
+    </optional>
   </define>
 
   <define name='poollogical'>
@@ -101,6 +108,19 @@
     </interleave>
   </define>
 
+  <define name='pooliscsidirect'>
+    <attribute name='type'>
+      <value>iscsi-direct</value>
+    </attribute>
+    <interleave>
+      <ref name='commonmetadata'/>
+      <optional>
+        <ref name='sizing'/>
+      </optional>
+      <ref name='sourceiscsidirect'/>
+    </interleave>
+  </define>
+
   <define name='poolscsi'>
     <attribute name='type'>
       <value>scsi</value>
@@ -135,7 +155,11 @@
       <ref name='commonMetadataNameOptional'/>
       <ref name='sizing'/>
       <ref name='sourcerbd'/>
+      <ref name='refresh'/>
     </interleave>
+    <optional>
+      <ref name='rbd_config_opts'/>
+    </optional>
   </define>
 
   <define name='poolsheepdog'>
@@ -314,14 +338,11 @@
     </element>
   </define>
 
-  <define name='initiatorinfo'>
-    <element name='initiator'>
-      <element name='iqn'>
-        <attribute name='name'>
-          <text/>
-        </attribute>
-        <empty/>
-      </element>
+  <define name='sourceinfodeviscsidirect'>
+    <element name='device'>
+      <attribute name='path'>
+        <ref name='IscsiQualifiedName'/>
+      </attribute>
     </element>
   </define>
 
@@ -521,6 +542,13 @@
             <ref name='sourceinfodir'/>
             <ref name='sourcefmtnetfs'/>
             <optional>
+              <element name='protocol'>
+                <attribute name='ver'>
+                  <ref name='unsignedInt'/>
+                </attribute>
+              </element>
+            </optional>
+            <optional>
               <ref name='sourceinfovendor'/>
             </optional>
           </interleave>
@@ -595,6 +623,19 @@
     </element>
   </define>
 
+  <define name='sourceiscsidirect'>
+    <element name='source'>
+      <interleave>
+        <ref name='sourceinfohost'/>
+        <ref name='sourceinfodeviscsidirect'/>
+        <ref name='initiatorinfo'/>
+        <optional>
+          <ref name='sourceinfoauth'/>
+        </optional>
+      </interleave>
+    </element>
+  </define>
+
   <define name='sourcescsi'>
     <element name='source'>
       <interleave>
@@ -649,6 +690,65 @@
     <data type='string'>
       <param name="pattern">iqn\.[0-9]{4}-(0[1-9]|1[0-2])\.[a-zA-Z0-9\.\-]+(:.+)?</param>
     </data>
+  </define>
+
+  <define name='refresh'>
+    <optional>
+      <element name='refresh'>
+        <interleave>
+          <ref name='refreshVolume'/>
+        </interleave>
+      </element>
+    </optional>
+  </define>
+
+  <define name='refreshVolume'>
+    <optional>
+      <element name='volume'>
+        <optional>
+          <attribute name='allocation'>
+            <ref name="refreshVolumeAllocation"/>
+          </attribute>
+        </optional>
+      </element>
+    </optional>
+  </define>
+
+  <!--
+       Optional storage pool extensions in their own namespace:
+         "fs" or "netfs"
+    -->
+
+  <define name="fs_mount_opts">
+    <element name="mount_opts" ns="http://libvirt.org/schemas/storagepool/fs/1.0">
+      <zeroOrMore>
+        <element name="option">
+          <attribute name='name'>
+            <text/>
+          </attribute>
+        </element>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <!--
+       Optional storage pool extensions in their own namespace:
+         RBD
+    -->
+
+  <define name="rbd_config_opts">
+    <element name="config_opts" ns="http://libvirt.org/schemas/storagepool/rbd/1.0">
+      <zeroOrMore>
+        <element name="option">
+          <attribute name='name'>
+            <text/>
+          </attribute>
+          <attribute name='value'>
+            <text/>
+          </attribute>
+        </element>
+      </zeroOrMore>
+    </element>
   </define>
 
 </grammar>

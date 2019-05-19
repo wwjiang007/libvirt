@@ -17,8 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Roman Bogorodskiy
  */
 
 #include <config.h>
@@ -133,7 +131,6 @@ bhyveAutostartDomains(bhyveConnPtr driver)
 virCapsPtr ATTRIBUTE_NONNULL(1)
 bhyveDriverGetCapabilities(bhyveConnPtr driver)
 {
-
     return virObjectRef(driver->caps);
 }
 
@@ -168,7 +165,7 @@ bhyveDomObjFromDomain(virDomainPtr domain)
     bhyveConnPtr privconn = domain->conn->privateData;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
 
-    vm = virDomainObjListFindByUUIDRef(privconn->domains, domain->uuid);
+    vm = virDomainObjListFindByUUID(privconn->domains, domain->uuid);
     if (!vm) {
         virUUIDFormat(domain->uuid, uuidstr);
         virReportError(VIR_ERR_NO_DOMAIN,
@@ -197,27 +194,27 @@ bhyveConnectOpen(virConnectPtr conn,
                  virConfPtr conf ATTRIBUTE_UNUSED,
                  unsigned int flags)
 {
-     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+    virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
 
-     if (STRNEQ(conn->uri->path, "/system")) {
-         virReportError(VIR_ERR_INTERNAL_ERROR,
-                        _("Unexpected bhyve URI path '%s', try bhyve:///system"),
-                        conn->uri->path);
-         return VIR_DRV_OPEN_ERROR;
-     }
+    if (STRNEQ(conn->uri->path, "/system")) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Unexpected bhyve URI path '%s', try bhyve:///system"),
+                       conn->uri->path);
+        return VIR_DRV_OPEN_ERROR;
+    }
 
-     if (bhyve_driver == NULL) {
-         virReportError(VIR_ERR_INTERNAL_ERROR,
-                        "%s", _("bhyve state driver is not active"));
-         return VIR_DRV_OPEN_ERROR;
-     }
+    if (bhyve_driver == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       "%s", _("bhyve state driver is not active"));
+        return VIR_DRV_OPEN_ERROR;
+    }
 
-     if (virConnectOpenEnsureACL(conn) < 0)
-         return VIR_DRV_OPEN_ERROR;
+    if (virConnectOpenEnsureACL(conn) < 0)
+        return VIR_DRV_OPEN_ERROR;
 
-     conn->privateData = bhyve_driver;
+    conn->privateData = bhyve_driver;
 
-     return VIR_DRV_OPEN_SUCCESS;
+    return VIR_DRV_OPEN_SUCCESS;
 }
 
 static int
@@ -487,6 +484,8 @@ bhyveDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     virCapsPtr caps = NULL;
     char *ret = NULL;
 
+    virCheckFlags(VIR_DOMAIN_XML_COMMON_FLAGS, NULL);
+
     if (!(vm = bhyveDomObjFromDomain(domain)))
         goto cleanup;
 
@@ -550,7 +549,6 @@ bhyveDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int flag
     if (virDomainSaveConfig(BHYVE_CONFIG_DIR, caps,
                             vm->newDef ? vm->newDef : vm->def) < 0) {
         virDomainObjListRemove(privconn->domains, vm);
-        vm = NULL;
         goto cleanup;
     }
 
@@ -566,10 +564,8 @@ bhyveDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int flag
     virObjectUnref(caps);
     virDomainDefFree(def);
     virDomainDefFree(oldDef);
-    if (vm)
-        virObjectUnlock(vm);
-    if (event)
-        virObjectEventStateQueue(privconn->domainEventState, event);
+    virDomainObjEndAPI(&vm);
+    virObjectEventStateQueue(privconn->domainEventState, event);
 
     return dom;
 }
@@ -609,19 +605,16 @@ bhyveDomainUndefine(virDomainPtr domain)
                                               VIR_DOMAIN_EVENT_UNDEFINED,
                                               VIR_DOMAIN_EVENT_UNDEFINED_REMOVED);
 
-    if (virDomainObjIsActive(vm)) {
+    if (virDomainObjIsActive(vm))
         vm->persistent = 0;
-    } else {
+    else
         virDomainObjListRemove(privconn->domains, vm);
-        virObjectLock(vm);
-    }
 
     ret = 0;
 
  cleanup:
     virDomainObjEndAPI(&vm);
-    if (event)
-        virObjectEventStateQueue(privconn->domainEventState, event);
+    virObjectEventStateQueue(privconn->domainEventState, event);
     return ret;
 }
 
@@ -742,14 +735,14 @@ bhyveConnectDomainXMLToNative(virConnectPtr conn,
                                                 NULL)))
             goto cleanup;
 
-        virBufferAdd(&buf, virCommandToString(loadcmd), -1);
+        virBufferAdd(&buf, virCommandToString(loadcmd, false), -1);
         virBufferAddChar(&buf, '\n');
     }
 
     if (!(cmd = virBhyveProcessBuildBhyveCmd(conn, def, true)))
         goto cleanup;
 
-    virBufferAdd(&buf, virCommandToString(cmd), -1);
+    virBufferAdd(&buf, virCommandToString(cmd, false), -1);
 
     if (virBufferCheckError(&buf) < 0)
         goto cleanup;
@@ -791,7 +784,7 @@ bhyveDomainLookupByUUID(virConnectPtr conn,
     virDomainObjPtr vm;
     virDomainPtr dom = NULL;
 
-    vm = virDomainObjListFindByUUIDRef(privconn->domains, uuid);
+    vm = virDomainObjListFindByUUID(privconn->domains, uuid);
 
     if (!vm) {
         char uuidstr[VIR_UUID_STRING_BUFLEN];
@@ -844,7 +837,7 @@ bhyveDomainLookupByID(virConnectPtr conn,
     virDomainObjPtr vm;
     virDomainPtr dom = NULL;
 
-    vm = virDomainObjListFindByIDRef(privconn->domains, id);
+    vm = virDomainObjListFindByID(privconn->domains, id);
 
     if (!vm) {
         virReportError(VIR_ERR_NO_DOMAIN,
@@ -900,8 +893,7 @@ bhyveDomainCreateWithFlags(virDomainPtr dom,
 
  cleanup:
     virDomainObjEndAPI(&vm);
-    if (event)
-        virObjectEventStateQueue(privconn->domainEventState, event);
+    virObjectEventStateQueue(privconn->domainEventState, event);
     return ret;
 }
 
@@ -958,10 +950,8 @@ bhyveDomainCreateXML(virConnectPtr conn,
                              VIR_DOMAIN_RUNNING_BOOTED,
                              start_flags) < 0) {
         /* If domain is not persistent, remove its data */
-        if (!vm->persistent) {
+        if (!vm->persistent)
             virDomainObjListRemove(privconn->domains, vm);
-            vm = NULL;
-        }
         goto cleanup;
     }
 
@@ -974,10 +964,8 @@ bhyveDomainCreateXML(virConnectPtr conn,
  cleanup:
     virObjectUnref(caps);
     virDomainDefFree(def);
-    if (vm)
-        virObjectUnlock(vm);
-    if (event)
-        virObjectEventStateQueue(privconn->domainEventState, event);
+    virDomainObjEndAPI(&vm);
+    virObjectEventStateQueue(privconn->domainEventState, event);
 
     return dom;
 }
@@ -996,26 +984,20 @@ bhyveDomainDestroy(virDomainPtr dom)
     if (virDomainDestroyEnsureACL(dom->conn, vm->def) < 0)
         goto cleanup;
 
-    if (!virDomainObjIsActive(vm)) {
-        virReportError(VIR_ERR_OPERATION_INVALID,
-                       "%s", _("Domain is not running"));
+    if (virDomainObjCheckActive(vm) < 0)
         goto cleanup;
-    }
 
     ret = virBhyveProcessStop(privconn, vm, VIR_DOMAIN_SHUTOFF_DESTROYED);
     event = virDomainEventLifecycleNewFromObj(vm,
                                               VIR_DOMAIN_EVENT_STOPPED,
                                               VIR_DOMAIN_EVENT_STOPPED_DESTROYED);
 
-    if (!vm->persistent) {
+    if (!vm->persistent)
         virDomainObjListRemove(privconn->domains, vm);
-        virObjectLock(vm);
-    }
 
  cleanup:
     virDomainObjEndAPI(&vm);
-    if (event)
-        virObjectEventStateQueue(privconn->domainEventState, event);
+    virObjectEventStateQueue(privconn->domainEventState, event);
     return ret;
 }
 
@@ -1031,11 +1013,8 @@ bhyveDomainShutdown(virDomainPtr dom)
     if (virDomainShutdownEnsureACL(dom->conn, vm->def) < 0)
         goto cleanup;
 
-    if (!virDomainObjIsActive(vm)) {
-        virReportError(VIR_ERR_OPERATION_INVALID,
-                       "%s", _("Domain is not running"));
+    if (virDomainObjCheckActive(vm) < 0)
         goto cleanup;
-    }
 
     ret = virBhyveProcessShutdown(vm);
 
@@ -1062,11 +1041,8 @@ bhyveDomainOpenConsole(virDomainPtr dom,
     if (virDomainOpenConsoleEnsureACL(dom->conn, vm->def) < 0)
         goto cleanup;
 
-    if (!virDomainObjIsActive(vm)) {
-        virReportError(VIR_ERR_OPERATION_INVALID,
-                       "%s", _("domain is not running"));
+    if (virDomainObjCheckActive(vm) < 0)
         goto cleanup;
-    }
 
     if (!vm->def->nserials) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -1293,6 +1269,8 @@ bhyveStateInitialize(bool privileged,
 
     virBhyveProcessReconnectAll(bhyve_driver);
 
+    bhyveAutostartDomains(bhyve_driver);
+
     return 0;
 
  cleanup:
@@ -1318,15 +1296,6 @@ bhyveDriverGetGrubCaps(virConnectPtr conn)
     if (driver != NULL)
         return driver->grubcaps;
     return 0;
-}
-
-static void
-bhyveStateAutoStart(void)
-{
-    if (!bhyve_driver)
-        return;
-
-    bhyveAutostartDomains(bhyve_driver);
 }
 
 static int
@@ -1416,8 +1385,8 @@ bhyveConnectBaselineCPU(virConnectPtr conn,
     if (!(cpus = virCPUDefListParse(xmlCPUs, ncpus, VIR_CPU_TYPE_HOST)))
         goto cleanup;
 
-    if (!(cpu = cpuBaseline(cpus, ncpus, NULL,
-                            !!(flags & VIR_CONNECT_BASELINE_CPU_MIGRATABLE))))
+    if (!(cpu = virCPUBaseline(VIR_ARCH_NONE, cpus, ncpus, NULL, NULL,
+                               !!(flags & VIR_CONNECT_BASELINE_CPU_MIGRATABLE))))
         goto cleanup;
 
     if ((flags & VIR_CONNECT_BASELINE_CPU_EXPAND_FEATURES) &&
@@ -1736,7 +1705,6 @@ static virConnectDriver bhyveConnectDriver = {
 static virStateDriver bhyveStateDriver = {
     .name = "bhyve",
     .stateInitialize = bhyveStateInitialize,
-    .stateAutoStart = bhyveStateAutoStart,
     .stateCleanup = bhyveStateCleanup,
 };
 

@@ -16,14 +16,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- * Authors:
- *     Erik Skultety <eskultet@redhat.com>
  */
 
 #include <config.h>
 #include "virt-admin.h"
 
-#include <errno.h>
 #include <getopt.h>
 
 #if WITH_READLINE
@@ -40,6 +37,8 @@
 #include "virgettext.h"
 #include "virtime.h"
 #include "virt-admin-completer.h"
+#include "vsh-table.h"
+#include "virenum.h"
 
 /* Gnulib doesn't guarantee SA_SIGINFO support.  */
 #ifndef SA_SIGINFO
@@ -56,12 +55,12 @@ static char *progname;
 static const vshCmdGrp cmdGroups[];
 static const vshClientHooks hooks;
 
-VIR_ENUM_DECL(virClientTransport)
+VIR_ENUM_DECL(virClientTransport);
 VIR_ENUM_IMPL(virClientTransport,
               VIR_CLIENT_TRANS_LAST,
               N_("unix"),
               N_("tcp"),
-              N_("tls"))
+              N_("tls"));
 
 static const char *
 vshAdmClientTransportToString(int transport)
@@ -82,7 +81,6 @@ vshAdmClientTransportToString(int transport)
 static int
 vshAdmGetTimeStr(vshControl *ctl, time_t then, char **result)
 {
-
     char *tmp = NULL;
     struct tm timeinfo;
 
@@ -383,6 +381,7 @@ cmdSrvList(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
     char *uri = NULL;
     virAdmServerPtr *srvs = NULL;
     vshAdmControlPtr priv = ctl->privData;
+    vshTablePtr table = NULL;
 
     /* Obtain a list of available servers on the daemon */
     if ((nsrvs = virAdmConnectListServers(priv->conn, &srvs, 0)) < 0) {
@@ -392,13 +391,27 @@ cmdSrvList(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
         goto cleanup;
     }
 
-    vshPrintExtra(ctl, " %-5s %-15s\n", "Id", "Name");
-    vshPrintExtra(ctl, "---------------\n");
-    for (i = 0; i < nsrvs; i++)
-        vshPrint(ctl, " %-5zu %-15s\n", i, virAdmServerGetName(srvs[i]));
+    table = vshTableNew(_("Id"), _("Name"), NULL);
+    if (!table)
+        goto cleanup;
+
+    for (i = 0; i < nsrvs; i++) {
+        VIR_AUTOFREE(char *) idStr = NULL;
+        if (virAsprintf(&idStr, "%zu", i) < 0)
+            goto cleanup;
+
+        if (vshTableRowAppend(table,
+                              idStr,
+                              virAdmServerGetName(srvs[i]),
+                              NULL) < 0)
+            goto cleanup;
+    }
+
+    vshTablePrintToStdout(table, ctl);
 
     ret = true;
  cleanup:
+    vshTableFree(table);
     if (srvs) {
         for (i = 0; i < nsrvs; i++)
             virAdmServerFree(srvs[i]);
@@ -552,7 +565,8 @@ cmdSrvThreadpoolSet(vshControl *ctl, const vshCmd *cmd)
                               VIR_THREADPOOL_WORKERS_MAX, &max) &&
         virTypedParamsGetUInt(params, nparams,
                               VIR_THREADPOOL_WORKERS_MIN, &min) && min > max) {
-        vshError(ctl, "%s", _("--min-workers must be less than --max-workers"));
+        vshError(ctl, "%s", _("--min-workers must be less than or equal to "
+                              "--max-workers"));
         goto cleanup;
     }
 
@@ -613,10 +627,10 @@ cmdSrvClientsList(vshControl *ctl, const vshCmd *cmd)
     const char *srvname = NULL;
     unsigned long long id;
     virClientTransport transport;
-    char *timestr = NULL;
     virAdmServerPtr srv = NULL;
     virAdmClientPtr *clts = NULL;
     vshAdmControlPtr priv = ctl->privData;
+    vshTablePtr table = NULL;
 
     if (vshCommandOptStringReq(ctl, cmd, "server", &srvname) < 0)
         return false;
@@ -631,12 +645,13 @@ cmdSrvClientsList(vshControl *ctl, const vshCmd *cmd)
         goto cleanup;
     }
 
-    vshPrintExtra(ctl, " %-5s %-15s %-15s\n%s\n", _("Id"), _("Transport"),
-                  _("Connected since"),
-                  "-------------------------"
-                  "-------------------------");
+    table = vshTableNew(_("Id"), _("Transport"), _("Connected since"), NULL);
+    if (!table)
+        goto cleanup;
 
     for (i = 0; i < nclts; i++) {
+        VIR_AUTOFREE(char *) timestr = NULL;
+        VIR_AUTOFREE(char *) idStr = NULL;
         virAdmClientPtr client = clts[i];
         id = virAdmClientGetID(client);
         transport = virAdmClientGetTransport(client);
@@ -644,14 +659,20 @@ cmdSrvClientsList(vshControl *ctl, const vshCmd *cmd)
                              &timestr) < 0)
             goto cleanup;
 
-        vshPrint(ctl, " %-5llu %-15s %-15s\n",
-                 id, vshAdmClientTransportToString(transport), timestr);
-        VIR_FREE(timestr);
+        if (virAsprintf(&idStr, "%llu", id) < 0)
+            goto cleanup;
+        if (vshTableRowAppend(table, idStr,
+                              vshAdmClientTransportToString(transport),
+                              timestr, NULL) < 0)
+            goto cleanup;
     }
+
+    vshTablePrintToStdout(table, ctl);
 
     ret = true;
 
  cleanup:
+    vshTableFree(table);
     if (clts) {
         for (i = 0; i < nclts; i++)
             virAdmClientFree(clts[i]);
@@ -952,7 +973,7 @@ cmdSrvClientsSet(vshControl *ctl, const vshCmd *cmd)
         virTypedParamsGetUInt(params, nparams,
                               VIR_SERVER_CLIENTS_UNAUTH_MAX, &unauth_max) &&
         unauth_max > max) {
-        vshError(ctl, "%s", _("--max-unauth-clients must be less than "
+        vshError(ctl, "%s", _("--max-unauth-clients must be less than or equal to "
                               "--max-clients"));
         goto cleanup;
     }
@@ -1027,7 +1048,7 @@ cmdDaemonLogFilters(vshControl *ctl, const vshCmd *cmd)
         }
 
         vshPrintExtra(ctl, " %-15s", _("Logging filters: "));
-        vshPrint(ctl, "%s\n", filters ? filters : "");
+        vshPrint(ctl, "%s\n", NULLSTR_EMPTY(filters));
     }
 
     return true;
@@ -1081,7 +1102,7 @@ cmdDaemonLogOutputs(vshControl *ctl, const vshCmd *cmd)
         }
 
         vshPrintExtra(ctl, " %-15s", _("Logging outputs: "));
-        vshPrint(ctl, "%s\n", outputs ? outputs : "");
+        vshPrint(ctl, "%s\n", NULLSTR_EMPTY(outputs));
     }
 
     return true;

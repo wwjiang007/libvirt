@@ -16,12 +16,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
-#ifndef __VIR_NET_CLIENT_STREAM_H__
-# define __VIR_NET_CLIENT_STREAM_H__
+#ifndef LIBVIRT_VIRNETCLIENTSTREAM_H
+# define LIBVIRT_VIRNETCLIENTSTREAM_H
 
 # include "virnetclientprogram.h"
 # include "virobject.h"
@@ -29,19 +27,30 @@
 typedef struct _virNetClientStream virNetClientStream;
 typedef virNetClientStream *virNetClientStreamPtr;
 
+typedef enum {
+    VIR_NET_CLIENT_STREAM_CLOSED_NOT = 0,
+    VIR_NET_CLIENT_STREAM_CLOSED_FINISHED,
+    VIR_NET_CLIENT_STREAM_CLOSED_ABORTED,
+} virNetClientStreamClosed;
+
 typedef void (*virNetClientStreamEventCallback)(virNetClientStreamPtr stream,
                                                 int events, void *opaque);
 
-virNetClientStreamPtr virNetClientStreamNew(virStreamPtr stream,
-                                            virNetClientProgramPtr prog,
+virNetClientStreamPtr virNetClientStreamNew(virNetClientProgramPtr prog,
                                             int proc,
                                             unsigned serial,
                                             bool allowSkip);
 
-bool virNetClientStreamRaiseError(virNetClientStreamPtr st);
+int virNetClientStreamCheckState(virNetClientStreamPtr st);
+
+int virNetClientStreamCheckSendStatus(virNetClientStreamPtr st,
+                                      virNetMessagePtr msg);
 
 int virNetClientStreamSetError(virNetClientStreamPtr st,
                                virNetMessagePtr msg);
+
+void virNetClientStreamSetClosed(virNetClientStreamPtr st,
+                                 virNetClientStreamClosed closed);
 
 bool virNetClientStreamMatches(virNetClientStreamPtr st,
                                virNetMessagePtr msg);
@@ -84,4 +93,4 @@ int virNetClientStreamEventRemoveCallback(virNetClientStreamPtr st);
 bool virNetClientStreamEOF(virNetClientStreamPtr st)
     ATTRIBUTE_NONNULL(1);
 
-#endif /* __VIR_NET_CLIENT_STREAM_H__ */
+#endif /* LIBVIRT_VIRNETCLIENTSTREAM_H */

@@ -1,3 +1,5 @@
+# vim: filetype=automake
+
 STORAGE_DRIVER_BACKEND_SOURCES = \
 	storage/storage_backend.h \
 	storage/storage_backend.c \
@@ -16,6 +18,11 @@ STORAGE_DRIVER_FS_SOURCES = \
 	storage/storage_backend_fs.c \
 	$(NULL)
 
+STORAGE_FILE_FS_SOURCES = \
+	storage/storage_file_fs.h \
+	storage/storage_file_fs.c \
+	$(NULL)
+
 STORAGE_DRIVER_LVM_SOURCES = \
 	storage/storage_backend_logical.h \
 	storage/storage_backend_logical.c \
@@ -24,6 +31,11 @@ STORAGE_DRIVER_LVM_SOURCES = \
 STORAGE_DRIVER_ISCSI_SOURCES = \
 	storage/storage_backend_iscsi.h \
 	storage/storage_backend_iscsi.c \
+	$(NULL)
+
+STORAGE_DRIVER_ISCSI_DIRECT_SOURCES = \
+	storage/storage_backend_iscsi_direct.h \
+	storage/storage_backend_iscsi_direct.c \
 	$(NULL)
 
 STORAGE_DRIVER_SCSI_SOURCES = \
@@ -57,6 +69,11 @@ STORAGE_DRIVER_GLUSTER_SOURCES = \
 	storage/storage_backend_gluster.c \
 	$(NULL)
 
+STORAGE_FILE_GLUSTER_SOURCES = \
+	storage/storage_file_gluster.h \
+	storage/storage_file_gluster.c \
+	$(NULL)
+
 STORAGE_DRIVER_ZFS_SOURCES = \
 	storage/storage_backend_zfs.h \
 	storage/storage_backend_zfs.c \
@@ -76,14 +93,17 @@ STATEFUL_DRIVER_SOURCE_FILES += $(STORAGE_DRIVER_SOURCES)
 EXTRA_DIST += \
 	$(STORAGE_DRIVER_SOURCES) \
 	$(STORAGE_DRIVER_FS_SOURCES) \
+	$(STORAGE_FILE_FS_SOURCES) \
 	$(STORAGE_DRIVER_LVM_SOURCES) \
 	$(STORAGE_DRIVER_ISCSI_SOURCES) \
+	$(STORAGE_DRIVER_ISCSI_DIRECT_SOURCES) \
 	$(STORAGE_DRIVER_SCSI_SOURCES) \
 	$(STORAGE_DRIVER_MPATH_SOURCES) \
 	$(STORAGE_DRIVER_DISK_SOURCES) \
 	$(STORAGE_DRIVER_RBD_SOURCES) \
 	$(STORAGE_DRIVER_SHEEPDOG_SOURCES) \
 	$(STORAGE_DRIVER_GLUSTER_SOURCES) \
+	$(STORAGE_FILE_GLUSTER_SOURCES) \
 	$(STORAGE_DRIVER_ZFS_SOURCES) \
 	$(STORAGE_DRIVER_VSTORAGE_SOURCES) \
 	$(STORAGE_HELPER_DISK_SOURCES) \
@@ -91,6 +111,9 @@ EXTRA_DIST += \
 
 storagebackenddir = $(libdir)/libvirt/storage-backend
 storagebackend_LTLIBRARIES =
+
+storagefiledir = $(libdir)/libvirt/storage-file
+storagefile_LTLIBRARIES =
 
 # Needed to keep automake quiet about conditionals
 libvirt_driver_storage_impl_la_SOURCES =
@@ -132,6 +155,19 @@ libvirt_storage_backend_fs_la_LIBADD = \
 	libvirt.la \
 	../gnulib/lib/libgnu.la \
 	$(NULL)
+
+libvirt_storage_file_fs_la_SOURCES = $(STORAGE_FILE_FS_SOURCES)
+libvirt_storage_file_fs_la_CFLAGS = \
+	-I$(srcdir)/conf \
+	$(AM_CFLAGS) \
+	$(NULL)
+
+storagefile_LTLIBRARIES += libvirt_storage_file_fs.la
+libvirt_storage_file_fs_la_LDFLAGS = $(AM_LDFLAGS_MOD)
+libvirt_storage_file_fs_la_LIBADD = \
+	libvirt.la \
+	../gnulib/lib/libgnu.la \
+	$(NULL)
 endif WITH_STORAGE
 
 if WITH_STORAGE_LVM
@@ -164,6 +200,24 @@ libvirt_storage_backend_iscsi_la_LIBADD = \
 	../gnulib/lib/libgnu.la \
 	$(NULL)
 endif WITH_STORAGE_ISCSI
+
+if WITH_STORAGE_ISCSI_DIRECT
+libvirt_storage_backend_iscsi_direct_la_SOURCES = $(STORAGE_DRIVER_ISCSI_DIRECT_SOURCES)
+libvirt_storage_backend_iscsi_direct_la_CFLAGS = \
+	-I$(srcdir)/conf \
+	-I$(srcdir)/secret \
+	$(LIBISCSI_CFLAGS) \
+	$(AM_CFLAGS) \
+	$(NULL)
+
+storagebackend_LTLIBRARIES += libvirt_storage_backend_iscsi-direct.la
+libvirt_storage_backend_iscsi_direct_la_LDFLAGS = $(AM_LDFLAGS_MOD)
+libvirt_storage_backend_iscsi_direct_la_LIBADD = \
+	libvirt.la \
+	../gnulib/lib/libgnu.la \
+	$(LIBISCSI_LIBS) \
+	$(NULL)
+endif WITH_STORAGE_ISCSI_DIRECT
 
 if WITH_STORAGE_SCSI
 libvirt_storage_backend_scsi_la_SOURCES = $(STORAGE_DRIVER_SCSI_SOURCES)
@@ -266,6 +320,22 @@ libvirt_storage_backend_gluster_la_CFLAGS = \
 
 storagebackend_LTLIBRARIES += libvirt_storage_backend_gluster.la
 libvirt_storage_backend_gluster_la_LDFLAGS = $(AM_LDFLAGS_MOD)
+
+
+libvirt_storage_file_gluster_la_SOURCES = $(STORAGE_FILE_GLUSTER_SOURCES)
+libvirt_storage_file_gluster_la_LIBADD = \
+	libvirt.la \
+	$(GLUSTERFS_LIBS) \
+	../gnulib/lib/libgnu.la \
+	$(NULL)
+libvirt_storage_file_gluster_la_CFLAGS = \
+	-I$(srcdir)/conf \
+	$(GLUSTERFS_CFLAGS) \
+	$(AM_CFLAGS) \
+	$(NULL)
+
+storagefile_LTLIBRARIES += libvirt_storage_file_gluster.la
+libvirt_storage_file_gluster_la_LDFLAGS = $(AM_LDFLAGS_MOD)
 endif WITH_STORAGE_GLUSTER
 
 if WITH_STORAGE_ZFS
@@ -308,7 +378,7 @@ libvirt_parthelper_LDFLAGS = \
 	$(NULL)
 libvirt_parthelper_LDADD = \
 	$(LIBPARTED_LIBS) \
-	libvirt_util.la \
+	libvirt.la \
 	../gnulib/lib/libgnu.la \
 	$(NULL)
 if WITH_DTRACE_PROBES

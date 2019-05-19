@@ -19,8 +19,8 @@
  *
  */
 
-#ifndef __THREADS_H_
-# define __THREADS_H_
+#ifndef LIBVIRT_VIRTHREAD_H
+# define LIBVIRT_VIRTHREAD_H
 
 # include "internal.h"
 # include "virerror.h"
@@ -181,7 +181,7 @@ int virThreadLocalSet(virThreadLocalPtr l, void*) ATTRIBUTE_RETURN_CHECK;
  *
  * Then invoking the macro:
  *
- *  VIR_ONCE_GLOBAL_INIT(virMyObject)
+ *  VIR_ONCE_GLOBAL_INIT(virMyObject);
  *
  * Will create a method
  *
@@ -211,6 +211,7 @@ int virThreadLocalSet(virThreadLocalPtr l, void*) ATTRIBUTE_RETURN_CHECK;
         } \
  \
         return 0; \
-    }
+    } \
+    struct classname ## EatSemicolon
 
-#endif
+#endif /* LIBVIRT_VIRTHREAD_H */

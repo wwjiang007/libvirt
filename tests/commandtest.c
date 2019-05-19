@@ -20,9 +20,6 @@
 
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 #include <signal.h>
 #include <sys/stat.h>
@@ -127,7 +124,7 @@ static int test0(const void *unused ATTRIBUTE_UNUSED)
     if (virCommandRun(cmd, NULL) == 0)
         goto cleanup;
 
-    if (virGetLastError() == NULL)
+    if (virGetLastErrorCode() == VIR_ERR_OK)
         goto cleanup;
 
     virResetLastError();
@@ -633,7 +630,7 @@ static int test16(const void *unused ATTRIBUTE_UNUSED)
     virCommandAddArg(cmd, "F");
     virCommandAddArg(cmd, "G  H");
 
-    if ((outactual = virCommandToString(cmd)) == NULL) {
+    if ((outactual = virCommandToString(cmd, false)) == NULL) {
         printf("Cannot convert to string: %s\n", virGetLastErrorMessage());
         goto cleanup;
     }
@@ -878,12 +875,12 @@ static int test21(const void *unused ATTRIBUTE_UNUSED)
     if (virTestGetVerbose())
         printf("STDOUT:%s\nSTDERR:%s\n", NULLSTR(outbuf), NULLSTR(errbuf));
 
-    if (STRNEQ(outbuf, outbufExpected)) {
+    if (STRNEQ_NULLABLE(outbuf, outbufExpected)) {
         virTestDifference(stderr, outbufExpected, outbuf);
         goto cleanup;
     }
 
-    if (STRNEQ(errbuf, errbufExpected)) {
+    if (STRNEQ_NULLABLE(errbuf, errbufExpected)) {
         virTestDifference(stderr, errbufExpected, errbuf);
         goto cleanup;
     }
@@ -1027,6 +1024,7 @@ static int test24(const void *unused ATTRIBUTE_UNUSED)
     virCommandDaemonize(cmd);
     virCommandPassFD(cmd, newfd2, VIR_COMMAND_PASS_FD_CLOSE_PARENT);
     virCommandPassFD(cmd, newfd3, VIR_COMMAND_PASS_FD_CLOSE_PARENT);
+    newfd2 = newfd3 = -1;
     virCommandPassListenFDs(cmd);
 
     if (virCommandRun(cmd, NULL) < 0) {
@@ -1056,7 +1054,6 @@ static int test24(const void *unused ATTRIBUTE_UNUSED)
     VIR_FREE(prefix);
     virCommandFree(cmd);
     VIR_FORCE_CLOSE(newfd1);
-    /* coverity[double_close] */
     VIR_FORCE_CLOSE(newfd2);
     VIR_FORCE_CLOSE(newfd3);
     return ret;
@@ -1137,6 +1134,67 @@ static int test25(const void *unused ATTRIBUTE_UNUSED)
     return ret;
 }
 
+
+/*
+ * Don't run program; rather, log what would be run.
+ */
+static int test26(const void *unused ATTRIBUTE_UNUSED)
+{
+    virCommandPtr cmd = virCommandNew("true");
+    char *outactual = NULL;
+    const char *outexpect =
+        "A=B \\\n"
+        "C='D  E' \\\n"
+        "true \\\n"
+        "--foo bar \\\n"
+        "--oooh \\\n"
+        "-f \\\n"
+        "--wizz 'eek eek' \\\n"
+        "-w \\\n"
+        "-z \\\n"
+        "-l \\\n"
+        "--mmm flash \\\n"
+        "bang \\\n"
+        "wallop";
+
+    int ret = -1;
+    int fd = -1;
+
+    virCommandAddEnvPair(cmd, "A", "B");
+    virCommandAddEnvPair(cmd, "C", "D  E");
+    virCommandAddArgList(cmd, "--foo", "bar", "--oooh", "-f",
+                         "--wizz", "eek eek", "-w", "-z", "-l",
+                         "--mmm", "flash", "bang", "wallop",
+                         NULL);
+
+    if ((outactual = virCommandToString(cmd, true)) == NULL) {
+        printf("Cannot convert to string: %s\n", virGetLastErrorMessage());
+        goto cleanup;
+    }
+    if ((fd = open(abs_builddir "/commandhelper.log",
+                   O_CREAT | O_TRUNC | O_WRONLY, 0600)) < 0) {
+        printf("Cannot open log file: %s\n", strerror(errno));
+        goto cleanup;
+    }
+    virCommandWriteArgLog(cmd, fd);
+    if (VIR_CLOSE(fd) < 0) {
+        printf("Cannot close log file: %s\n", strerror(errno));
+        goto cleanup;
+    }
+
+    if (STRNEQ(outactual, outexpect)) {
+        virTestDifference(stderr, outexpect, outactual);
+        goto cleanup;
+    }
+
+    ret = checkoutput("test26", NULL);
+
+ cleanup:
+    virCommandFree(cmd);
+    VIR_FORCE_CLOSE(fd);
+    VIR_FREE(outactual);
+    return ret;
+}
 
 static void virCommandThreadWorker(void *opaque)
 {
@@ -1291,6 +1349,7 @@ mymain(void)
     DO_TEST(test23);
     DO_TEST(test24);
     DO_TEST(test25);
+    DO_TEST(test26);
 
     virMutexLock(&test->lock);
     if (test->running) {

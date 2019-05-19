@@ -20,11 +20,8 @@
 
 #include <config.h>
 
-#include <stdio.h>
 #include <unistd.h>
-#include <stdlib.h>
 #include <fcntl.h>
-#include <string.h>
 #include <sys/stat.h>
 
 #include "internal.h"
@@ -67,7 +64,7 @@ int main(int argc, char **argv) {
     int ret = EXIT_FAILURE;
 
     if (!log)
-        goto cleanup;
+        return ret;
 
     for (i = 1; i < argc; i++)
         fprintf(log, "ARG:%s\n", argv[i]);

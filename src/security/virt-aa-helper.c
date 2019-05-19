@@ -17,20 +17,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author:
- *   Jamie Strandboge <jamie@canonical.com>
- *
  */
 
 #include <config.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <stdarg.h>
 #include <unistd.h>
-#include <errno.h>
 #include <sys/types.h>
 #include <fcntl.h>
 #include <getopt.h>
@@ -63,7 +55,6 @@
 static char *progname;
 
 typedef struct {
-    bool allowDiskFormatProbing;
     char uuid[PROFILE_NAME_SIZE];       /* UUID of vm */
     bool dryrun;                /* dry run */
     char cmd;                   /* 'c'   create
@@ -115,7 +106,6 @@ vah_usage(void)
             "    -r | --replace                 reload profile\n"
             "    -R | --remove                  unload profile\n"
             "    -h | --help                    this help\n"
-            "    -p | --probing [0|1]           allow disk format probing\n"
             "    -u | --uuid <uuid>             uuid (profile name)\n"
             "\n"), progname);
 
@@ -365,8 +355,7 @@ create_profile(const char *profile, const char *profile_name,
         if (!(tmp = virStringReplace(pcontent, template_end, replace_files)))
             goto clean_all;
         VIR_FREE(pcontent);
-        pcontent = tmp;
-        tmp = NULL;
+        VIR_STEAL_PTR(pcontent, tmp);
     }
 
     /* write the file */
@@ -521,8 +510,9 @@ valid_path(const char *path, const bool readonly)
     };
     /* override the above with these */
     const char * const override[] = {
-        "/sys/devices/pci",              /* for hostdev pci devices */
-        "/etc/libvirt-sandbox/services/" /* for virt-sandbox service config */
+        "/sys/devices/pci",                /* for hostdev pci devices */
+        "/sys/kernel/config/target/vhost", /* for hostdev vhost_scsi devices */
+        "/etc/libvirt-sandbox/services/"   /* for virt-sandbox service config */
     };
 
     const int nropaths = ARRAY_CARDINALITY(restricted);
@@ -557,7 +547,7 @@ valid_path(const char *path, const bool readonly)
             return 0;
     }
 
-    /* disallow RW acess to all paths in restricted and restriced_rw */
+    /* disallow RW access to all paths in restricted and restriced_rw */
     if ((array_starts_with(path, restricted, nropaths) == 0 ||
          array_starts_with(path, restricted_rw, nrwpaths) == 0))
         return 1;
@@ -656,7 +646,8 @@ caps_mockup(vahControl * ctl, const char *xmlStr)
 virDomainDefParserConfig virAAHelperDomainDefParserConfig = {
     .features = VIR_DOMAIN_DEF_FEATURE_MEMORY_HOTPLUG |
                 VIR_DOMAIN_DEF_FEATURE_OFFLINE_VCPUPIN |
-                VIR_DOMAIN_DEF_FEATURE_INDIVIDUAL_VCPUS,
+                VIR_DOMAIN_DEF_FEATURE_INDIVIDUAL_VCPUS |
+                VIR_DOMAIN_DEF_FEATURE_NET_MODEL_STRING,
 };
 
 static int
@@ -948,7 +939,7 @@ get_files(vahControl * ctl)
     size_t i;
     char *uuid;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
-    bool needsVfio = false, needsvhost = false;
+    bool needsVfio = false, needsvhost = false, needsgl = false;
 
     /* verify uuid is same as what we were given on the command line */
     virUUIDFormat(ctl->def->uuid, uuidstr);
@@ -964,7 +955,7 @@ get_files(vahControl * ctl)
 
     /* load the storage driver so that backing store can be accessed */
 #ifdef WITH_STORAGE
-    virDriverLoadModule("storage", "storageRegister");
+    virDriverLoadModule("storage", "storageRegister", false);
 #endif
 
     for (i = 0; i < ctl->def->ndisks; i++) {
@@ -975,10 +966,8 @@ get_files(vahControl * ctl)
         /* XXX - if we knew the qemu user:group here we could send it in
          *        so that the open could be re-tried as that user:group.
          */
-        if (!virStorageSourceHasBacking(disk->src)) {
-            bool probe = ctl->allowDiskFormatProbing;
-            virStorageFileGetMetadata(disk->src, -1, -1, probe, false);
-        }
+        if (!virStorageSourceHasBacking(disk->src))
+            virStorageFileGetMetadata(disk->src, -1, -1, false);
 
         /* XXX passing ignoreOpenFailure = true to get back to the behavior
          * from before using virDomainDiskDefForeachPath. actually we should
@@ -1074,6 +1063,22 @@ get_files(vahControl * ctl)
     for (i = 0; i < ctl->def->ngraphics; i++) {
         virDomainGraphicsDefPtr graphics = ctl->def->graphics[i];
         size_t n;
+        const char *rendernode = virDomainGraphicsGetRenderNode(graphics);
+
+        if (rendernode) {
+            vah_add_file(&buf, rendernode, "rw");
+            needsgl = true;
+        } else {
+            if (virDomainGraphicsNeedsAutoRenderNode(graphics)) {
+                char *defaultRenderNode = virHostGetDRMRenderNode();
+                needsgl = true;
+
+                if (defaultRenderNode) {
+                    vah_add_file(&buf, defaultRenderNode, "rw");
+                    VIR_FREE(defaultRenderNode);
+                }
+            }
+        }
 
         for (n = 0; n < graphics->nListens; n++) {
             virDomainGraphicsListenDef listenObj = graphics->listens[n];
@@ -1110,6 +1115,23 @@ get_files(vahControl * ctl)
                 virUSBDeviceFree(usb);
                 if (rc != 0)
                     goto cleanup;
+                break;
+            }
+
+            case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_MDEV: {
+                virDomainHostdevSubsysMediatedDevPtr mdevsrc = &dev->source.subsys.u.mdev;
+                switch ((virMediatedDeviceModelType) mdevsrc->model) {
+                    case VIR_MDEV_MODEL_TYPE_VFIO_PCI:
+                    case VIR_MDEV_MODEL_TYPE_VFIO_AP:
+                    case VIR_MDEV_MODEL_TYPE_VFIO_CCW:
+                        needsVfio = true;
+                        break;
+                    case VIR_MDEV_MODEL_TYPE_LAST:
+                    default:
+                        virReportEnumRangeError(virMediatedDeviceModelType,
+                                                mdevsrc->model);
+                        break;
+                }
                 break;
             }
 
@@ -1185,13 +1207,58 @@ get_files(vahControl * ctl)
         }
     }
 
+    if (ctl->def->tpm) {
+        char *shortName = NULL;
+        const char *tpmpath = NULL;
+
+        switch (ctl->def->tpm->type) {
+        case VIR_DOMAIN_TPM_TYPE_EMULATOR:
+            shortName = virDomainDefGetShortName(ctl->def);
+
+            switch (ctl->def->tpm->version) {
+            case VIR_DOMAIN_TPM_VERSION_1_2:
+                tpmpath = "tpm1.2";
+                break;
+            case VIR_DOMAIN_TPM_VERSION_2_0:
+                tpmpath = "tpm2";
+                break;
+            case VIR_DOMAIN_TPM_VERSION_DEFAULT:
+            case VIR_DOMAIN_TPM_VERSION_LAST:
+                break;
+            }
+
+            /* Unix socket for QEMU and swtpm to use */
+            virBufferAsprintf(&buf,
+                "  \"/run/libvirt/qemu/swtpm/%s-swtpm.sock\" rw,\n",
+                shortName);
+            /* Paths for swtpm to use: give it access to its state
+             * directory, log, and PID files.
+             */
+            virBufferAsprintf(&buf,
+                "  \"%s/lib/libvirt/swtpm/%s/%s/**\" rw,\n",
+                LOCALSTATEDIR, uuidstr, tpmpath);
+            virBufferAsprintf(&buf,
+                "  \"%s/log/swtpm/libvirt/qemu/%s-swtpm.log\" a,\n",
+                LOCALSTATEDIR, ctl->def->name);
+            virBufferAsprintf(&buf,
+                "  \"/run/libvirt/qemu/swtpm/%s-swtpm.pid\" rw,\n",
+                shortName);
+
+            VIR_FREE(shortName);
+            break;
+        case VIR_DOMAIN_TPM_TYPE_PASSTHROUGH:
+        case VIR_DOMAIN_TPM_TYPE_LAST:
+            break;
+        }
+    }
+
     if (ctl->def->virtType == VIR_DOMAIN_VIRT_KVM) {
         for (i = 0; i < ctl->def->nnets; i++) {
             virDomainNetDefPtr net = ctl->def->nets[i];
-            if (net && net->model) {
+            if (net && virDomainNetGetModelString(net)) {
                 if (net->driver.virtio.name == VIR_DOMAIN_NET_BACKEND_TYPE_QEMU)
                     continue;
-                if (STRNEQ(net->model, "virtio"))
+                if (!virDomainNetIsVirtioModel(net))
                     continue;
             }
             needsvhost = true;
@@ -1203,6 +1270,27 @@ get_files(vahControl * ctl)
     if (needsVfio) {
         virBufferAddLit(&buf, "  \"/dev/vfio/vfio\" rw,\n");
         virBufferAddLit(&buf, "  \"/dev/vfio/[0-9]*\" rw,\n");
+    }
+    if (needsgl) {
+        /* if using gl all sorts of further dri related paths will be needed */
+        virBufferAddLit(&buf, "  # DRI/Mesa/(e)GL config and driver paths\n");
+        virBufferAddLit(&buf, "  \"/usr/lib{,32,64}/dri/*.so*\" mr,\n");
+        virBufferAddLit(&buf, "  \"/usr/lib/@{multiarch}/dri/*.so*\" mr,\n");
+        virBufferAddLit(&buf, "  \"/usr/lib/fglrx/dri/*.so*\" mr,\n");
+        virBufferAddLit(&buf, "  \"/etc/drirc\" r,\n");
+        virBufferAddLit(&buf, "  \"/usr/share/drirc.d/{,*.conf}\" r,\n");
+        virBufferAddLit(&buf, "  \"/etc/glvnd/egl_vendor.d/{,*}\" r,\n");
+        virBufferAddLit(&buf, "  \"/usr/share/glvnd/egl_vendor.d/{,*}\" r,\n");
+        virBufferAddLit(&buf, "  \"/usr/share/egl/egl_external_platform.d/\" r,\n");
+        virBufferAddLit(&buf, "  \"/usr/share/egl/egl_external_platform.d/*\" r,\n");
+        virBufferAddLit(&buf, "  \"/proc/modules\" r,\n");
+        virBufferAddLit(&buf, "  \"/proc/driver/nvidia/params\" r,\n");
+        virBufferAddLit(&buf, "  \"/dev/nvidiactl\" rw,\n");
+        virBufferAddLit(&buf, "  # Probe DRI device attributes\n");
+        virBufferAddLit(&buf, "  \"/dev/dri/\" r,\n");
+        virBufferAddLit(&buf, "  \"/sys/devices/**/{uevent,vendor,device,subsystem_vendor,subsystem_device}\" r,\n");
+        virBufferAddLit(&buf, "  # dri libs will trigger that, but t is not requited and DAC would deny it anyway\n");
+        virBufferAddLit(&buf, "  deny \"/var/lib/libvirt/.cache/\" w,\n");
     }
 
     if (ctl->newfile)
@@ -1228,7 +1316,6 @@ vahParseArgv(vahControl * ctl, int argc, char **argv)
 {
     int arg, idx = 0;
     struct option opt[] = {
-        {"probing", 1, 0, 'p' },
         {"add", 0, 0, 'a'},
         {"create", 0, 0, 'c'},
         {"dryrun", 0, 0, 'd'},
@@ -1276,15 +1363,9 @@ vahParseArgv(vahControl * ctl, int argc, char **argv)
             case 'u':
                 if (strlen(optarg) > PROFILE_NAME_SIZE - 1)
                     vah_error(ctl, 1, _("invalid UUID"));
-                if (virStrcpy((char *) ctl->uuid, optarg,
-                    PROFILE_NAME_SIZE) == NULL)
+                if (virStrcpy((char *)ctl->uuid, optarg,
+                    PROFILE_NAME_SIZE) < 0)
                     vah_error(ctl, 1, _("error copying UUID"));
-                break;
-            case 'p':
-                if (STREQ(optarg, "1"))
-                    ctl->allowDiskFormatProbing = true;
-                else
-                    ctl->allowDiskFormatProbing = false;
                 break;
             default:
                 vah_error(ctl, 1, _("unsupported option"));

@@ -19,15 +19,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
 
 #include <time.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #if WITH_AVAHI
 # include <avahi-client/client.h>

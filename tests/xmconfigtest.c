@@ -17,14 +17,10 @@
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
  *
- * Author: Daniel P. Berrange <berrange@redhat.com>
- *
  */
 
 #include <config.h>
 
-#include <stdio.h>
-#include <string.h>
 #include <unistd.h>
 
 #include "internal.h"
@@ -197,9 +193,12 @@ mymain(void)
     DO_TEST("paravirt-new-pvfb");
     DO_TEST("paravirt-new-pvfb-vncdisplay");
     DO_TEST("paravirt-net-e1000");
+    DO_TEST("paravirt-net-fakemodel");
     DO_TEST("paravirt-net-vifname");
     DO_TEST("paravirt-vcpu");
     DO_TEST("paravirt-maxvcpus");
+    DO_TEST_FORMAT("paravirt-root");
+    DO_TEST_FORMAT("paravirt-extra-root");
     DO_TEST("fullvirt-new-cdrom");
     DO_TEST("fullvirt-utc");
     DO_TEST("fullvirt-localtime");

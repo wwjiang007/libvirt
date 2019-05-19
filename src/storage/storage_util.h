@@ -16,8 +16,8 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VIR_STORAGE_UTIL_H__
-# define __VIR_STORAGE_UTIL_H__
+#ifndef LIBVIRT_STORAGE_UTIL_H
+# define LIBVIRT_STORAGE_UTIL_H
 
 # include <sys/stat.h>
 
@@ -25,6 +25,20 @@
 # include "vircommand.h"
 # include "storage_driver.h"
 # include "storage_backend.h"
+
+/* Storage Pool Namespace options to share w/ storage_backend_fs.c and
+ * the virStorageBackendFileSystemMountCmd method */
+typedef struct _virStoragePoolFSMountOptionsDef virStoragePoolFSMountOptionsDef;
+typedef virStoragePoolFSMountOptionsDef *virStoragePoolFSMountOptionsDefPtr;
+struct _virStoragePoolFSMountOptionsDef {
+    size_t noptions;
+    char **options;
+};
+
+int
+virStorageBackendNamespaceInit(int poolType,
+                               virStoragePoolXMLNamespacePtr xmlns);
+
 
 /* File creation/cloning functions used for cloning between backends */
 
@@ -153,14 +167,22 @@ char *virStorageBackendStablePath(virStoragePoolObjPtr pool,
                                   const char *devpath,
                                   bool loop);
 
+typedef enum {
+    VIR_STORAGE_VOL_ENCRYPT_NONE = 0,
+    VIR_STORAGE_VOL_ENCRYPT_CREATE,
+    VIR_STORAGE_VOL_ENCRYPT_CONVERT,
+    VIR_STORAGE_VOL_ENCRYPT_DONE,
+} virStorageVolEncryptConvertStep;
+
 virCommandPtr
 virStorageBackendCreateQemuImgCmdFromVol(virStoragePoolObjPtr pool,
                                          virStorageVolDefPtr vol,
                                          virStorageVolDefPtr inputvol,
                                          unsigned int flags,
                                          const char *create_tool,
-                                         int imgformat,
-                                         const char *secretPath);
+                                         const char *secretPath,
+                                         const char *inputSecretPath,
+                                         virStorageVolEncryptConvertStep convertStep);
 
 int virStorageBackendSCSIFindLUs(virStoragePoolObjPtr pool,
                                  uint32_t scanhost);
@@ -169,4 +191,17 @@ int
 virStorageBackendZeroPartitionTable(const char *path,
                                     unsigned long long size);
 
-#endif /* __VIR_STORAGE_UTIL_H__ */
+char *
+virStorageBackendFileSystemGetPoolSource(virStoragePoolObjPtr pool);
+
+virCommandPtr
+virStorageBackendFileSystemMountCmd(const char *cmdstr,
+                                    virStoragePoolDefPtr def,
+                                    const char *src);
+
+virCommandPtr
+virStorageBackendLogicalChangeCmd(const char *cmdstr,
+                                  virStoragePoolDefPtr def,
+                                  bool on);
+
+#endif /* LIBVIRT_STORAGE_UTIL_H */

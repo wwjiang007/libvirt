@@ -14,13 +14,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
 
-#include <stdlib.h>
 #include <fcntl.h>
 #include <sys/socket.h>
 
@@ -180,7 +177,7 @@ static int testTLSSessionInit(const void *opaque)
             if (rv == VIR_NET_TLS_HANDSHAKE_COMPLETE)
                 clientShake = true;
         }
-    } while (!clientShake && !serverShake);
+    } while (!clientShake || !serverShake);
 
 
     /* Finally make sure the server validation does what

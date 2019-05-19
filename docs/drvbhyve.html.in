@@ -239,7 +239,7 @@ to let a guest boot or start a guest using:</p>
 
 <pre>start --console domname</pre>
 
-<p><b>NB:</b> An bootloader configured to require user interaction will prevent
+<p><b>NB:</b> A bootloader configured to require user interaction will prevent
 the domain from starting (and thus <code>virsh console</code> or <code>start
 --console</code> from functioning) until the user interacts with it manually on
 the VM host. Because users typically do not have access to the VM host,
@@ -431,6 +431,63 @@ supports Intel e1000 network adapter emulation. It's supported in libvirt
     &lt;/interface&gt;
 ...
 </pre>
+
+<h3><a id="wired">Wiring guest memory</a></h3>
+
+<p><span class="since">Since 4.4.0</span>, it's possible to specify that guest memory should
+be wired and cannot be swapped out as follows:</p>
+<pre>
+&lt;domain type="bhyve"&gt;
+    ...
+    &lt;memoryBacking&gt;
+      &lt;locked/&gt;
+    &lt;/memoryBacking&gt;
+    ...
+&lt;/domain&gt;
+</pre>
+
+<h3><a id="cputopology">CPU topology</a></h3>
+
+<p><span class="since">Since 4.5.0</span>, it's possible to specify guest CPU topology, if bhyve
+supports that. Support for specifying guest CPU topology was added to bhyve in
+<a href="http://svnweb.freebsd.org/changeset/base/332298">r332298</a> for <i>-CURRENT</i>.
+Example:</p>
+<pre>
+&lt;domain type="bhyve"&gt;
+    ...
+    &lt;cpu&gt;
+      &lt;topology sockets='1' cores='2' threads='1'/&gt;
+    &lt;/cpu&gt;
+    ...
+&lt;/domain&gt;
+</pre>
+
+<h3><a id="bhyvecommand">Pass-through of arbitrary bhyve commands</a></h3>
+
+<p><span class="since">Since 5.1.0</span>, it's possible to pass additional command-line
+arguments to the bhyve process when starting the domain using the
+<code>&lt;bhyve:commandline&gt;</code> element under <code>domain</code>.
+To supply an argument, use the element <code>&lt;bhyve:arg&gt;</code> with
+the attribute <code>value</code> set to additional argument to be added.
+The arg element may be repeated multiple times. To use this XML addition, it is necessary
+to issue an XML namespace request (the special <code>xmlns:<i>name</i></code> attribute)
+that pulls in <code>http://libvirt.org/schemas/domain/bhyve/1.0</code>;
+typically, the namespace is given the name of <code>bhyve</code>.
+</p>
+<p>Example:</p>
+<pre>
+&lt;domain type="bhyve" xmlns:bhyve="http://libvirt.org/schemas/domain/bhyve/1.0"&gt;
+  ...
+  &lt;bhyve:commandline&gt;
+    &lt;bhyve:arg value='-somebhyvearg'/&gt;
+  &lt;/bhyve:commandline&gt;
+&lt;/domain&gt;
+</pre>
+
+<p>Note that these extensions are for testing and development purposes only.
+They are <b>unsupported</b>, using them may result in inconsistent state,
+and upgrading either bhyve or libvirtd maybe break behavior of a domain that
+was relying on a specific commands pass-through.</p>
 
   </body>
 </html>

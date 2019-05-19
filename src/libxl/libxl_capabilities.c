@@ -16,8 +16,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Jim Fehlig <jfehlig@suse.com>
  */
 
 #include <config.h>
@@ -57,6 +55,7 @@ struct guest_arch {
     virArch arch;
     int bits;
     int hvm;
+    int pvh;
     int pae;
     int nonpae;
     int ia64_be;
@@ -67,13 +66,16 @@ struct guest_arch {
 static int
 libxlCapsAddCPUID(virCPUDataPtr data, virCPUx86CPUID *cpuid, ssize_t ncaps)
 {
+    virCPUx86DataItem item = { 0 };
     size_t i;
 
+    item.type = VIR_CPU_X86_DATA_CPUID;
     for (i = 0; i < ncaps; i++) {
-        virCPUx86CPUID *c = &cpuid[i];
+        item.data.cpuid = cpuid[i];
 
-        if (virCPUx86DataAddCPUID(data, c) < 0) {
-            VIR_DEBUG("Failed to add CPUID(%x,%x)", c->eax_in, c->ecx_in);
+        if (virCPUx86DataAdd(data, &item) < 0) {
+            VIR_DEBUG("Failed to add CPUID(%x,%x)",
+                      cpuid[i].eax_in, cpuid[i].ecx_in);
             return -1;
         }
     }
@@ -491,20 +493,44 @@ libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
                 guest_archs[i].nonpae = nonpae;
             if (ia64_be)
                 guest_archs[i].ia64_be = ia64_be;
+
+            /*
+             * Xen 4.10 introduced support for the PVH guest type, which
+             * requires hardware virtualization support similar to the
+             * HVM guest type. Add a PVH guest type for each new HVM
+             * guest type.
+             */
+#ifdef HAVE_XEN_PVH
+            if (hvm && i == nr_guest_archs-1) {
+                /* Ensure we have not exhausted the guest_archs array */
+                if (nr_guest_archs >= ARRAY_CARDINALITY(guest_archs))
+                    continue;
+                i = nr_guest_archs;
+                nr_guest_archs++;
+
+                guest_archs[i].arch = arch;
+                guest_archs[i].hvm = 0;
+                guest_archs[i].pvh = 1;
+            }
+#endif
         }
     }
     regfree(&regex);
 
     for (i = 0; i < nr_guest_archs; ++i) {
         virCapsGuestPtr guest;
-        char const *const xen_machines[] = {guest_archs[i].hvm ? "xenfv" : "xenpv"};
+        char const *const xen_machines[] = {
+            guest_archs[i].hvm ? "xenfv" :
+                (guest_archs[i].pvh ? "xenpvh" : "xenpv")};
         virCapsGuestMachinePtr *machines;
 
         if ((machines = virCapabilitiesAllocMachines(xen_machines, 1)) == NULL)
             return -1;
 
         if ((guest = virCapabilitiesAddGuest(caps,
-                                             guest_archs[i].hvm ? VIR_DOMAIN_OSTYPE_HVM : VIR_DOMAIN_OSTYPE_XEN,
+                                             guest_archs[i].hvm ? VIR_DOMAIN_OSTYPE_HVM :
+                                                (guest_archs[i].pvh ? VIR_DOMAIN_OSTYPE_XENPVH :
+                                                 VIR_DOMAIN_OSTYPE_XEN),
                                              guest_archs[i].arch,
                                              LIBXL_EXECBIN_DIR "/qemu-system-i386",
                                              (guest_archs[i].hvm ?
@@ -557,7 +583,9 @@ libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
                                                1,
                                                0) == NULL)
                 return -1;
+        }
 
+        if (guest_archs[i].hvm || guest_archs[i].pvh) {
             if (virCapabilitiesAddGuestFeature(guest,
                                                "hap",
                                                1,
@@ -578,12 +606,15 @@ libxlMakeDomainOSCaps(const char *machine,
     virDomainCapsLoaderPtr capsLoader = &os->loader;
     size_t i;
 
-    os->supported = true;
+    os->supported = VIR_TRISTATE_BOOL_YES;
+    capsLoader->supported = VIR_TRISTATE_BOOL_NO;
+    capsLoader->type.report = true;
+    capsLoader->readonly.report = true;
 
-    if (STREQ(machine, "xenpv"))
+    if (STREQ(machine, "xenpv") || STREQ(machine, "xenpvh"))
         return 0;
 
-    capsLoader->supported = true;
+    capsLoader->supported = VIR_TRISTATE_BOOL_YES;
     if (VIR_ALLOC_N(capsLoader->values.values, nfirmwares) < 0)
         return -1;
 
@@ -606,7 +637,10 @@ libxlMakeDomainOSCaps(const char *machine,
 static int
 libxlMakeDomainDeviceDiskCaps(virDomainCapsDeviceDiskPtr dev)
 {
-    dev->supported = true;
+    dev->supported = VIR_TRISTATE_BOOL_YES;
+    dev->diskDevice.report = true;
+    dev->bus.report = true;
+    dev->model.report = true;
 
     VIR_DOMAIN_CAPS_ENUM_SET(dev->diskDevice,
                              VIR_DOMAIN_DISK_DEVICE_DISK,
@@ -623,7 +657,8 @@ libxlMakeDomainDeviceDiskCaps(virDomainCapsDeviceDiskPtr dev)
 static int
 libxlMakeDomainDeviceGraphicsCaps(virDomainCapsDeviceGraphicsPtr dev)
 {
-    dev->supported = true;
+    dev->supported = VIR_TRISTATE_BOOL_YES;
+    dev->type.report = true;
 
     VIR_DOMAIN_CAPS_ENUM_SET(dev->type,
                              VIR_DOMAIN_GRAPHICS_TYPE_SDL,
@@ -636,7 +671,8 @@ libxlMakeDomainDeviceGraphicsCaps(virDomainCapsDeviceGraphicsPtr dev)
 static int
 libxlMakeDomainDeviceVideoCaps(virDomainCapsDeviceVideoPtr dev)
 {
-    dev->supported = true;
+    dev->supported = VIR_TRISTATE_BOOL_YES;
+    dev->modelType.report = true;
 
     VIR_DOMAIN_CAPS_ENUM_SET(dev->modelType,
                              VIR_DOMAIN_VIDEO_TYPE_VGA,
@@ -646,10 +682,25 @@ libxlMakeDomainDeviceVideoCaps(virDomainCapsDeviceVideoPtr dev)
     return 0;
 }
 
+bool libxlCapsHasPVUSB(void)
+{
+#ifdef LIBXL_HAVE_PVUSB
+    return true;
+#else
+    return false;
+#endif
+}
+
 static int
 libxlMakeDomainDeviceHostdevCaps(virDomainCapsDeviceHostdevPtr dev)
 {
-    dev->supported = true;
+    dev->supported = VIR_TRISTATE_BOOL_YES;
+    dev->mode.report = true;
+    dev->startupPolicy.report = true;
+    dev->subsysType.report = true;
+    dev->capsType.report = true;
+    dev->pciBackend.report = true;
+
     /* VIR_DOMAIN_HOSTDEV_MODE_CAPABILITIES is for containers only */
     VIR_DOMAIN_CAPS_ENUM_SET(dev->mode,
                              VIR_DOMAIN_HOSTDEV_MODE_SUBSYS);
@@ -663,10 +714,9 @@ libxlMakeDomainDeviceHostdevCaps(virDomainCapsDeviceHostdevPtr dev)
     VIR_DOMAIN_CAPS_ENUM_SET(dev->subsysType,
                              VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI);
 
-#ifdef LIBXL_HAVE_PVUSB
-    VIR_DOMAIN_CAPS_ENUM_SET(dev->subsysType,
-                             VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB);
-#endif
+    if (libxlCapsHasPVUSB())
+        VIR_DOMAIN_CAPS_ENUM_SET(dev->subsysType,
+                                 VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB);
 
     /* No virDomainHostdevCapsType for libxl */
     virDomainCapsEnumClear(&dev->capsType);
@@ -734,9 +784,17 @@ libxlMakeDomainCapabilities(virDomainCapsPtr domCaps,
     if (libxlMakeDomainOSCaps(domCaps->machine, os, firmwares, nfirmwares) < 0 ||
         libxlMakeDomainDeviceDiskCaps(disk) < 0 ||
         libxlMakeDomainDeviceGraphicsCaps(graphics) < 0 ||
-        libxlMakeDomainDeviceVideoCaps(video) < 0 ||
+        libxlMakeDomainDeviceVideoCaps(video) < 0)
+        return -1;
+    if (STRNEQ(domCaps->machine, "xenpvh") &&
         libxlMakeDomainDeviceHostdevCaps(hostdev) < 0)
         return -1;
+
+    domCaps->iothreads = VIR_TRISTATE_BOOL_NO;
+    domCaps->vmcoreinfo = VIR_TRISTATE_BOOL_NO;
+    domCaps->genid = VIR_TRISTATE_BOOL_NO;
+    domCaps->gic.supported = VIR_TRISTATE_BOOL_NO;
+
     return 0;
 }
 

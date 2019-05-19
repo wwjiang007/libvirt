@@ -16,18 +16,17 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Authors:
- *     Mark McLoughlin <markmc@redhat.com>
  */
 
-#ifndef __VIR_PCI_H__
-# define __VIR_PCI_H__
+#ifndef LIBVIRT_VIRPCI_H
+# define LIBVIRT_VIRPCI_H
 
 # include "internal.h"
 # include "virmdev.h"
 # include "virobject.h"
 # include "virutil.h"
+# include "virautoclean.h"
+# include "virenum.h"
 
 typedef struct _virPCIDevice virPCIDevice;
 typedef virPCIDevice *virPCIDevicePtr;
@@ -36,12 +35,24 @@ typedef virPCIDeviceAddress *virPCIDeviceAddressPtr;
 typedef struct _virPCIDeviceList virPCIDeviceList;
 typedef virPCIDeviceList *virPCIDeviceListPtr;
 
+# define VIR_DOMAIN_DEVICE_ZPCI_MAX_UID UINT16_MAX
+# define VIR_DOMAIN_DEVICE_ZPCI_MAX_FID UINT32_MAX
+
+typedef struct _virZPCIDeviceAddress virZPCIDeviceAddress;
+typedef virZPCIDeviceAddress *virZPCIDeviceAddressPtr;
+struct _virZPCIDeviceAddress {
+    unsigned int uid; /* exempt from syntax-check */
+    unsigned int fid;
+};
+
 struct _virPCIDeviceAddress {
     unsigned int domain;
     unsigned int bus;
     unsigned int slot;
     unsigned int function;
     int multi; /* virTristateSwitch */
+    int extFlags; /* enum virPCIDeviceAddressExtensionFlags */
+    virZPCIDeviceAddress zpci;
 };
 
 typedef enum {
@@ -63,7 +74,7 @@ typedef enum {
     VIR_PCIE_LINK_SPEED_LAST
 } virPCIELinkSpeed;
 
-VIR_ENUM_DECL(virPCIELinkSpeed)
+VIR_ENUM_DECL(virPCIELinkSpeed);
 
 typedef enum {
     VIR_PCI_HEADER_ENDPOINT = 0,
@@ -73,7 +84,7 @@ typedef enum {
     VIR_PCI_HEADER_LAST
 } virPCIHeaderType;
 
-VIR_ENUM_DECL(virPCIHeader)
+VIR_ENUM_DECL(virPCIHeader);
 
 typedef struct _virPCIELink virPCIELink;
 typedef virPCIELink *virPCIELinkPtr;
@@ -217,14 +228,20 @@ int virPCIGetSysfsFile(char *virPCIDeviceName,
                              char **pci_sysfs_device_link)
     ATTRIBUTE_RETURN_CHECK;
 
-int virPCIGetAddrString(unsigned int domain,
-                        unsigned int bus,
-                        unsigned int slot,
-                        unsigned int function,
-                        char **pciConfigAddr)
-    ATTRIBUTE_NONNULL(5) ATTRIBUTE_RETURN_CHECK;
+bool virPCIDeviceAddressIsValid(virPCIDeviceAddressPtr addr,
+                                bool report);
+bool virPCIDeviceAddressIsEmpty(const virPCIDeviceAddress *addr);
+
+bool virPCIDeviceAddressEqual(virPCIDeviceAddress *addr1,
+                              virPCIDeviceAddress *addr2);
+
+char *virPCIDeviceAddressAsString(virPCIDeviceAddressPtr addr)
+      ATTRIBUTE_NONNULL(1);
 
 int virPCIDeviceAddressParse(char *address, virPCIDeviceAddressPtr bdf);
+
+bool virZPCIDeviceAddressIsValid(virZPCIDeviceAddressPtr zpci);
+bool virZPCIDeviceAddressIsEmpty(const virZPCIDeviceAddress *addr);
 
 int virPCIGetVirtualFunctionInfo(const char *vf_sysfs_device_path,
                                  int pfNetDevIdx,
@@ -253,4 +270,10 @@ void virPCIEDeviceInfoFree(virPCIEDeviceInfoPtr dev);
 ssize_t virPCIGetMdevTypes(const char *sysfspath,
                            virMediatedDeviceType ***types);
 
-#endif /* __VIR_PCI_H__ */
+void virPCIDeviceAddressFree(virPCIDeviceAddressPtr address);
+
+VIR_DEFINE_AUTOPTR_FUNC(virPCIDevice, virPCIDeviceFree);
+VIR_DEFINE_AUTOPTR_FUNC(virPCIDeviceAddress, virPCIDeviceAddressFree);
+VIR_DEFINE_AUTOPTR_FUNC(virPCIEDeviceInfo, virPCIEDeviceInfoFree);
+
+#endif /* LIBVIRT_VIRPCI_H */

@@ -17,15 +17,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel P. Berrange <berrange@redhat.com>
  */
 
 #include <config.h>
 
 #include <dirent.h>
 #include <sys/wait.h>
-#include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -133,27 +130,20 @@ static int
 virStorageBackendISCSIFindLUs(virStoragePoolObjPtr pool,
                               const char *session)
 {
-    char *sysfs_path;
-    int retval = -1;
     uint32_t host;
+    VIR_AUTOFREE(char *) sysfs_path = NULL;
 
     if (virAsprintf(&sysfs_path,
                     "/sys/class/iscsi_session/session%s/device", session) < 0)
-        goto cleanup;
+        return -1;
 
     if (virStorageBackendISCSIGetHostNumber(sysfs_path, &host) < 0)
-        goto cleanup;
+        return -1;
 
     if (virStorageBackendSCSIFindLUs(pool, host) < 0)
-        goto cleanup;
+        return -1;
 
-    retval = 0;
-
- cleanup:
-
-    VIR_FREE(sysfs_path);
-
-    return retval;
+    return 0;
 }
 
 
@@ -161,7 +151,6 @@ static char *
 virStorageBackendISCSIFindPoolSources(const char *srcSpec,
                                       unsigned int flags)
 {
-    virStoragePoolSourcePtr source = NULL;
     size_t ntargets = 0;
     char **targets = NULL;
     char *ret = NULL;
@@ -171,7 +160,8 @@ virStorageBackendISCSIFindPoolSources(const char *srcSpec,
         .nsources = 0,
         .sources = NULL
     };
-    char *portal = NULL;
+    VIR_AUTOFREE(char *) portal = NULL;
+    VIR_AUTOPTR(virStoragePoolSource) source = NULL;
 
     virCheckFlags(0, NULL);
 
@@ -194,7 +184,10 @@ virStorageBackendISCSIFindPoolSources(const char *srcSpec,
     if (!(portal = virStorageBackendISCSIPortal(source)))
         goto cleanup;
 
-    if (virISCSIScanTargets(portal, &ntargets, &targets) < 0)
+    if (virISCSIScanTargets(portal,
+                            source->initiator.iqn,
+                            false,
+                            &ntargets, &targets) < 0)
         goto cleanup;
 
     if (VIR_ALLOC_N(list.sources, ntargets) < 0)
@@ -226,8 +219,6 @@ virStorageBackendISCSIFindPoolSources(const char *srcSpec,
     for (i = 0; i < ntargets; i++)
         VIR_FREE(targets[i]);
     VIR_FREE(targets);
-    VIR_FREE(portal);
-    virStoragePoolSourceFree(source);
     return ret;
 }
 
@@ -236,8 +227,8 @@ virStorageBackendISCSICheckPool(virStoragePoolObjPtr pool,
                                 bool *isActive)
 {
     virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
-    char *session = NULL;
     int ret = -1;
+    VIR_AUTOFREE(char *) session = NULL;
 
     *isActive = false;
 
@@ -260,10 +251,8 @@ virStorageBackendISCSICheckPool(virStoragePoolObjPtr pool,
         return -1;
     }
 
-    if ((session = virStorageBackendISCSISession(pool, true)) != NULL) {
+    if ((session = virStorageBackendISCSISession(pool, true)))
         *isActive = true;
-        VIR_FREE(session);
-    }
     ret = 0;
 
     return ret;
@@ -300,6 +289,11 @@ virStorageBackendISCSISetAuth(const char *portal,
                                  &secret_value, &secret_size) < 0)
         goto cleanup;
 
+    if (VIR_REALLOC_N(secret_value, secret_size + 1) < 0)
+        goto cleanup;
+
+    secret_value[secret_size] = '\0';
+
     if (virISCSINodeUpdate(portal,
                            source->devices[0].path,
                            "node.session.auth.authmethod",
@@ -326,9 +320,8 @@ static int
 virStorageBackendISCSIStartPool(virStoragePoolObjPtr pool)
 {
     virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
-    char *portal = NULL;
-    char *session = NULL;
-    int ret = -1;
+    VIR_AUTOFREE(char *) portal = NULL;
+    VIR_AUTOFREE(char *) session = NULL;
 
     if (def->source.nhost != 1) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
@@ -351,50 +344,40 @@ virStorageBackendISCSIStartPool(virStoragePoolObjPtr pool)
 
     if ((session = virStorageBackendISCSISession(pool, true)) == NULL) {
         if ((portal = virStorageBackendISCSIPortal(&def->source)) == NULL)
-            goto cleanup;
+            return -1;
 
         /* Create a static node record for the IQN target. Must be done
          * in order for login to the target */
         if (virISCSINodeNew(portal, def->source.devices[0].path) < 0)
-            goto cleanup;
+            return -1;
 
         if (virStorageBackendISCSISetAuth(portal, &def->source) < 0)
-            goto cleanup;
+            return -1;
 
         if (virISCSIConnectionLogin(portal,
                                     def->source.initiator.iqn,
                                     def->source.devices[0].path) < 0)
-            goto cleanup;
+            return -1;
     }
-    ret = 0;
-
- cleanup:
-    VIR_FREE(portal);
-    VIR_FREE(session);
-    return ret;
+    return 0;
 }
 
 static int
 virStorageBackendISCSIRefreshPool(virStoragePoolObjPtr pool)
 {
     virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
-    char *session = NULL;
+    VIR_AUTOFREE(char *) session = NULL;
 
     def->allocation = def->capacity = def->available = 0;
 
     if ((session = virStorageBackendISCSISession(pool, false)) == NULL)
-        goto cleanup;
+        return -1;
     if (virISCSIRescanLUNs(session) < 0)
-        goto cleanup;
+        return -1;
     if (virStorageBackendISCSIFindLUs(pool, session) < 0)
-        goto cleanup;
-    VIR_FREE(session);
+        return -1;
 
     return 0;
-
- cleanup:
-    VIR_FREE(session);
-    return -1;
 }
 
 
@@ -402,13 +385,11 @@ static int
 virStorageBackendISCSIStopPool(virStoragePoolObjPtr pool)
 {
     virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
-    char *portal;
-    char *session;
-    int ret = -1;
+    VIR_AUTOFREE(char *) portal = NULL;
+    VIR_AUTOFREE(char *) session = NULL;
 
     if ((session = virStorageBackendISCSISession(pool, true)) == NULL)
         return 0;
-    VIR_FREE(session);
 
     if ((portal = virStorageBackendISCSIPortal(&def->source)) == NULL)
         return -1;
@@ -416,12 +397,9 @@ virStorageBackendISCSIStopPool(virStoragePoolObjPtr pool)
     if (virISCSIConnectionLogout(portal,
                                  def->source.initiator.iqn,
                                  def->source.devices[0].path) < 0)
-        goto cleanup;
-    ret = 0;
+        return -1;
 
- cleanup:
-    VIR_FREE(portal);
-    return ret;
+    return 0;
 }
 
 virStorageBackend virStorageBackendISCSI = {

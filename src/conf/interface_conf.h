@@ -16,13 +16,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
- *
- * Author: Daniel Veillard <veillard@redhat.com>
- *         Laine Stump <laine@redhat.com>
  */
 
-#ifndef __INTERFACE_CONF_H__
-# define __INTERFACE_CONF_H__
+#ifndef LIBVIRT_INTERFACE_CONF_H
+# define LIBVIRT_INTERFACE_CONF_H
 
 # include <libxml/parser.h>
 # include <libxml/tree.h>
@@ -32,6 +29,7 @@
 # include "virutil.h"
 # include "virthread.h"
 # include "device_conf.h"
+# include "virenum.h"
 
 /* There is currently 3 types of interfaces */
 
@@ -44,7 +42,7 @@ typedef enum {
     VIR_INTERFACE_TYPE_LAST,
 } virInterfaceType;
 
-VIR_ENUM_DECL(virInterface)
+VIR_ENUM_DECL(virInterface);
 
 /* types of start mode */
 
@@ -181,4 +179,4 @@ virInterfaceDefFormat(const virInterfaceDef *def);
                 (VIR_CONNECT_LIST_INTERFACES_ACTIVE | \
                  VIR_CONNECT_LIST_INTERFACES_INACTIVE)
 
-#endif /* __INTERFACE_CONF_H__ */
+#endif /* LIBVIRT_INTERFACE_CONF_H */
