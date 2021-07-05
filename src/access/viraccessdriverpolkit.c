@@ -40,14 +40,12 @@ VIR_LOG_INIT("access.accessdriverpolkit");
 #define VIR_ACCESS_DRIVER_POLKIT_ACTION_PREFIX "org.libvirt.api"
 
 typedef struct _virAccessDriverPolkitPrivate virAccessDriverPolkitPrivate;
-typedef virAccessDriverPolkitPrivate *virAccessDriverPolkitPrivatePtr;
-
 struct _virAccessDriverPolkitPrivate {
     bool ignore;
 };
 
 
-static void virAccessDriverPolkitCleanup(virAccessManagerPtr manager ATTRIBUTE_UNUSED)
+static void virAccessDriverPolkitCleanup(virAccessManager *manager G_GNUC_UNUSED)
 {
 }
 
@@ -59,10 +57,8 @@ virAccessDriverPolkitFormatAction(const char *typename,
     char *actionid = NULL;
     size_t i;
 
-    if (virAsprintf(&actionid, "%s.%s.%s",
-                    VIR_ACCESS_DRIVER_POLKIT_ACTION_PREFIX,
-                    typename, permname) < 0)
-        return NULL;
+    actionid = g_strdup_printf("%s.%s.%s", VIR_ACCESS_DRIVER_POLKIT_ACTION_PREFIX,
+                               typename, permname);
 
     for (i = 0; actionid[i]; i++)
         if (actionid[i] == '_')
@@ -78,8 +74,8 @@ virAccessDriverPolkitGetCaller(const char *actionid,
                                unsigned long long *startTime,
                                uid_t *uid)
 {
-    virIdentityPtr identity = virIdentityGetCurrent();
-    int ret = -1;
+    g_autoptr(virIdentity) identity = virIdentityGetCurrent();
+    int rc;
 
     if (!identity) {
         virAccessError(VIR_ERR_ACCESS_DENIED,
@@ -88,51 +84,57 @@ virAccessDriverPolkitGetCaller(const char *actionid,
         return -1;
     }
 
-    if (virIdentityGetUNIXProcessID(identity, pid) < 0) {
+    if ((rc = virIdentityGetProcessID(identity, pid)) < 0)
+        return -1;
+
+    if (rc == 0) {
         virAccessError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("No UNIX process ID available"));
-        goto cleanup;
+                       _("No process ID available"));
+        return -1;
     }
-    if (virIdentityGetUNIXProcessTime(identity, startTime) < 0) {
+
+    if ((rc = virIdentityGetProcessTime(identity, startTime)) < 0)
+        return -1;
+
+    if (rc == 0) {
         virAccessError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("No UNIX process start time available"));
-        goto cleanup;
+                       _("No process start time available"));
+        return -1;
     }
-    if (virIdentityGetUNIXUserID(identity, uid) < 0) {
+
+    if ((rc = virIdentityGetUNIXUserID(identity, uid)) < 0)
+        return -1;
+
+    if (rc == 0) {
         virAccessError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("No UNIX caller UID available"));
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
-
- cleanup:
-    virObjectUnref(identity);
-    return ret;
+    return 0;
 }
 
 
 static int
-virAccessDriverPolkitCheck(virAccessManagerPtr manager ATTRIBUTE_UNUSED,
+virAccessDriverPolkitCheck(virAccessManager *manager G_GNUC_UNUSED,
                            const char *typename,
                            const char *permname,
                            const char **attrs)
 {
-    char *actionid = NULL;
-    int ret = -1;
+    g_autofree char *actionid = NULL;
     pid_t pid;
     uid_t uid;
     unsigned long long startTime;
     int rv;
 
     if (!(actionid = virAccessDriverPolkitFormatAction(typename, permname)))
-        goto cleanup;
+        return -1;
 
     if (virAccessDriverPolkitGetCaller(actionid,
                                        &pid,
                                        &startTime,
                                        &uid) < 0)
-        goto cleanup;
+        return -1;
 
     VIR_DEBUG("Check action '%s' for process '%lld' time %lld uid %d",
               actionid, (long long)pid, startTime, uid);
@@ -145,23 +147,19 @@ virAccessDriverPolkitCheck(virAccessManagerPtr manager ATTRIBUTE_UNUSED,
                             false);
 
     if (rv == 0) {
-        ret = 1; /* Allowed */
+        return 1; /* Allowed */
     } else {
         if (rv == -2) {
-            ret = 0; /* Denied */
+            return 0; /* Denied */
         } else {
-            ret = -1; /* Error */
+            return -1; /* Error */
         }
     }
-
- cleanup:
-    VIR_FREE(actionid);
-    return ret;
 }
 
 
 static int
-virAccessDriverPolkitCheckConnect(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckConnect(virAccessManager *manager,
                                   const char *driverName,
                                   virAccessPermConnect perm)
 {
@@ -177,9 +175,9 @@ virAccessDriverPolkitCheckConnect(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckDomain(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckDomain(virAccessManager *manager,
                                  const char *driverName,
-                                 virDomainDefPtr domain,
+                                 virDomainDef *domain,
                                  virAccessPermDomain perm)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
@@ -198,9 +196,9 @@ virAccessDriverPolkitCheckDomain(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckInterface(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckInterface(virAccessManager *manager,
                                     const char *driverName,
-                                    virInterfaceDefPtr iface,
+                                    virInterfaceDef *iface,
                                     virAccessPermInterface perm)
 {
     const char *attrs[] = {
@@ -217,9 +215,9 @@ virAccessDriverPolkitCheckInterface(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckNetwork(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckNetwork(virAccessManager *manager,
                                   const char *driverName,
-                                  virNetworkDefPtr network,
+                                  virNetworkDef *network,
                                   virAccessPermNetwork perm)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
@@ -238,9 +236,34 @@ virAccessDriverPolkitCheckNetwork(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckNodeDevice(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckNetworkPort(virAccessManager *manager,
+                                      const char *driverName,
+                                      virNetworkDef *network,
+                                      virNetworkPortDef *port,
+                                      virAccessPermNetworkPort perm)
+{
+    char uuidstr1[VIR_UUID_STRING_BUFLEN];
+    char uuidstr2[VIR_UUID_STRING_BUFLEN];
+    const char *attrs[] = {
+        "connect_driver", driverName,
+        "network_name", network->name,
+        "network_uuid", uuidstr1,
+        "port_uuid", uuidstr2,
+        NULL,
+    };
+    virUUIDFormat(network->uuid, uuidstr1);
+    virUUIDFormat(port->uuid, uuidstr2);
+
+    return virAccessDriverPolkitCheck(manager,
+                                      "network-port",
+                                      virAccessPermNetworkPortTypeToString(perm),
+                                      attrs);
+}
+
+static int
+virAccessDriverPolkitCheckNodeDevice(virAccessManager *manager,
                                      const char *driverName,
-                                     virNodeDeviceDefPtr nodedev,
+                                     virNodeDeviceDef *nodedev,
                                      virAccessPermNodeDevice perm)
 {
     const char *attrs[] = {
@@ -256,9 +279,9 @@ virAccessDriverPolkitCheckNodeDevice(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckNWFilter(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckNWFilter(virAccessManager *manager,
                                    const char *driverName,
-                                   virNWFilterDefPtr nwfilter,
+                                   virNWFilterDef *nwfilter,
                                    virAccessPermNWFilter perm)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
@@ -277,9 +300,9 @@ virAccessDriverPolkitCheckNWFilter(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckNWFilterBinding(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckNWFilterBinding(virAccessManager *manager,
                                           const char *driverName,
-                                          virNWFilterBindingDefPtr binding,
+                                          virNWFilterBindingDef *binding,
                                           virAccessPermNWFilterBinding perm)
 {
     const char *attrs[] = {
@@ -297,9 +320,9 @@ virAccessDriverPolkitCheckNWFilterBinding(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckSecret(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckSecret(virAccessManager *manager,
                                  const char *driverName,
-                                 virSecretDefPtr secret,
+                                 virSecretDef *secret,
                                  virAccessPermSecret perm)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
@@ -375,9 +398,9 @@ virAccessDriverPolkitCheckSecret(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckStoragePool(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckStoragePool(virAccessManager *manager,
                                       const char *driverName,
-                                      virStoragePoolDefPtr pool,
+                                      virStoragePoolDef *pool,
                                       virAccessPermStoragePool perm)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
@@ -396,10 +419,10 @@ virAccessDriverPolkitCheckStoragePool(virAccessManagerPtr manager,
 }
 
 static int
-virAccessDriverPolkitCheckStorageVol(virAccessManagerPtr manager,
+virAccessDriverPolkitCheckStorageVol(virAccessManager *manager,
                                      const char *driverName,
-                                     virStoragePoolDefPtr pool,
-                                     virStorageVolDefPtr vol,
+                                     virStoragePoolDef *pool,
+                                     virStorageVolDef *vol,
                                      virAccessPermStorageVol perm)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
@@ -427,6 +450,7 @@ virAccessDriver accessDriverPolkit = {
     .checkDomain = virAccessDriverPolkitCheckDomain,
     .checkInterface = virAccessDriverPolkitCheckInterface,
     .checkNetwork = virAccessDriverPolkitCheckNetwork,
+    .checkNetworkPort = virAccessDriverPolkitCheckNetworkPort,
     .checkNodeDevice = virAccessDriverPolkitCheckNodeDevice,
     .checkNWFilter = virAccessDriverPolkitCheckNWFilter,
     .checkNWFilterBinding = virAccessDriverPolkitCheckNWFilterBinding,

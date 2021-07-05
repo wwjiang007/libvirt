@@ -19,13 +19,9 @@
  *
  */
 
-#ifndef LIBVIRT_VIRERROR_H
-# define LIBVIRT_VIRERROR_H
+#pragma once
 
-# include "internal.h"
-# include "virautoclean.h"
-
-# define VIR_ERROR_MAX_LENGTH 1024
+#include "internal.h"
 
 extern virErrorFunc virErrorHandler;
 extern void *virUserData;
@@ -43,7 +39,7 @@ void virRaiseErrorFull(const char *filename,
                        int int1,
                        int int2,
                        const char *fmt, ...)
-    ATTRIBUTE_FMT_PRINTF(12, 13);
+    G_GNUC_PRINTF(12, 13);
 
 void virRaiseErrorObject(const char *filename,
                          const char *funcname,
@@ -55,7 +51,7 @@ void virReportErrorHelper(int domcode, int errcode,
                           const char *funcname,
                           size_t linenr,
                           const char *fmt, ...)
-  ATTRIBUTE_FMT_PRINTF(6, 7);
+  G_GNUC_PRINTF(6, 7);
 
 void virReportSystemErrorFull(int domcode,
                               int theerrno,
@@ -63,15 +59,15 @@ void virReportSystemErrorFull(int domcode,
                               const char *funcname,
                               size_t linenr,
                               const char *fmt, ...)
-    ATTRIBUTE_FMT_PRINTF(6, 7);
+    G_GNUC_PRINTF(6, 7);
 
-# define virReportSystemError(theerrno, fmt,...) \
+#define virReportSystemError(theerrno, fmt,...) \
     virReportSystemErrorFull(VIR_FROM_THIS, \
                              (theerrno), \
                              __FILE__, __FUNCTION__, __LINE__, \
                              (fmt), __VA_ARGS__)
 
-# define virReportInvalidNullArg(argname) \
+#define virReportInvalidNullArg(argname) \
     virRaiseErrorFull(__FILE__, __FUNCTION__, __LINE__, \
                       VIR_FROM_THIS, \
                       VIR_ERR_INVALID_ARG, \
@@ -82,7 +78,7 @@ void virReportSystemErrorFull(int domcode,
                       0, 0, \
                       _("%s in %s must be NULL"), \
                       #argname, __FUNCTION__)
-# define virReportInvalidNonNullArg(argname) \
+#define virReportInvalidNonNullArg(argname) \
     virRaiseErrorFull(__FILE__, __FUNCTION__, __LINE__, \
                       VIR_FROM_THIS, \
                       VIR_ERR_INVALID_ARG, \
@@ -93,7 +89,7 @@ void virReportSystemErrorFull(int domcode,
                       0, 0, \
                       _("%s in %s must not be NULL"), \
                       #argname, __FUNCTION__)
-# define virReportInvalidEmptyStringArg(argname) \
+#define virReportInvalidEmptyStringArg(argname) \
     virRaiseErrorFull(__FILE__, __FUNCTION__, __LINE__, \
                       VIR_FROM_THIS, \
                       VIR_ERR_INVALID_ARG, \
@@ -104,7 +100,7 @@ void virReportSystemErrorFull(int domcode,
                       0, 0, \
                       _("string %s in %s must not be empty"), \
                       #argname, __FUNCTION__)
-# define virReportInvalidPositiveArg(argname) \
+#define virReportInvalidPositiveArg(argname) \
     virRaiseErrorFull(__FILE__, __FUNCTION__, __LINE__, \
                       VIR_FROM_THIS, \
                       VIR_ERR_INVALID_ARG, \
@@ -115,7 +111,7 @@ void virReportSystemErrorFull(int domcode,
                       0, 0, \
                       _("%s in %s must be greater than zero"), \
                       #argname, __FUNCTION__)
-# define virReportInvalidNonZeroArg(argname) \
+#define virReportInvalidNonZeroArg(argname) \
     virRaiseErrorFull(__FILE__, __FUNCTION__, __LINE__, \
                       VIR_FROM_THIS, \
                       VIR_ERR_INVALID_ARG, \
@@ -126,7 +122,7 @@ void virReportSystemErrorFull(int domcode,
                       0, 0, \
                       _("%s in %s must not be zero"), \
                       #argname, __FUNCTION__)
-# define virReportInvalidZeroArg(argname) \
+#define virReportInvalidZeroArg(argname) \
     virRaiseErrorFull(__FILE__, __FUNCTION__, __LINE__, \
                       VIR_FROM_THIS, \
                       VIR_ERR_INVALID_ARG, \
@@ -137,7 +133,7 @@ void virReportSystemErrorFull(int domcode,
                       0, 0, \
                       _("%s in %s must be zero"), \
                       #argname, __FUNCTION__)
-# define virReportInvalidNonNegativeArg(argname) \
+#define virReportInvalidNonNegativeArg(argname) \
     virRaiseErrorFull(__FILE__, __FUNCTION__, __LINE__, \
                       VIR_FROM_THIS, \
                       VIR_ERR_INVALID_ARG, \
@@ -148,7 +144,7 @@ void virReportSystemErrorFull(int domcode,
                       0, 0, \
                       _("%s in %s must be zero or greater"), \
                       #argname, __FUNCTION__)
-# define virReportInvalidArg(argname, fmt, ...) \
+#define virReportInvalidArg(argname, fmt, ...) \
     virRaiseErrorFull(__FILE__, __FUNCTION__, __LINE__, \
                       VIR_FROM_THIS, \
                       VIR_ERR_INVALID_ARG, \
@@ -159,10 +155,10 @@ void virReportSystemErrorFull(int domcode,
                       0, 0, \
                       (fmt), __VA_ARGS__)
 
-# define virReportUnsupportedError() \
+#define virReportUnsupportedError() \
     virReportErrorHelper(VIR_FROM_THIS, VIR_ERR_NO_SUPPORT, \
                          __FILE__, __FUNCTION__, __LINE__, __FUNCTION__)
-# define virReportRestrictedError(...) \
+#define virReportRestrictedError(...) \
     virReportErrorHelper(VIR_FROM_THIS, VIR_ERR_OPERATION_DENIED, \
                          __FILE__, __FUNCTION__, __LINE__, __VA_ARGS__)
 /* The sizeof(...) comparison here is a hack to catch typos
@@ -170,31 +166,22 @@ void virReportSystemErrorFull(int domcode,
  * as detecting if you passed a typename that refers to a function
  * or struct type, instead of an enum. It should get optimized away
  * since sizeof() is known at compile time  */
-# define virReportEnumRangeError(typname, value) \
+#define virReportEnumRangeError(typname, value) \
     virReportErrorHelper(VIR_FROM_THIS, VIR_ERR_INTERNAL_ERROR, \
                          __FILE__, __FUNCTION__, __LINE__, \
                          "Unexpected enum value %d for %s", \
                          value, sizeof((typname)1) != 0 ? #typname : #typname);
 
-void virReportOOMErrorFull(int domcode,
-                           const char *filename,
-                           const char *funcname,
-                           size_t linenr);
-
-# define virReportOOMError() \
-    virReportOOMErrorFull(VIR_FROM_THIS, __FILE__, __FUNCTION__, __LINE__)
-
-# define virReportError(code, ...) \
+#define virReportError(code, ...) \
     virReportErrorHelper(VIR_FROM_THIS, code, __FILE__, \
                          __FUNCTION__, __LINE__, __VA_ARGS__)
 
-# define virReportErrorObject(obj) \
+#define virReportErrorObject(obj) \
     virRaiseErrorObject(__FILE__, __FUNCTION__, __LINE__, obj)
 
 int virSetError(virErrorPtr newerr);
 virErrorPtr virErrorCopyNew(virErrorPtr err);
 void virDispatchError(virConnectPtr conn);
-const char *virStrerror(int theerrno, char *errBuf, size_t errBufLen);
 
 typedef int (*virErrorLogPriorityFunc)(virErrorPtr, int);
 void virSetErrorLogPriorityFunc(virErrorLogPriorityFunc func);
@@ -206,6 +193,7 @@ bool virLastErrorIsSystemErrno(int errnum);
 void virErrorPreserveLast(virErrorPtr *saveerr);
 void virErrorRestore(virErrorPtr *savederr);
 
-VIR_DEFINE_AUTOPTR_FUNC(virError, virFreeError);
+void virLastErrorPrefixMessage(const char *fmt, ...)
+    G_GNUC_PRINTF(1, 2);
 
-#endif /* LIBVIRT_VIRERROR_H */
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virError, virFreeError);

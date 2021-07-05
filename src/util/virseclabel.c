@@ -30,78 +30,68 @@
 
 
 void
-virSecurityLabelDefFree(virSecurityLabelDefPtr def)
+virSecurityLabelDefFree(virSecurityLabelDef *def)
 {
     if (!def)
         return;
-    VIR_FREE(def->model);
-    VIR_FREE(def->label);
-    VIR_FREE(def->imagelabel);
-    VIR_FREE(def->baselabel);
-    VIR_FREE(def);
+    g_free(def->model);
+    g_free(def->label);
+    g_free(def->imagelabel);
+    g_free(def->baselabel);
+    g_free(def);
 }
 
 
 void
-virSecurityDeviceLabelDefFree(virSecurityDeviceLabelDefPtr def)
+virSecurityDeviceLabelDefFree(virSecurityDeviceLabelDef *def)
 {
     if (!def)
         return;
-    VIR_FREE(def->model);
-    VIR_FREE(def->label);
-    VIR_FREE(def);
+    g_free(def->model);
+    g_free(def->label);
+    g_free(def);
 }
 
 
-virSecurityLabelDefPtr
+virSecurityLabelDef *
 virSecurityLabelDefNew(const char *model)
 {
-    virSecurityLabelDefPtr seclabel = NULL;
+    virSecurityLabelDef *seclabel = NULL;
 
-    if (VIR_ALLOC(seclabel) < 0 ||
-        VIR_STRDUP(seclabel->model, model) < 0) {
-        virSecurityLabelDefFree(seclabel);
-        return NULL;
-    }
+    seclabel = g_new0(virSecurityLabelDef, 1);
+
+    seclabel->model = g_strdup(model);
 
     seclabel->relabel = true;
 
     return seclabel;
 }
 
-virSecurityDeviceLabelDefPtr
+virSecurityDeviceLabelDef *
 virSecurityDeviceLabelDefNew(const char *model)
 {
-    virSecurityDeviceLabelDefPtr seclabel = NULL;
+    virSecurityDeviceLabelDef *seclabel = NULL;
 
-    if (VIR_ALLOC(seclabel) < 0 ||
-        VIR_STRDUP(seclabel->model, model) < 0) {
-        virSecurityDeviceLabelDefFree(seclabel);
-        seclabel = NULL;
-    }
+    seclabel = g_new0(virSecurityDeviceLabelDef, 1);
+
+    seclabel->model = g_strdup(model);
 
     return seclabel;
 }
 
 
-virSecurityDeviceLabelDefPtr
+virSecurityDeviceLabelDef *
 virSecurityDeviceLabelDefCopy(const virSecurityDeviceLabelDef *src)
 {
-    virSecurityDeviceLabelDefPtr ret;
+    virSecurityDeviceLabelDef *ret;
 
-    if (VIR_ALLOC(ret) < 0)
-        return NULL;
+    ret = g_new0(virSecurityDeviceLabelDef, 1);
 
     ret->relabel = src->relabel;
     ret->labelskip = src->labelskip;
 
-    if (VIR_STRDUP(ret->model, src->model) < 0 ||
-        VIR_STRDUP(ret->label, src->label) < 0)
-        goto error;
+    ret->model = g_strdup(src->model);
+    ret->label = g_strdup(src->label);
 
     return ret;
-
- error:
-    virSecurityDeviceLabelDefFree(ret);
-    return NULL;
 }

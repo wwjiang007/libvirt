@@ -35,6 +35,7 @@
 #include "virenum.h"
 #include "configmake.h"
 #include "virgettext.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_NETWORK
 
@@ -47,7 +48,7 @@ helperVersion(const char *argv0)
     printf("%s (%s) %s\n", argv0, PACKAGE_NAME, PACKAGE_VERSION);
 }
 
-ATTRIBUTE_NORETURN static void
+G_GNUC_NORETURN static void
 usage(int status)
 {
     if (status) {
@@ -81,22 +82,22 @@ VIR_ENUM_IMPL(virLeaseAction,
 int
 main(int argc, char **argv)
 {
-    char *pid_file = NULL;
-    char *custom_lease_file = NULL;
+    g_autofree char *pid_file = NULL;
+    g_autofree char *custom_lease_file = NULL;
     const char *ip = NULL;
     const char *mac = NULL;
     const char *leases_str = NULL;
-    const char *iaid = virGetEnvAllowSUID("DNSMASQ_IAID");
-    const char *clientid = virGetEnvAllowSUID("DNSMASQ_CLIENT_ID");
-    const char *interface = virGetEnvAllowSUID("DNSMASQ_INTERFACE");
-    const char *hostname = virGetEnvAllowSUID("DNSMASQ_SUPPLIED_HOSTNAME");
-    char *server_duid = NULL;
+    const char *iaid = getenv("DNSMASQ_IAID");
+    const char *clientid = getenv("DNSMASQ_CLIENT_ID");
+    const char *interface = getenv("DNSMASQ_INTERFACE");
+    const char *hostname = getenv("DNSMASQ_SUPPLIED_HOSTNAME");
+    g_autofree char *server_duid = NULL;
     int action = -1;
     int pid_file_fd = -1;
     int rv = EXIT_FAILURE;
     bool delete = false;
-    virJSONValuePtr lease_new = NULL;
-    virJSONValuePtr leases_array_new = NULL;
+    g_autoptr(virJSONValue) lease_new = NULL;
+    g_autoptr(virJSONValue) leases_array_new = NULL;
 
     virSetErrorFunc(NULL, NULL);
     virSetErrorLogPriorityFunc(NULL);
@@ -104,7 +105,6 @@ main(int argc, char **argv)
     program_name = argv[0];
 
     if (virGettextInitialize() < 0 ||
-        virThreadInitialize() < 0 ||
         virErrorInitialize() < 0) {
         fprintf(stderr, _("%s: initialization failed\n"), program_name);
         exit(EXIT_FAILURE);
@@ -131,8 +131,10 @@ main(int argc, char **argv)
      * events for expired leases. So, libvirtd sets another env var for this
      * purpose */
     if (!interface &&
-        !(interface = virGetEnvAllowSUID("VIR_BRIDGE_NAME")))
-        goto cleanup;
+        !(interface = getenv("VIR_BRIDGE_NAME"))) {
+        fprintf(stderr, _("interface not set\n"));
+        exit(EXIT_FAILURE);
+    }
 
     ip = argv[3];
     mac = argv[2];
@@ -148,29 +150,33 @@ main(int argc, char **argv)
 
     /* Check if it is an IPv6 lease */
     if (iaid) {
-        mac = virGetEnvAllowSUID("DNSMASQ_MAC");
+        mac = getenv("DNSMASQ_MAC");
         clientid = argv[2];
     }
 
-    if (VIR_STRDUP(server_duid, virGetEnvAllowSUID("DNSMASQ_SERVER_DUID")) < 0)
-        goto cleanup;
+    server_duid = g_strdup(getenv("DNSMASQ_SERVER_DUID"));
 
-    if (virAsprintf(&custom_lease_file,
-                    LOCALSTATEDIR "/lib/libvirt/dnsmasq/%s.status",
-                    interface) < 0)
-        goto cleanup;
+    custom_lease_file = g_strdup_printf(LOCALSTATEDIR "/lib/libvirt/dnsmasq/%s.status",
+                                        interface);
 
-    if (VIR_STRDUP(pid_file, LOCALSTATEDIR "/run/leaseshelper.pid") < 0)
-        goto cleanup;
+    pid_file = g_strdup(RUNSTATEDIR "/leaseshelper.pid");
 
     /* Try to claim the pidfile, exiting if we can't */
-    if ((pid_file_fd = virPidFileAcquirePath(pid_file, true, getpid())) < 0)
+    if ((pid_file_fd = virPidFileAcquirePath(pid_file, true, getpid())) < 0) {
+        fprintf(stderr,
+                _("Unable to acquire PID file: %s\n errno=%d"),
+                pid_file, errno);
         goto cleanup;
+    }
 
     /* Since interfaces can be hot plugged, we need to make sure that the
      * corresponding custom lease file exists. If not, 'touch' it */
-    if (virFileTouch(custom_lease_file, 0644) < 0)
+    if (virFileTouch(custom_lease_file, 0644) < 0) {
+        fprintf(stderr,
+                _("Unable to create: %s\n errno=%d"),
+                custom_lease_file, errno);
         goto cleanup;
+    }
 
     switch ((enum virLeaseActionFlags) action) {
     case VIR_LEASE_ACTION_ADD:
@@ -194,7 +200,7 @@ main(int argc, char **argv)
         if (!lease_new)
             break;
 
-        ATTRIBUTE_FALLTHROUGH;
+        G_GNUC_FALLTHROUGH;
     case VIR_LEASE_ACTION_DEL:
         /* Delete the corresponding lease, if it already exists */
         delete = true;
@@ -205,11 +211,7 @@ main(int argc, char **argv)
         break;
     }
 
-    if (!(leases_array_new = virJSONValueNewArray())) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("failed to create json"));
-        goto cleanup;
-    }
+    leases_array_new = virJSONValueNewArray();
 
     if (virLeaseReadCustomLeaseFile(leases_array_new, custom_lease_file,
                                     delete ? ip : NULL, &server_duid) < 0)
@@ -224,14 +226,13 @@ main(int argc, char **argv)
 
     case VIR_LEASE_ACTION_OLD:
     case VIR_LEASE_ACTION_ADD:
-        if (lease_new && virJSONValueArrayAppend(leases_array_new, lease_new) < 0) {
+        if (lease_new && virJSONValueArrayAppend(leases_array_new, &lease_new) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("failed to create json"));
             goto cleanup;
         }
-        lease_new = NULL;
 
-        ATTRIBUTE_FALLTHROUGH;
+        G_GNUC_FALLTHROUGH;
     case VIR_LEASE_ACTION_DEL:
         if (!(leases_str = virJSONValueToString(leases_array_new, true))) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -251,14 +252,10 @@ main(int argc, char **argv)
     rv = EXIT_SUCCESS;
 
  cleanup:
+    if (rv != EXIT_SUCCESS)
+        virDispatchError(NULL);
     if (pid_file_fd != -1)
         virPidFileReleasePath(pid_file, pid_file_fd);
-
-    VIR_FREE(pid_file);
-    VIR_FREE(server_duid);
-    VIR_FREE(custom_lease_file);
-    virJSONValueFree(lease_new);
-    virJSONValueFree(leases_array_new);
 
     return rv;
 }

@@ -33,7 +33,7 @@
 #define VIR_FROM_THIS VIR_FROM_NWFILTER
 
 static virMutex ipAddressMapLock = VIR_MUTEX_INITIALIZER;
-static virHashTablePtr ipAddressMap;
+static GHashTable *ipAddressMap;
 
 
 /* Add an IP address to the list of IP addresses an interface is
@@ -51,10 +51,9 @@ virNWFilterIPAddrMapAddIPAddr(const char *ifname, char *addr)
 {
     int ret = -1;
     char *addrCopy;
-    virNWFilterVarValuePtr val;
+    virNWFilterVarValue *val;
 
-    if (VIR_STRDUP(addrCopy, addr) < 0)
-        return -1;
+    addrCopy = g_strdup(addr);
 
     virMutexLock(&ipAddressMapLock);
 
@@ -101,7 +100,7 @@ int
 virNWFilterIPAddrMapDelIPAddr(const char *ifname, const char *ipaddr)
 {
     int ret = -1;
-    virNWFilterVarValuePtr val = NULL;
+    virNWFilterVarValue *val = NULL;
 
     virMutexLock(&ipAddressMapLock);
 
@@ -130,13 +129,13 @@ virNWFilterIPAddrMapDelIPAddr(const char *ifname, const char *ipaddr)
 /* Get the list of IP addresses known to be in use by an interface
  *
  * This function returns NULL in case no IP address is known to be
- * associated with the interface, a virNWFilterVarValuePtr otherwise
+ * associated with the interface, a virNWFilterVarValue *otherwise
  * that then can contain one or multiple entries.
  */
-virNWFilterVarValuePtr
+virNWFilterVarValue *
 virNWFilterIPAddrMapGetIPAddr(const char *ifname)
 {
-    virNWFilterVarValuePtr res;
+    virNWFilterVarValue *res;
 
     virMutexLock(&ipAddressMapLock);
 
@@ -150,7 +149,7 @@ virNWFilterIPAddrMapGetIPAddr(const char *ifname)
 int
 virNWFilterIPAddrMapInit(void)
 {
-    ipAddressMap = virNWFilterHashTableCreate(0);
+    ipAddressMap = virHashNew(virNWFilterVarValueHashFree);
     if (!ipAddressMap)
         return -1;
 

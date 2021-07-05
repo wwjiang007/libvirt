@@ -28,9 +28,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "c-ctype.h"
 #include "internal.h"
-#include "virutil.h"
 #include "virerror.h"
 #include "virlog.h"
 #include "viralloc.h"
@@ -102,46 +100,43 @@ virUUIDParse(const char *uuidstr, unsigned char *uuid)
      * 32 hexadecimal digits the end.
      */
     cur = uuidstr;
-    while (c_isspace(*cur))
+    while (g_ascii_isspace(*cur))
         cur++;
 
     for (i = 0; i < VIR_UUID_BUFLEN;) {
+        int val;
         uuid[i] = 0;
         if (*cur == 0)
-            goto error;
+            return -1;
         if ((*cur == '-') || (*cur == ' ')) {
             cur++;
             continue;
         }
-        if (!c_isxdigit(*cur))
-            goto error;
-        uuid[i] = virHexToBin(*cur);
-        uuid[i] *= 16;
+        if ((val = g_ascii_xdigit_value(*cur)) < 0)
+            return -1;
+        uuid[i] = 16 * val;
         cur++;
         if (*cur == 0)
-            goto error;
-        if (!c_isxdigit(*cur))
-            goto error;
-        uuid[i] += virHexToBin(*cur);
+            return -1;
+        if ((val = g_ascii_xdigit_value(*cur)) < 0)
+            return -1;
+        uuid[i] += val;
         i++;
         cur++;
     }
 
     while (*cur) {
-        if (!c_isspace(*cur))
-            goto error;
+        if (!g_ascii_isspace(*cur))
+            return -1;
         cur++;
     }
 
     return 0;
-
- error:
-    return -1;
 }
 
 /**
  * virUUIDFormat:
- * @uuid: array of VIR_UUID_RAW_LEN bytes to store the raw UUID
+ * @uuid: array of VIR_UUID_BUFLEN bytes to store the raw UUID
  * @uuidstr: array of VIR_UUID_STRING_BUFLEN bytes to store the
  * string representation of the UUID in. The resulting string
  * will be NULL terminated.
@@ -153,12 +148,12 @@ virUUIDParse(const char *uuidstr, unsigned char *uuid)
 const char *
 virUUIDFormat(const unsigned char *uuid, char *uuidstr)
 {
-    snprintf(uuidstr, VIR_UUID_STRING_BUFLEN,
-             "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-             uuid[0], uuid[1], uuid[2], uuid[3],
-             uuid[4], uuid[5], uuid[6], uuid[7],
-             uuid[8], uuid[9], uuid[10], uuid[11],
-             uuid[12], uuid[13], uuid[14], uuid[15]);
+    g_snprintf(uuidstr, VIR_UUID_STRING_BUFLEN,
+               "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+               uuid[0], uuid[1], uuid[2], uuid[3],
+               uuid[4], uuid[5], uuid[6], uuid[7],
+               uuid[8], uuid[9], uuid[10], uuid[11],
+               uuid[12], uuid[13], uuid[14], uuid[15]);
     uuidstr[VIR_UUID_STRING_BUFLEN-1] = '\0';
     return uuidstr;
 }
@@ -175,24 +170,21 @@ virUUIDFormat(const unsigned char *uuid, char *uuidstr)
  * Basic tests:
  *  - Not all of the digits may be equal
  */
-int
-virUUIDIsValid(unsigned char *uuid)
+bool
+virUUIDIsValid(const unsigned char *uuid)
 {
     size_t i;
-    unsigned int ctr = 1;
-    unsigned char c;
 
     if (!uuid)
-        return 0;
-
-    c = uuid[0];
+        return false;
 
     for (i = 1; i < VIR_UUID_BUFLEN; i++)
-        if (uuid[i] == c)
-            ctr++;
+        if (uuid[i] != uuid[0])
+            return true;
 
-    return ctr != VIR_UUID_BUFLEN;
+    return false;
 }
+
 
 static int
 getDMISystemUUID(char *uuid, int len)

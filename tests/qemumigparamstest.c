@@ -22,8 +22,10 @@
 #include "virjson.h"
 #include "virbuffer.h"
 #include "virxml.h"
+#include "virhash.h"
 #include "testutils.h"
 #include "testutilsqemu.h"
+#include "tests/testutilsqemuschema.h"
 #include "qemumonitortestutils.h"
 #include "qemu/qemu_migration_params.h"
 #define LIBVIRT_QEMU_MIGRATION_PARAMSPRIV_H_ALLOW
@@ -34,14 +36,15 @@
 
 typedef struct _qemuMigParamsData qemuMigParamsData;
 struct _qemuMigParamsData {
-    virDomainXMLOptionPtr xmlopt;
+    virDomainXMLOption *xmlopt;
     const char *name;
+    GHashTable *qmpschema;
 };
 
 
 static void
-qemuMigParamsTestFormatXML(virBufferPtr buf,
-                           qemuMigrationParamsPtr migParams)
+qemuMigParamsTestFormatXML(virBuffer *buf,
+                           qemuMigrationParams *migParams)
 {
     virBufferAddLit(buf, "<test>\n");
     virBufferAdjustIndent(buf, 2);
@@ -58,42 +61,31 @@ static int
 qemuMigParamsTestXML2XML(const void *opaque)
 {
     const qemuMigParamsData *data = opaque;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
-    char *xmlFile = NULL;
-    xmlDocPtr doc = NULL;
-    xmlXPathContextPtr ctxt = NULL;
-    qemuMigrationParamsPtr migParams = NULL;
-    char *actualXML = NULL;
-    int ret = -1;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+    g_autofree char *xmlFile = NULL;
+    g_autoptr(xmlDoc) doc = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
+    g_autoptr(qemuMigrationParams) migParams = NULL;
+    g_autofree char *actualXML = NULL;
 
-    if (virAsprintf(&xmlFile, "%s/qemumigparamsdata/%s.xml",
-                    abs_srcdir, data->name) < 0)
-        goto cleanup;
+    xmlFile = g_strdup_printf("%s/qemumigparamsdata/%s.xml", abs_srcdir,
+                              data->name);
 
     if (!(doc = virXMLParseFileCtxt(xmlFile, &ctxt)))
-        goto cleanup;
+        return -1;
 
     if (qemuMigrationParamsParse(ctxt, &migParams) < 0)
-        goto cleanup;
+        return -1;
 
     qemuMigParamsTestFormatXML(&buf, migParams);
 
     if (!(actualXML = virBufferContentAndReset(&buf)))
-        goto cleanup;
+        return -1;
 
     if (virTestCompareToFile(actualXML, xmlFile) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(xmlFile);
-    VIR_FREE(actualXML);
-    qemuMigrationParamsFree(migParams);
-    virBufferFreeAndReset(&buf);
-    xmlXPathFreeContext(ctxt);
-    xmlFreeDoc(doc);
-    return ret;
+    return 0;
 }
 
 
@@ -101,20 +93,19 @@ static int
 qemuMigParamsTestXML(const void *opaque)
 {
     const qemuMigParamsData *data = opaque;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
-    char *replyFile = NULL;
-    char *xmlFile = NULL;
-    qemuMonitorTestPtr mon = NULL;
-    virJSONValuePtr params = NULL;
-    qemuMigrationParamsPtr migParams = NULL;
-    char *actualXML = NULL;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+    g_autofree char *replyFile = NULL;
+    g_autofree char *xmlFile = NULL;
+    qemuMonitorTest *mon = NULL;
+    g_autoptr(virJSONValue) params = NULL;
+    g_autoptr(qemuMigrationParams) migParams = NULL;
+    g_autofree char *actualXML = NULL;
     int ret = -1;
 
-    if (virAsprintf(&replyFile, "%s/qemumigparamsdata/%s.reply",
-                    abs_srcdir, data->name) < 0 ||
-        virAsprintf(&xmlFile, "%s/qemumigparamsdata/%s.xml",
-                    abs_srcdir, data->name) < 0)
-        goto cleanup;
+    replyFile = g_strdup_printf("%s/qemumigparamsdata/%s.reply",
+                                abs_srcdir, data->name);
+    xmlFile = g_strdup_printf("%s/qemumigparamsdata/%s.xml",
+                              abs_srcdir, data->name);
 
     if (!(mon = qemuMonitorTestNewFromFile(replyFile, data->xmlopt, true)))
         goto cleanup;
@@ -137,12 +128,6 @@ qemuMigParamsTestXML(const void *opaque)
     ret = 0;
 
  cleanup:
-    VIR_FREE(replyFile);
-    VIR_FREE(xmlFile);
-    VIR_FREE(actualXML);
-    virJSONValueFree(params);
-    qemuMigrationParamsFree(migParams);
-    virBufferFreeAndReset(&buf);
     qemuMonitorTestFree(mon);
     return ret;
 }
@@ -152,20 +137,20 @@ static int
 qemuMigParamsTestJSON(const void *opaque)
 {
     const qemuMigParamsData *data = opaque;
-    char *replyFile = NULL;
-    char *jsonFile = NULL;
-    qemuMonitorTestPtr mon = NULL;
-    virJSONValuePtr paramsIn = NULL;
-    virJSONValuePtr paramsOut = NULL;
-    qemuMigrationParamsPtr migParams = NULL;
-    char *actualJSON = NULL;
+    g_autofree char *replyFile = NULL;
+    g_autofree char *jsonFile = NULL;
+    qemuMonitorTest *mon = NULL;
+    g_autoptr(virJSONValue) paramsIn = NULL;
+    g_autoptr(virJSONValue) paramsOut = NULL;
+    g_autoptr(qemuMigrationParams) migParams = NULL;
+    g_autofree char *actualJSON = NULL;
+    g_auto(virBuffer) debug = VIR_BUFFER_INITIALIZER;
     int ret = -1;
 
-    if (virAsprintf(&replyFile, "%s/qemumigparamsdata/%s.reply",
-                    abs_srcdir, data->name) < 0 ||
-        virAsprintf(&jsonFile, "%s/qemumigparamsdata/%s.json",
-                    abs_srcdir, data->name) < 0)
-        goto cleanup;
+    replyFile = g_strdup_printf("%s/qemumigparamsdata/%s.reply",
+                                abs_srcdir, data->name);
+    jsonFile = g_strdup_printf("%s/qemumigparamsdata/%s.json",
+                               abs_srcdir, data->name);
 
     if (!(mon = qemuMonitorTestNewFromFile(replyFile, data->xmlopt, true)))
         goto cleanup;
@@ -181,18 +166,23 @@ qemuMigParamsTestJSON(const void *opaque)
         !(actualJSON = virJSONValueToString(paramsOut, true)))
         goto cleanup;
 
+    if (testQEMUSchemaValidateCommand("migrate-set-parameters",
+                                      paramsOut,
+                                      data->qmpschema,
+                                      false,
+                                      false,
+                                      &debug) < 0) {
+        VIR_TEST_VERBOSE("failed to validate migration params '%s' against QMP schema: %s",
+                         actualJSON, virBufferCurrentContent(&debug));
+        goto cleanup;
+    }
+
     if (virTestCompareToFile(actualJSON, jsonFile) < 0)
         goto cleanup;
 
     ret = 0;
 
  cleanup:
-    VIR_FREE(replyFile);
-    VIR_FREE(jsonFile);
-    VIR_FREE(actualJSON);
-    virJSONValueFree(paramsIn);
-    virJSONValueFree(paramsOut);
-    qemuMigrationParamsFree(migParams);
     qemuMonitorTestFree(mon);
     return ret;
 }
@@ -201,24 +191,24 @@ qemuMigParamsTestJSON(const void *opaque)
 static int
 mymain(void)
 {
+    g_autoptr(GHashTable) qmpschema = NULL;
     virQEMUDriver driver;
     int ret = 0;
 
-#if !WITH_YAJL
-    fputs("libvirt not compiled with JSON support, skipping this test\n", stderr);
-    return EXIT_AM_SKIP;
-#endif
-
-    if (virThreadInitialize() < 0 ||
-        qemuTestDriverInit(&driver) < 0)
+    if (qemuTestDriverInit(&driver) < 0)
         return EXIT_FAILURE;
 
     virEventRegisterDefaultImpl();
 
+    if (!(qmpschema = testQEMUSchemaLoadLatest("x86_64"))) {
+        VIR_TEST_VERBOSE("failed to load QMP schema");
+        return EXIT_FAILURE;
+    }
+
 #define DO_TEST(name) \
     do { \
         qemuMigParamsData data = { \
-            driver.xmlopt, name \
+            driver.xmlopt, name, qmpschema \
         }; \
         if (virTestRun(name " (xml)", qemuMigParamsTestXML, &data) < 0) \
             ret = -1; \

@@ -18,13 +18,12 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_LXC_NATIVE_H
-# define LIBVIRT_LXC_NATIVE_H
+#pragma once
 
-# include "domain_conf.h"
-# include "virenum.h"
+#include "domain_conf.h"
+#include "virenum.h"
 
-# define LXC_CONFIG_FORMAT "lxc-tools"
+#define LXC_CONFIG_FORMAT "lxc-tools"
 
 typedef enum {
     VIR_LXC_NETWORK_CONFIG_NAME,
@@ -36,15 +35,15 @@ typedef enum {
     VIR_LXC_NETWORK_CONFIG_VLAN_ID,
     VIR_LXC_NETWORK_CONFIG_IPV4,
     VIR_LXC_NETWORK_CONFIG_IPV4_GATEWAY,
+    VIR_LXC_NETWORK_CONFIG_IPV4_ADDRESS,
     VIR_LXC_NETWORK_CONFIG_IPV6,
     VIR_LXC_NETWORK_CONFIG_IPV6_GATEWAY,
+    VIR_LXC_NETWORK_CONFIG_IPV6_ADDRESS,
     VIR_LXC_NETWORK_CONFIG_LAST,
 } virLXCNetworkConfigEntry;
 
 VIR_ENUM_DECL(virLXCNetworkConfigEntry);
 
-virDomainDefPtr lxcParseConfigString(const char *config,
-                                     virCapsPtr caps,
-                                     virDomainXMLOptionPtr xmlopt);
-
-#endif /* LIBVIRT_LXC_NATIVE_H */
+virDomainDef *lxcParseConfigString(const char *config,
+                                     virCaps *caps,
+                                     virDomainXMLOption *xmlopt);

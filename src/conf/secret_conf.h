@@ -18,14 +18,11 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_SECRET_CONF_H
-# define LIBVIRT_SECRET_CONF_H
+#pragma once
 
-# include "internal.h"
-# include "virutil.h"
+#include "internal.h"
 
 typedef struct _virSecretDef virSecretDef;
-typedef virSecretDef *virSecretDefPtr;
 struct _virSecretDef {
     bool isephemeral;
     bool isprivate;
@@ -35,21 +32,21 @@ struct _virSecretDef {
     char *usage_id; /* May be NULL */
 };
 
-void virSecretDefFree(virSecretDefPtr def);
-virSecretDefPtr virSecretDefParseString(const char *xml);
-virSecretDefPtr virSecretDefParseFile(const char *filename);
+void virSecretDefFree(virSecretDef *def);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virSecretDef, virSecretDefFree);
+
+virSecretDef *virSecretDefParseString(const char *xml);
+virSecretDef *virSecretDefParseFile(const char *filename);
 char *virSecretDefFormat(const virSecretDef *def);
 
-# define VIR_CONNECT_LIST_SECRETS_FILTERS_EPHEMERAL \
+#define VIR_CONNECT_LIST_SECRETS_FILTERS_EPHEMERAL \
                 (VIR_CONNECT_LIST_SECRETS_EPHEMERAL     | \
                  VIR_CONNECT_LIST_SECRETS_NO_EPHEMERAL)
 
-# define VIR_CONNECT_LIST_SECRETS_FILTERS_PRIVATE \
+#define VIR_CONNECT_LIST_SECRETS_FILTERS_PRIVATE \
                 (VIR_CONNECT_LIST_SECRETS_PRIVATE     | \
                  VIR_CONNECT_LIST_SECRETS_NO_PRIVATE)
 
-# define VIR_CONNECT_LIST_SECRETS_FILTERS_ALL \
+#define VIR_CONNECT_LIST_SECRETS_FILTERS_ALL \
                 (VIR_CONNECT_LIST_SECRETS_FILTERS_EPHEMERAL  | \
                  VIR_CONNECT_LIST_SECRETS_FILTERS_PRIVATE)
-
-#endif /* LIBVIRT_SECRET_CONF_H */

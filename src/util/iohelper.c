@@ -27,8 +27,8 @@
 
 #include <unistd.h>
 #include <fcntl.h>
+#include <stdlib.h>
 
-#include "virutil.h"
 #include "virthread.h"
 #include "virfile.h"
 #include "viralloc.h"
@@ -39,10 +39,14 @@
 
 #define VIR_FROM_THIS VIR_FROM_STORAGE
 
+#ifndef O_DIRECT
+# define O_DIRECT 0
+#endif
+
 static int
 runIO(const char *path, int fd, int oflags)
 {
-    VIR_AUTOFREE(void *) base = NULL; /* Location to be freed */
+    g_autofree void *base = NULL; /* Location to be freed */
     char *buf = NULL; /* Aligned location within base */
     size_t buflen = 1024*1024;
     intptr_t alignMask = 64*1024 - 1;
@@ -53,15 +57,12 @@ runIO(const char *path, int fd, int oflags)
     bool direct = O_DIRECT && ((oflags & O_DIRECT) != 0);
     off_t end = 0;
 
-#if HAVE_POSIX_MEMALIGN
-    if (posix_memalign(&base, alignMask + 1, buflen)) {
-        virReportOOMError();
-        goto cleanup;
-    }
+#if WITH_POSIX_MEMALIGN
+    if (posix_memalign(&base, alignMask + 1, buflen))
+        abort();
     buf = base;
 #else
-    if (VIR_ALLOC_N(buf, buflen + alignMask) < 0)
-        goto cleanup;
+    buf = g_new0(char, buflen + alignMask);
     base = buf;
     buf = (char *) (((intptr_t) base + alignMask) & ~alignMask);
 #endif
@@ -154,7 +155,7 @@ runIO(const char *path, int fd, int oflags)
     }
 
     /* Ensure all data is written */
-    if (fdatasync(fdout) < 0) {
+    if (virFileDataSync(fdout) < 0) {
         if (errno != EINVAL && errno != EROFS) {
             /* fdatasync() may fail on some special FDs, e.g. pipes */
             virReportSystemError(errno, _("unable to fsync %s"), fdoutname);
@@ -175,7 +176,7 @@ runIO(const char *path, int fd, int oflags)
 
 static const char *program_name;
 
-ATTRIBUTE_NORETURN static void
+G_GNUC_NORETURN static void
 usage(int status)
 {
     if (status) {
@@ -196,7 +197,6 @@ main(int argc, char **argv)
     program_name = argv[0];
 
     if (virGettextInitialize() < 0 ||
-        virThreadInitialize() < 0 ||
         virErrorInitialize() < 0) {
         fprintf(stderr, _("%s: initialization failed"), program_name);
         exit(EXIT_FAILURE);

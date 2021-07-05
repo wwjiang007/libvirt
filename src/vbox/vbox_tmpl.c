@@ -1,10 +1,6 @@
 /** @file vbox_tmpl.c
  * Template File to support multiple versions of VirtualBox
  * at runtime :).
- *
- * IMPORTANT:
- * Please dont include this file in the src/Makefile.am, it
- * is automatically include by other files.
  */
 
 /*
@@ -49,18 +45,18 @@
 #include "virutil.h"
 
 /* This one changes from version to version. */
-#if VBOX_API_VERSION == 5000000
-# include "vbox_CAPI_v5_0.h"
-#elif VBOX_API_VERSION == 5001000
-# include "vbox_CAPI_v5_1.h"
-#elif VBOX_API_VERSION == 5002000
+#if VBOX_API_VERSION == 5002000
 # include "vbox_CAPI_v5_2.h"
+#elif VBOX_API_VERSION == 6000000
+# include "vbox_CAPI_v6_0.h"
+#elif VBOX_API_VERSION == 6001000
+# include "vbox_CAPI_v6_1.h"
 #else
-# error "Unsupport VBOX_API_VERSION"
+# error "Unsupported VBOX_API_VERSION"
 #endif
 
 /* Include this *last* or we'll get the wrong vbox_CAPI_*.h. */
-#include "vbox_glue.h"
+#include "vbox_XPCOMCGlue.h"
 
 typedef IUSBDeviceFilters IUSBCommon;
 
@@ -136,7 +132,7 @@ if (strUtf16) {\
 #define VBOX_RDP_AUTOPORT_RANGE "3389-3689"
 
 static void
-_vboxIIDUnalloc(vboxDriverPtr data, vboxIID *iid)
+_vboxIIDUnalloc(struct _vboxDriver *data, vboxIID *iid)
 {
     if (iid->value != NULL && iid->owner)
         data->pFuncs->pfnUtf16Free(iid->value);
@@ -146,7 +142,7 @@ _vboxIIDUnalloc(vboxDriverPtr data, vboxIID *iid)
 }
 
 static void
-_vboxIIDToUUID(vboxDriverPtr data, vboxIID *iid,
+_vboxIIDToUUID(struct _vboxDriver *data, vboxIID *iid,
                unsigned char *uuid)
 {
     char *utf8 = NULL;
@@ -159,7 +155,7 @@ _vboxIIDToUUID(vboxDriverPtr data, vboxIID *iid,
 }
 
 static void
-_vboxIIDFromUUID(vboxDriverPtr data, vboxIID *iid,
+_vboxIIDFromUUID(struct _vboxDriver *data, vboxIID *iid,
                  const unsigned char *uuid)
 {
     char utf8[VIR_UUID_STRING_BUFLEN];
@@ -172,7 +168,7 @@ _vboxIIDFromUUID(vboxDriverPtr data, vboxIID *iid,
 }
 
 static bool
-_vboxIIDIsEqual(vboxDriverPtr data, vboxIID *iid1,
+_vboxIIDIsEqual(struct _vboxDriver *data, vboxIID *iid1,
                 vboxIID *iid2)
 {
     unsigned char uuid1[VIR_UUID_BUFLEN];
@@ -190,7 +186,7 @@ _vboxIIDIsEqual(vboxDriverPtr data, vboxIID *iid1,
 }
 
 static void
-_vboxIIDFromArrayItem(vboxDriverPtr data, vboxIID *iid,
+_vboxIIDFromArrayItem(struct _vboxDriver *data, vboxIID *iid,
                       vboxArray *array, int idx)
 {
     _vboxIIDUnalloc(data, iid);
@@ -214,7 +210,7 @@ static PRUnichar *PRUnicharFromInt(PCVBOXXPCOM pFuncs, int n) {
     PRUnichar *strUtf16 = NULL;
     char s[24];
 
-    snprintf(s, sizeof(s), "%d", n);
+    g_snprintf(s, sizeof(s), "%d", n);
 
     pFuncs->pfnUtf8ToUtf16(s, &strUtf16);
 
@@ -296,7 +292,7 @@ _vboxDomainSnapshotRestore(virDomainPtr dom,
                           IMachine *machine,
                           ISnapshot *snapshot)
 {
-    vboxDriverPtr data = dom->conn->privateData;
+    struct _vboxDriver *data = dom->conn->privateData;
     IProgress *progress = NULL;
     PRUint32 state;
     nsresult rc;
@@ -368,7 +364,7 @@ _vboxDomainSnapshotRestore(virDomainPtr dom,
 }
 
 static nsresult
-_unregisterMachine(vboxDriverPtr data, vboxIID *iid, IMachine **machine)
+_unregisterMachine(struct _vboxDriver *data, vboxIID *iid, IMachine **machine)
 {
     nsresult rc;
     vboxArray media = VBOX_ARRAY_INITIALIZER;
@@ -432,7 +428,7 @@ _deleteConfig(IMachine *machine)
     }
 }
 
-static int _pfnInitialize(vboxDriverPtr driver)
+static int _pfnInitialize(struct _vboxDriver *driver)
 {
     nsresult rc;
 
@@ -452,7 +448,7 @@ static int _pfnInitialize(vboxDriverPtr driver)
     return 0;
 }
 
-static void _pfnUninitialize(vboxDriverPtr data)
+static void _pfnUninitialize(struct _vboxDriver *data)
 {
     if (data->pFuncs) {
         VBOX_RELEASE(data->vboxObj);
@@ -494,15 +490,15 @@ static void _vboxIIDInitialize(vboxIID *iid)
     iid->owner = true;
 }
 
-static void _DEBUGIID(vboxDriverPtr data, const char *msg, vboxIID *iid)
+static void _DEBUGIID(struct _vboxDriver *data, const char *msg, vboxIID *iid)
 {
     DEBUGPRUnichar(msg, iid->value);
 }
 
 static void
-_vboxIIDToUtf8(vboxDriverPtr data ATTRIBUTE_UNUSED,
-               vboxIID *iid ATTRIBUTE_UNUSED,
-               char **utf8 ATTRIBUTE_UNUSED)
+_vboxIIDToUtf8(struct _vboxDriver *data G_GNUC_UNUSED,
+               vboxIID *iid G_GNUC_UNUSED,
+               char **utf8 G_GNUC_UNUSED)
 {
     data->pFuncs->pfnUtf16ToUtf8(iid->value, utf8);
 }
@@ -548,7 +544,7 @@ static void* _handleSnapshotGetChildren(ISnapshot *snapshot)
     return snapshot->vtbl->GetChildren;
 }
 
-static void* _handleMediumGetChildren(IMedium *medium ATTRIBUTE_UNUSED)
+static void* _handleMediumGetChildren(IMedium *medium G_GNUC_UNUSED)
 {
     return medium->vtbl->GetChildren;
 }
@@ -609,33 +605,27 @@ _virtualboxGetHost(IVirtualBox *vboxObj, IHost **host)
 }
 
 static nsresult
-_virtualboxCreateMachine(vboxDriverPtr data, virDomainDefPtr def, IMachine **machine, char *uuidstr ATTRIBUTE_UNUSED)
+_virtualboxCreateMachine(struct _vboxDriver *data, virDomainDef *def, IMachine **machine, char *uuidstr G_GNUC_UNUSED)
 {
     vboxIID iid = VBOX_IID_INITIALIZER;
     PRUnichar *machineNameUtf16 = NULL;
+    char *createFlags = NULL;
+    PRUnichar *createFlagsUtf16 = NULL;
     nsresult rc = -1;
 
     VBOX_UTF8_TO_UTF16(def->name, &machineNameUtf16);
     vboxIIDFromUUID(&iid, def->uuid);
-    {
-        char *createFlags = NULL;
-        PRUnichar *createFlagsUtf16 = NULL;
-
-        if (virAsprintf(&createFlags,
-                        "UUID=%s,forceOverwrite=0", uuidstr) < 0)
-            goto cleanup;
-        VBOX_UTF8_TO_UTF16(createFlags, &createFlagsUtf16);
-        rc = data->vboxObj->vtbl->CreateMachine(data->vboxObj,
-                                                NULL,
-                                                machineNameUtf16,
-                                                0,
-                                                nsnull,
-                                                nsnull,
-                                                createFlagsUtf16,
-                                                machine);
- cleanup:
-        VIR_FREE(createFlags);
-    }
+    createFlags = g_strdup_printf("UUID=%s,forceOverwrite=0", uuidstr);
+    VBOX_UTF8_TO_UTF16(createFlags, &createFlagsUtf16);
+    rc = data->vboxObj->vtbl->CreateMachine(data->vboxObj,
+                                            NULL,
+                                            machineNameUtf16,
+                                            0,
+                                            nsnull,
+                                            nsnull,
+                                            createFlagsUtf16,
+                                            machine);
+    VIR_FREE(createFlags);
     VBOX_UTF16_FREE(machineNameUtf16);
     vboxIIDUnalloc(&iid);
     return rc;
@@ -662,7 +652,7 @@ static nsresult
 _virtualboxFindHardDisk(IVirtualBox *vboxObj,
                         PRUnichar *location,
                         PRUint32 deviceType,
-                        PRUint32 accessMode ATTRIBUTE_UNUSED,
+                        PRUint32 accessMode G_GNUC_UNUSED,
                         IMedium **medium)
 {
     return vboxObj->vtbl->OpenMedium(vboxObj, location, deviceType, accessMode,
@@ -737,10 +727,15 @@ _machineAttachDevice(IMachine *machine,
 static nsresult
 _machineCreateSharedFolder(IMachine *machine, PRUnichar *name,
                            PRUnichar *hostPath, PRBool writable,
-                           PRBool automount ATTRIBUTE_UNUSED)
+                           PRBool automount G_GNUC_UNUSED)
 {
+#if VBOX_API_VERSION >= 6000000
+    return machine->vtbl->CreateSharedFolder(machine, name, hostPath,
+                                             writable, automount, NULL);
+#else
     return machine->vtbl->CreateSharedFolder(machine, name, hostPath,
                                              writable, automount);
+#endif
 }
 
 static nsresult
@@ -750,21 +745,27 @@ _machineRemoveSharedFolder(IMachine *machine, PRUnichar *name)
 }
 
 static nsresult
-_machineLaunchVMProcess(vboxDriverPtr data,
-                        IMachine *machine ATTRIBUTE_UNUSED,
-                        vboxIID *iid ATTRIBUTE_UNUSED,
+_machineLaunchVMProcess(struct _vboxDriver *data,
+                        IMachine *machine G_GNUC_UNUSED,
+                        vboxIID *iid G_GNUC_UNUSED,
                         PRUnichar *sessionType, PRUnichar *env,
                         IProgress **progress)
 {
+#if VBOX_API_VERSION >= 6001000
+    PRUnichar *envlist[] = { env };
+    return machine->vtbl->LaunchVMProcess(machine, data->vboxSession,
+                                          sessionType, 1, envlist, progress);
+#else
     return machine->vtbl->LaunchVMProcess(machine, data->vboxSession,
                                           sessionType, env, progress);
+#endif
 }
 
 static nsresult
-_machineUnregister(IMachine *machine ATTRIBUTE_UNUSED,
-                   PRUint32 cleanupMode ATTRIBUTE_UNUSED,
-                   PRUint32 *aMediaSize ATTRIBUTE_UNUSED,
-                   IMedium ***aMedia ATTRIBUTE_UNUSED)
+_machineUnregister(IMachine *machine G_GNUC_UNUSED,
+                   PRUint32 cleanupMode G_GNUC_UNUSED,
+                   PRUint32 *aMediaSize G_GNUC_UNUSED,
+                   IMedium ***aMedia G_GNUC_UNUSED)
 {
     return machine->vtbl->Unregister(machine, cleanupMode, aMediaSize, aMedia);
 }
@@ -825,7 +826,7 @@ _machineGetNetworkAdapter(IMachine *machine, PRUint32 slot, INetworkAdapter **ad
 }
 
 static nsresult
-_machineGetChipsetType(IMachine *machine ATTRIBUTE_UNUSED, PRUint32 *chipsetType ATTRIBUTE_UNUSED)
+_machineGetChipsetType(IMachine *machine G_GNUC_UNUSED, PRUint32 *chipsetType G_GNUC_UNUSED)
 {
     return machine->vtbl->GetChipsetType(machine, chipsetType);
 }
@@ -891,13 +892,13 @@ _machineSetMemorySize(IMachine *machine, PRUint32 memorySize)
 }
 
 static nsresult
-_machineGetCPUProperty(IMachine *machine, PRUint32 property ATTRIBUTE_UNUSED, PRBool *value)
+_machineGetCPUProperty(IMachine *machine, PRUint32 property G_GNUC_UNUSED, PRBool *value)
 {
     return machine->vtbl->GetCPUProperty(machine, property, value);
 }
 
 static nsresult
-_machineSetCPUProperty(IMachine *machine, PRUint32 property ATTRIBUTE_UNUSED, PRBool value)
+_machineSetCPUProperty(IMachine *machine, PRUint32 property G_GNUC_UNUSED, PRBool value)
 {
     return machine->vtbl->SetCPUProperty(machine, property, value);
 }
@@ -917,51 +918,123 @@ _machineSetBootOrder(IMachine *machine, PRUint32 position, PRUint32 device)
 static nsresult
 _machineGetVRAMSize(IMachine *machine, PRUint32 *VRAMSize)
 {
+#if VBOX_API_VERSION >= 6001000
+    IGraphicsAdapter *ga;
+    nsresult ret;
+    ret = machine->vtbl->GetGraphicsAdapter(machine, &ga);
+    if (NS_FAILED(ret))
+        return ret;
+    return ga->vtbl->GetVRAMSize(ga, VRAMSize);
+#else
     return machine->vtbl->GetVRAMSize(machine, VRAMSize);
+#endif
 }
 
 static nsresult
 _machineSetVRAMSize(IMachine *machine, PRUint32 VRAMSize)
 {
+#if VBOX_API_VERSION >= 6001000
+    IGraphicsAdapter *ga;
+    nsresult ret;
+    ret = machine->vtbl->GetGraphicsAdapter(machine, &ga);
+    if (NS_FAILED(ret))
+        return ret;
+    return ga->vtbl->SetVRAMSize(ga, VRAMSize);
+#else
     return machine->vtbl->SetVRAMSize(machine, VRAMSize);
+#endif
 }
 
 static nsresult
 _machineGetMonitorCount(IMachine *machine, PRUint32 *monitorCount)
 {
+#if VBOX_API_VERSION >= 6001000
+    IGraphicsAdapter *ga;
+    nsresult ret;
+    ret = machine->vtbl->GetGraphicsAdapter(machine, &ga);
+    if (NS_FAILED(ret))
+        return ret;
+    return ga->vtbl->GetMonitorCount(ga, monitorCount);
+#else
     return machine->vtbl->GetMonitorCount(machine, monitorCount);
+#endif
 }
 
 static nsresult
 _machineSetMonitorCount(IMachine *machine, PRUint32 monitorCount)
 {
+#if VBOX_API_VERSION >= 6001000
+    IGraphicsAdapter *ga;
+    nsresult ret;
+    ret = machine->vtbl->GetGraphicsAdapter(machine, &ga);
+    if (NS_FAILED(ret))
+        return ret;
+    return ga->vtbl->SetMonitorCount(ga, monitorCount);
+#else
     return machine->vtbl->SetMonitorCount(machine, monitorCount);
+#endif
 }
 
 static nsresult
 _machineGetAccelerate3DEnabled(IMachine *machine, PRBool *accelerate3DEnabled)
 {
+#if VBOX_API_VERSION >= 6001000
+    IGraphicsAdapter *ga;
+    nsresult ret;
+    ret = machine->vtbl->GetGraphicsAdapter(machine, &ga);
+    if (NS_FAILED(ret))
+        return ret;
+    return ga->vtbl->GetAccelerate3DEnabled(ga, accelerate3DEnabled);
+#else
     return machine->vtbl->GetAccelerate3DEnabled(machine, accelerate3DEnabled);
+#endif
 }
 
 static nsresult
 _machineSetAccelerate3DEnabled(IMachine *machine, PRBool accelerate3DEnabled)
 {
+#if VBOX_API_VERSION >= 6001000
+    IGraphicsAdapter *ga;
+    nsresult ret;
+    ret = machine->vtbl->GetGraphicsAdapter(machine, &ga);
+    if (NS_FAILED(ret))
+        return ret;
+    return ga->vtbl->SetAccelerate3DEnabled(ga, accelerate3DEnabled);
+#else
     return machine->vtbl->SetAccelerate3DEnabled(machine, accelerate3DEnabled);
+#endif
 }
 
 static nsresult
 _machineGetAccelerate2DVideoEnabled(IMachine *machine,
                                     PRBool *accelerate2DVideoEnabled)
 {
+#if VBOX_API_VERSION >= 6001000
+    IGraphicsAdapter *ga;
+    nsresult ret;
+    ret = machine->vtbl->GetGraphicsAdapter(machine, &ga);
+    if (NS_FAILED(ret))
+        return ret;
+    return ga->vtbl->GetAccelerate2DVideoEnabled(ga, accelerate2DVideoEnabled);
+#else
     return machine->vtbl->GetAccelerate2DVideoEnabled(machine, accelerate2DVideoEnabled);
+#endif
 }
 
 static nsresult
 _machineSetAccelerate2DVideoEnabled(IMachine *machine,
                                     PRBool accelerate2DVideoEnabled)
 {
+#if VBOX_API_VERSION >= 6001000
+    IGraphicsAdapter *ga;
+    nsresult ret;
+    ret = machine->vtbl->GetGraphicsAdapter(machine, &ga);
+    if (NS_FAILED(ret))
+        return ret;
+    return ga->vtbl->SetAccelerate2DVideoEnabled(ga, accelerate2DVideoEnabled);
+#else
     return machine->vtbl->SetAccelerate2DVideoEnabled(machine, accelerate2DVideoEnabled);
+#endif
 }
 
 static nsresult
@@ -989,13 +1062,13 @@ _machineSaveSettings(IMachine *machine)
 }
 
 static nsresult
-_sessionOpen(vboxDriverPtr data, vboxIID *iid ATTRIBUTE_UNUSED, IMachine *machine)
+_sessionOpen(struct _vboxDriver *data, vboxIID *iid G_GNUC_UNUSED, IMachine *machine)
 {
     return machine->vtbl->LockMachine(machine, data->vboxSession, LockType_Write);
 }
 
 static nsresult
-_sessionOpenExisting(vboxDriverPtr data, vboxIID *iid ATTRIBUTE_UNUSED, IMachine *machine)
+_sessionOpenExisting(struct _vboxDriver *data, vboxIID *iid G_GNUC_UNUSED, IMachine *machine)
 {
     return machine->vtbl->LockMachine(machine, data->vboxSession, LockType_Shared);
 }
@@ -1080,7 +1153,7 @@ _consoleTakeSnapshot(IConsole *console, PRUnichar *name,
     IMachine *machine;
     nsresult rc;
     PRUnichar *id = NULL;
-    bool bpause = true; /*NO live snapshot*/
+    bool bpause = true; /* NO live snapshot */
 
     rc = console->vtbl->GetMachine(console, &machine);
 
@@ -1156,7 +1229,7 @@ _systemPropertiesGetMaxBootPosition(ISystemProperties *systemProperties, PRUint3
 }
 
 static nsresult
-_systemPropertiesGetMaxNetworkAdapters(ISystemProperties *systemProperties, PRUint32 chipset ATTRIBUTE_UNUSED,
+_systemPropertiesGetMaxNetworkAdapters(ISystemProperties *systemProperties, PRUint32 chipset G_GNUC_UNUSED,
                                        PRUint32 *maxNetworkAdapters)
 {
     return systemProperties->vtbl->GetMaxNetworkAdapters(systemProperties, chipset,
@@ -1467,8 +1540,8 @@ _vrdeServerSetEnabled(IVRDEServer *VRDEServer, PRBool enabled)
 }
 
 static nsresult
-_vrdeServerGetPorts(vboxDriverPtr data, IVRDEServer *VRDEServer,
-                    IMachine *machine, virDomainGraphicsDefPtr graphics)
+_vrdeServerGetPorts(struct _vboxDriver *data, IVRDEServer *VRDEServer,
+                    IMachine *machine, virDomainGraphicsDef *graphics)
 {
     nsresult rc;
     PRUnichar *VRDEPortsKey = NULL;
@@ -1479,7 +1552,7 @@ _vrdeServerGetPorts(vboxDriverPtr data, IVRDEServer *VRDEServer,
     char *portUtf8 = NULL;
 
     /* get active (effective) port - available only when VM is running and has
-     * the VBOX extensions installed (without extenstions RDP server
+     * the VBOX extensions installed (without extensions RDP server
      * functionality is disabled)
      */
     port = vboxGetActiveVRDEServerPort(data->vboxSession, machine);
@@ -1523,7 +1596,7 @@ _vrdeServerGetPorts(vboxDriverPtr data, IVRDEServer *VRDEServer,
     }
 
  cleanup:
-    virStringListFree(matches);
+    g_strfreev(matches);
     VBOX_UTF8_FREE(portUtf8);
     VBOX_UTF16_FREE(VRDEPortsValue);
     VBOX_UTF16_FREE(VRDEPortsKey);
@@ -1532,8 +1605,8 @@ _vrdeServerGetPorts(vboxDriverPtr data, IVRDEServer *VRDEServer,
 }
 
 static nsresult
-_vrdeServerSetPorts(vboxDriverPtr data, IVRDEServer *VRDEServer,
-                    virDomainGraphicsDefPtr graphics)
+_vrdeServerSetPorts(struct _vboxDriver *data, IVRDEServer *VRDEServer,
+                    virDomainGraphicsDef *graphics)
 {
     nsresult rc = 0;
     PRUnichar *VRDEPortsKey = NULL;
@@ -1580,7 +1653,7 @@ _vrdeServerSetAllowMultiConnection(IVRDEServer *VRDEServer, PRBool enabled)
 }
 
 static nsresult
-_vrdeServerGetNetAddress(vboxDriverPtr data ATTRIBUTE_UNUSED,
+_vrdeServerGetNetAddress(struct _vboxDriver *data G_GNUC_UNUSED,
                          IVRDEServer *VRDEServer, PRUnichar **netAddress)
 {
     PRUnichar *VRDENetAddressKey = NULL;
@@ -1594,7 +1667,7 @@ _vrdeServerGetNetAddress(vboxDriverPtr data ATTRIBUTE_UNUSED,
 }
 
 static nsresult
-_vrdeServerSetNetAddress(vboxDriverPtr data ATTRIBUTE_UNUSED,
+_vrdeServerSetNetAddress(struct _vboxDriver *data G_GNUC_UNUSED,
                          IVRDEServer *VRDEServer, PRUnichar *netAddress)
 {
     PRUnichar *netAddressKey = NULL;
@@ -1609,14 +1682,14 @@ _vrdeServerSetNetAddress(vboxDriverPtr data ATTRIBUTE_UNUSED,
 }
 
 static nsresult
-_usbCommonEnable(IUSBCommon *USBCommon ATTRIBUTE_UNUSED)
+_usbCommonEnable(IUSBCommon *USBCommon G_GNUC_UNUSED)
 {
     /* We don't need to set usb enabled for vbox 4.3 and later */
     return 0;
 }
 
 static nsresult
-_usbCommonGetEnabled(IUSBCommon *USBCommon ATTRIBUTE_UNUSED, PRBool *enabled)
+_usbCommonGetEnabled(IUSBCommon *USBCommon G_GNUC_UNUSED, PRBool *enabled)
 {
     *enabled = true;
     return 0;
@@ -1703,8 +1776,8 @@ static nsresult _mediumGetSize(IMedium *medium, PRUint64 *uSize)
     return rc;
 }
 
-static nsresult _mediumGetReadOnly(IMedium *medium ATTRIBUTE_UNUSED,
-                                   PRBool *readOnly ATTRIBUTE_UNUSED)
+static nsresult _mediumGetReadOnly(IMedium *medium G_GNUC_UNUSED,
+                                   PRBool *readOnly G_GNUC_UNUSED)
 {
     return medium->vtbl->GetReadOnly(medium, readOnly);
 }
@@ -1743,18 +1816,18 @@ static nsresult _mediumClose(IMedium *medium)
     return medium->vtbl->Close(medium);
 }
 
-static nsresult _mediumSetType(IMedium *medium ATTRIBUTE_UNUSED,
-                               PRUint32 type ATTRIBUTE_UNUSED)
+static nsresult _mediumSetType(IMedium *medium G_GNUC_UNUSED,
+                               PRUint32 type G_GNUC_UNUSED)
 {
     return medium->vtbl->SetType(medium, type);
 }
 
 static nsresult
-_mediumCreateDiffStorage(IMedium *medium ATTRIBUTE_UNUSED,
-                         IMedium *target ATTRIBUTE_UNUSED,
-                         PRUint32 variantSize ATTRIBUTE_UNUSED,
-                         PRUint32 *variant ATTRIBUTE_UNUSED,
-                         IProgress **progress ATTRIBUTE_UNUSED)
+_mediumCreateDiffStorage(IMedium *medium G_GNUC_UNUSED,
+                         IMedium *target G_GNUC_UNUSED,
+                         PRUint32 variantSize G_GNUC_UNUSED,
+                         PRUint32 *variant G_GNUC_UNUSED,
+                         IProgress **progress G_GNUC_UNUSED)
 {
     return medium->vtbl->CreateDiffStorage(medium, target, variantSize, variant, progress);
 }
@@ -1793,8 +1866,8 @@ _mediumAttachmentGetController(IMediumAttachment *mediumAttachment,
 }
 
 static nsresult
-_mediumAttachmentGetType(IMediumAttachment *mediumAttachment ATTRIBUTE_UNUSED,
-                         PRUint32 *type ATTRIBUTE_UNUSED)
+_mediumAttachmentGetType(IMediumAttachment *mediumAttachment G_GNUC_UNUSED,
+                         PRUint32 *type G_GNUC_UNUSED)
 {
     return mediumAttachment->vtbl->GetType(mediumAttachment, type);
 }
@@ -1890,13 +1963,13 @@ _snapshotGetOnline(ISnapshot *snapshot, PRBool *online)
 }
 
 static nsresult
-_displayGetScreenResolution(IDisplay *display ATTRIBUTE_UNUSED,
-                            PRUint32 screenId ATTRIBUTE_UNUSED,
-                            PRUint32 *width ATTRIBUTE_UNUSED,
-                            PRUint32 *height ATTRIBUTE_UNUSED,
-                            PRUint32 *bitsPerPixel ATTRIBUTE_UNUSED,
-                            PRInt32 *xOrigin ATTRIBUTE_UNUSED,
-                            PRInt32 *yOrigin ATTRIBUTE_UNUSED)
+_displayGetScreenResolution(IDisplay *display G_GNUC_UNUSED,
+                            PRUint32 screenId G_GNUC_UNUSED,
+                            PRUint32 *width G_GNUC_UNUSED,
+                            PRUint32 *height G_GNUC_UNUSED,
+                            PRUint32 *bitsPerPixel G_GNUC_UNUSED,
+                            PRInt32 *xOrigin G_GNUC_UNUSED,
+                            PRInt32 *yOrigin G_GNUC_UNUSED)
 {
     PRUint32 gms;
 
@@ -1933,8 +2006,8 @@ _hostFindHostNetworkInterfaceByName(IHost *host, PRUnichar *name,
 }
 
 static nsresult
-_hostCreateHostOnlyNetworkInterface(vboxDriverPtr data ATTRIBUTE_UNUSED,
-                                    IHost *host, char *name ATTRIBUTE_UNUSED,
+_hostCreateHostOnlyNetworkInterface(struct _vboxDriver *data G_GNUC_UNUSED,
+                                    IHost *host, char *name G_GNUC_UNUSED,
                                     IHostNetworkInterface **networkInterface)
 {
     nsresult rc = -1;
@@ -1952,9 +2025,9 @@ _hostCreateHostOnlyNetworkInterface(vboxDriverPtr data ATTRIBUTE_UNUSED,
 }
 
 static nsresult
-_hostRemoveHostOnlyNetworkInterface(IHost *host ATTRIBUTE_UNUSED,
-                                    vboxIID *iid ATTRIBUTE_UNUSED,
-                                    IProgress **progress ATTRIBUTE_UNUSED)
+_hostRemoveHostOnlyNetworkInterface(IHost *host G_GNUC_UNUSED,
+                                    vboxIID *iid G_GNUC_UNUSED,
+                                    IProgress **progress G_GNUC_UNUSED)
 {
     return host->vtbl->RemoveHostOnlyNetworkInterface(host, iid->value, progress);
 }
@@ -2061,11 +2134,16 @@ _dhcpServerSetConfiguration(IDHCPServer *dhcpServer, PRUnichar *IPAddress,
 }
 
 static nsresult
-_dhcpServerStart(IDHCPServer *dhcpServer, PRUnichar *networkName,
+_dhcpServerStart(IDHCPServer *dhcpServer, PRUnichar *networkName G_GNUC_UNUSED,
                  PRUnichar *trunkName, PRUnichar *trunkType)
 {
+#if VBOX_API_VERSION >= 6001000
+    return dhcpServer->vtbl->Start(dhcpServer,
+                                   trunkName, trunkType);
+#else
     return dhcpServer->vtbl->Start(dhcpServer, networkName,
                                    trunkName, trunkType);
+#endif
 }
 
 static nsresult

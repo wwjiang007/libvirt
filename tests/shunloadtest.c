@@ -40,7 +40,7 @@
 
 #include <config.h>
 
-#define NO_LIBVIRT /* This file intentionally does not link to libvirt */
+#define VIR_NO_GLIB_STDIO /* This file intentionally does not link to libvirt/glib */
 #include "testutils.h"
 
 #ifdef linux
@@ -90,7 +90,7 @@ static void sigHandler(int sig)
  * we don't want  'shunloadtest' itself to link against
  * libvirt.so. We need to test dlopen()'ing of libvirt.so
  */
-int main(int argc ATTRIBUTE_UNUSED, char **argv)
+int main(int argc G_GNUC_UNUSED, char **argv)
 {
     void (*startup)(void);
     pthread_t t;
@@ -105,8 +105,8 @@ int main(int argc ATTRIBUTE_UNUSED, char **argv)
     fprintf(stderr, "      .%*s 1   ", 39, "");
     signal(SIGSEGV, sigHandler);
 
-    if (!(lib = dlopen("./.libs/libshunload.so", RTLD_LAZY))) {
-        fprintf(stderr, "Cannot load ./.libs/libshunload.so %s\n", dlerror());
+    if (!(lib = dlopen(abs_builddir "/libshunload.so", RTLD_LAZY))) {
+        fprintf(stderr, "Cannot load ./libshunload.so %s\n", dlerror());
         return 1;
     }
     if (!(startup = dlsym(lib, "shunloadStart"))) {

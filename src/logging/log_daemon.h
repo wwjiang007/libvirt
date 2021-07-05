@@ -18,26 +18,19 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_LOG_DAEMON_H
-# define LIBVIRT_LOG_DAEMON_H
+#pragma once
 
-# include "virthread.h"
-# include "log_handler.h"
+#include "log_handler.h"
 
 typedef struct _virLogDaemon virLogDaemon;
-typedef virLogDaemon *virLogDaemonPtr;
 
 typedef struct _virLogDaemonClient virLogDaemonClient;
-typedef virLogDaemonClient *virLogDaemonClientPtr;
-
 struct _virLogDaemonClient {
-    virMutex lock;
+    GMutex lock;
 
     pid_t clientPid;
 };
 
-extern virLogDaemonPtr logDaemon;
+extern virLogDaemon *logDaemon;
 
-virLogHandlerPtr virLogDaemonGetHandler(virLogDaemonPtr dmn);
-
-#endif /* LIBVIRT_LOG_DAEMON_H */
+virLogHandler *virLogDaemonGetHandler(virLogDaemon *dmn);

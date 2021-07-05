@@ -22,12 +22,13 @@
 #include <config.h>
 
 #include <dirent.h>
-#include <sys/utsname.h>
 #include <fcntl.h>
-#include <sys/ioctl.h>
+#ifndef WIN32
+# include <sys/ioctl.h>
+#endif
 #include <unistd.h>
 
-#if HAVE_LINUX_KVM_H
+#if WITH_LINUX_KVM_H
 # include <linux/kvm.h>
 #endif
 
@@ -38,14 +39,10 @@
 # include <sys/resource.h>
 #endif
 
-#include "c-ctype.h"
 #include "viralloc.h"
 #define LIBVIRT_VIRHOSTCPUPRIV_H_ALLOW
 #include "virhostcpupriv.h"
-#include "physmem.h"
 #include "virerror.h"
-#include "count-one-bits.h"
-#include "intprops.h"
 #include "virarch.h"
 #include "virfile.h"
 #include "virtypedparam.h"
@@ -90,7 +87,7 @@ virHostCPUGetStatsFreeBSD(int cpuNum,
                           int *nparams)
 {
     const char *sysctl_name;
-    long *cpu_times;
+    g_autofree long *cpu_times = NULL;
     struct clockinfo clkinfo;
     size_t i, j, cpu_times_size, clkinfo_size;
     int cpu_times_num, offset, hz, stathz, ret = -1;
@@ -148,8 +145,7 @@ virHostCPUGetStatsFreeBSD(int cpuNum,
 
     cpu_times_size = sizeof(long) * cpu_times_num * CPUSTATES;
 
-    if (VIR_ALLOC_N(cpu_times, cpu_times_num * CPUSTATES) < 0)
-        goto cleanup;
+    cpu_times = g_new0(long, cpu_times_num * CPUSTATES);
 
     if (sysctlbyname(sysctl_name, cpu_times, &cpu_times_size, NULL, 0) < 0) {
         virReportSystemError(errno,
@@ -169,15 +165,13 @@ virHostCPUGetStatsFreeBSD(int cpuNum,
         }
 
         param->value = 0;
-        for (j = 0; j < ARRAY_CARDINALITY(cpu_map[i].idx); j++)
+        for (j = 0; j < G_N_ELEMENTS(cpu_map[i].idx); j++)
             param->value += cpu_times[offset + cpu_map[i].idx[j]] * TICK_TO_NSEC;
     }
 
     ret = 0;
 
  cleanup:
-    VIR_FREE(cpu_times);
-
     return ret;
 }
 
@@ -221,6 +215,29 @@ virHostCPUGetSocket(unsigned int cpu, unsigned int *socket)
 }
 
 int
+virHostCPUGetDie(unsigned int cpu, unsigned int *die)
+{
+    int die_id;
+    int ret = virFileReadValueInt(&die_id,
+                                  "%s/cpu/cpu%u/topology/die_id",
+                                  SYSFS_SYSTEM_PATH, cpu);
+
+    if (ret == -1)
+        return -1;
+
+    /* If the file is not there, it's 0.
+     * Another alternative is die_id set to -1, meaning that
+     * the arch does not have die_id support. Set @die to
+     * 0 in this case too. */
+    if (ret == -2 || die_id < 0)
+        *die = 0;
+    else
+        *die = die_id;
+
+    return 0;
+}
+
+int
 virHostCPUGetCore(unsigned int cpu, unsigned int *core)
 {
     int ret = virFileReadValueUint(core,
@@ -236,10 +253,10 @@ virHostCPUGetCore(unsigned int cpu, unsigned int *core)
     return 0;
 }
 
-virBitmapPtr
+virBitmap *
 virHostCPUGetSiblingsList(unsigned int cpu)
 {
-    virBitmapPtr ret = NULL;
+    virBitmap *ret = NULL;
     int rv = -1;
 
     rv = virFileReadValueBitmap(&ret,
@@ -248,8 +265,7 @@ virHostCPUGetSiblingsList(unsigned int cpu)
     if (rv == -2) {
         /* If the file doesn't exist, the threadis its only sibling */
         ret = virBitmapNew(cpu + 1);
-        if (ret)
-            ignore_value(virBitmapSetBit(ret, cpu));
+        ignore_value(virBitmapSetBit(ret, cpu));
     }
 
     return ret;
@@ -258,7 +274,7 @@ virHostCPUGetSiblingsList(unsigned int cpu)
 static unsigned long
 virHostCPUCountThreadSiblings(unsigned int cpu)
 {
-    virBitmapPtr siblings_map;
+    virBitmap *siblings_map;
     unsigned long ret = 0;
 
     if (!(siblings_map = virHostCPUGetSiblingsList(cpu)))
@@ -280,8 +296,8 @@ ATTRIBUTE_NONNULL(7) ATTRIBUTE_NONNULL(8)
 ATTRIBUTE_NONNULL(9)
 virHostCPUParseNode(const char *node,
                     virArch arch,
-                    virBitmapPtr present_cpus_map,
-                    virBitmapPtr online_cpus_map,
+                    virBitmap *present_cpus_map,
+                    virBitmap *online_cpus_map,
                     int threads_per_subcore,
                     int *sockets,
                     int *cores,
@@ -290,11 +306,11 @@ virHostCPUParseNode(const char *node,
 {
     int ret = -1;
     int processors = 0;
-    DIR *cpudir = NULL;
+    g_autoptr(DIR) cpudir = NULL;
     struct dirent *cpudirent = NULL;
-    virBitmapPtr node_cpus_map = NULL;
-    virBitmapPtr sockets_map = NULL;
-    virBitmapPtr *cores_maps = NULL;
+    virBitmap *node_cpus_map = NULL;
+    virBitmap *sockets_map = NULL;
+    virBitmap **cores_maps = NULL;
     int npresent_cpus = virBitmapSize(present_cpus_map);
     unsigned int sock_max = 0;
     unsigned int sock;
@@ -312,12 +328,10 @@ virHostCPUParseNode(const char *node,
         goto cleanup;
 
     /* Keep track of the CPUs that belong to the current node */
-    if (!(node_cpus_map = virBitmapNew(npresent_cpus)))
-        goto cleanup;
+    node_cpus_map = virBitmapNew(npresent_cpus);
 
     /* enumerate sockets in the node */
-    if (!(sockets_map = virBitmapNewEmpty()))
-        goto cleanup;
+    sockets_map = virBitmapNew(0);
 
     while ((direrr = virDirRead(cpudir, &cpudirent, node)) > 0) {
         if (sscanf(cpudirent->d_name, "cpu%u", &cpu) != 1)
@@ -349,12 +363,10 @@ virHostCPUParseNode(const char *node,
     sock_max++;
 
     /* allocate cores maps for each socket */
-    if (VIR_ALLOC_N(cores_maps, sock_max) < 0)
-        goto cleanup;
+    cores_maps = g_new0(virBitmap *, sock_max);
 
     for (i = 0; i < sock_max; i++)
-        if (!(cores_maps[i] = virBitmapNewEmpty()))
-            goto cleanup;
+        cores_maps[i] = virBitmapNew(0);
 
     /* Iterate over all CPUs in the node, in ascending order */
     for (cpu = 0; cpu < npresent_cpus; cpu++) {
@@ -429,7 +441,6 @@ virHostCPUParseNode(const char *node,
     ret = processors;
 
  cleanup:
-    VIR_DIR_CLOSE(cpudir);
     if (cores_maps)
         for (i = 0; i < sock_max; i++)
             virBitmapFree(cores_maps[i]);
@@ -447,7 +458,7 @@ virHostCPUParseNode(const char *node,
 static bool
 virHostCPUHasValidSubcoreConfiguration(int threads_per_subcore)
 {
-    virBitmapPtr online_cpus = NULL;
+    virBitmap *online_cpus = NULL;
     int cpu = -1;
     bool ret = false;
 
@@ -513,7 +524,7 @@ virHostCPUParseFrequencyString(const char *str,
     str += strlen(prefix);
 
     /* Skip all whitespace */
-    while (c_isspace(*str))
+    while (g_ascii_isspace(*str))
         str++;
     if (*str == '\0')
         goto error;
@@ -525,7 +536,7 @@ virHostCPUParseFrequencyString(const char *str,
     str++;
 
     /* Skip all whitespace */
-    while (c_isspace(*str))
+    while (g_ascii_isspace(*str))
         str++;
     if (*str == '\0')
         goto error;
@@ -534,7 +545,7 @@ virHostCPUParseFrequencyString(const char *str,
      * followed by a fractional part (which gets discarded) or some
      * leading whitespace */
     if (virStrToLong_ui(str, &p, 10, &ui) < 0 ||
-        (*p != '.' && *p != '\0' && !c_isspace(*p))) {
+        (*p != '.' && *p != '\0' && !g_ascii_isspace(*p))) {
         goto error;
     }
 
@@ -595,9 +606,9 @@ virHostCPUGetInfoPopulateLinux(FILE *cpuinfo,
                                unsigned int *cores,
                                unsigned int *threads)
 {
-    virBitmapPtr present_cpus_map = NULL;
-    virBitmapPtr online_cpus_map = NULL;
-    DIR *nodedir = NULL;
+    virBitmap *present_cpus_map = NULL;
+    virBitmap *online_cpus_map = NULL;
+    g_autoptr(DIR) nodedir = NULL;
     struct dirent *nodedirent = NULL;
     int nodecpus, nodecores, nodesockets, nodethreads, offline = 0;
     int threads_per_subcore = 0;
@@ -628,8 +639,7 @@ virHostCPUGetInfoPopulateLinux(FILE *cpuinfo,
     /* OK, we've parsed clock speed out of /proc/cpuinfo. Get the
      * core, node, socket, thread and topology information from /sys
      */
-    if (virAsprintf(&sysfs_nodedir, "%s/node", SYSFS_SYSTEM_PATH) < 0)
-        goto cleanup;
+    sysfs_nodedir = g_strdup_printf("%s/node", SYSFS_SYSTEM_PATH);
 
     if (virDirOpenQuiet(&nodedir, sysfs_nodedir) < 0) {
         /* the host isn't probably running a NUMA architecture */
@@ -646,7 +656,7 @@ virHostCPUGetInfoPopulateLinux(FILE *cpuinfo,
      * subcore will vary accordingly to 8, 4 and 2 respectively.
      * So, On host threads_per_core what is arrived at from sysfs in the
      * current logic is actually the subcores_per_core. Threads per subcore
-     * can only be obtained from the kvm device. For example, on P8 wih 1
+     * can only be obtained from the kvm device. For example, on P8 with 1
      * core having 8 threads, sub_cores_percore=4, the threads 0,2,4 & 6
      * will be online. The sysfs reflects this and in the current logic
      * variable 'threads' will be 4 which is nothing but subcores_per_core.
@@ -672,9 +682,8 @@ virHostCPUGetInfoPopulateLinux(FILE *cpuinfo,
 
         (*nodes)++;
 
-        if (virAsprintf(&sysfs_cpudir, "%s/node/%s", SYSFS_SYSTEM_PATH,
-                        nodedirent->d_name) < 0)
-            goto cleanup;
+        sysfs_cpudir = g_strdup_printf("%s/node/%s", SYSFS_SYSTEM_PATH,
+                                       nodedirent->d_name);
 
         if ((nodecpus = virHostCPUParseNode(sysfs_cpudir, arch,
                                             present_cpus_map,
@@ -707,8 +716,7 @@ virHostCPUGetInfoPopulateLinux(FILE *cpuinfo,
  fallback:
     VIR_FREE(sysfs_cpudir);
 
-    if (virAsprintf(&sysfs_cpudir, "%s/cpu", SYSFS_SYSTEM_PATH) < 0)
-        goto cleanup;
+    sysfs_cpudir = g_strdup_printf("%s/cpu", SYSFS_SYSTEM_PATH);
 
     if ((nodecpus = virHostCPUParseNode(sysfs_cpudir, arch,
                                         present_cpus_map,
@@ -761,7 +769,6 @@ virHostCPUGetInfoPopulateLinux(FILE *cpuinfo,
     ret = 0;
 
  cleanup:
-    VIR_DIR_CLOSE(nodedir);
     virBitmapFree(present_cpus_map);
     virBitmapFree(online_cpus_map);
     VIR_FREE(sysfs_nodedir);
@@ -777,30 +784,28 @@ virHostCPUGetStatsLinux(FILE *procstat,
                         virNodeCPUStatsPtr params,
                         int *nparams)
 {
-    int ret = -1;
     char line[1024];
     unsigned long long usr, ni, sys, idle, iowait;
     unsigned long long irq, softirq, steal, guest, guest_nice;
-    char cpu_header[4 + INT_BUFSIZE_BOUND(cpuNum)];
+    g_autofree char *cpu_header = NULL;
 
     if ((*nparams) == 0) {
         /* Current number of cpu stats supported by linux */
         *nparams = LINUX_NB_CPU_STATS;
-        ret = 0;
-        goto cleanup;
+        return 0;
     }
 
     if ((*nparams) != LINUX_NB_CPU_STATS) {
         virReportInvalidArg(*nparams,
                             _("nparams in %s must be equal to %d"),
                             __FUNCTION__, LINUX_NB_CPU_STATS);
-        goto cleanup;
+        return -1;
     }
 
     if (cpuNum == VIR_NODE_CPU_STATS_ALL_CPUS) {
-        strcpy(cpu_header, "cpu ");
+        cpu_header = g_strdup("cpu ");
     } else {
-        snprintf(cpu_header, sizeof(cpu_header), "cpu%d ", cpuNum);
+        cpu_header = g_strdup_printf("cpu%d ", cpuNum);
     }
 
     while (fgets(line, sizeof(line), procstat) != NULL) {
@@ -817,22 +822,21 @@ virHostCPUGetStatsLinux(FILE *procstat,
 
             if (virHostCPUStatsAssign(&params[0], VIR_NODE_CPU_STATS_KERNEL,
                                       (sys + irq + softirq) * TICK_TO_NSEC) < 0)
-                goto cleanup;
+                return -1;
 
             if (virHostCPUStatsAssign(&params[1], VIR_NODE_CPU_STATS_USER,
                                       (usr + ni) * TICK_TO_NSEC) < 0)
-                goto cleanup;
+                return -1;
 
             if (virHostCPUStatsAssign(&params[2], VIR_NODE_CPU_STATS_IDLE,
                                       idle * TICK_TO_NSEC) < 0)
-                goto cleanup;
+                return -1;
 
             if (virHostCPUStatsAssign(&params[3], VIR_NODE_CPU_STATS_IOWAIT,
                                       iowait * TICK_TO_NSEC) < 0)
-                goto cleanup;
+                return -1;
 
-            ret = 0;
-            goto cleanup;
+            return 0;
         }
     }
 
@@ -840,38 +844,21 @@ virHostCPUGetStatsLinux(FILE *procstat,
                         _("Invalid cpuNum in %s"),
                         __FUNCTION__);
 
- cleanup:
-    return ret;
+    return -1;
 }
 
 
-/* Determine the number of CPUs (maximum CPU id + 1) from a file containing
- * a list of CPU ids, like the Linux sysfs cpu/present file */
+/* Determine the number of CPUs (maximum CPU id + 1) present in
+ * the host. */
 static int
-virHostCPUParseCountLinux(void)
+virHostCPUCountLinux(void)
 {
-    char *str = NULL;
-    char *tmp;
-    int ret = -1;
+    g_autoptr(virBitmap) present = virHostCPUGetPresentBitmap();
 
-    if (virFileReadValueString(&str, "%s/cpu/present", SYSFS_SYSTEM_PATH) < 0)
+    if (!present)
         return -1;
 
-    tmp = str;
-    do {
-        if (virStrToLong_i(tmp, &tmp, 10, &ret) < 0 ||
-            !strchr(",-", *tmp)) {
-            virReportError(VIR_ERR_NO_SUPPORT,
-                           _("failed to parse %s"), str);
-            ret = -1;
-            goto cleanup;
-        }
-    } while (*tmp++ && *tmp);
-    ret++;
-
- cleanup:
-    VIR_FREE(str);
-    return ret;
+    return virBitmapSize(present);
 }
 #endif
 
@@ -911,13 +898,13 @@ virHostCPUStatsAssign(virNodeCPUStatsPtr param,
 
 
 int
-virHostCPUGetInfo(virArch hostarch ATTRIBUTE_UNUSED,
-                  unsigned int *cpus ATTRIBUTE_UNUSED,
-                  unsigned int *mhz ATTRIBUTE_UNUSED,
-                  unsigned int *nodes ATTRIBUTE_UNUSED,
-                  unsigned int *sockets ATTRIBUTE_UNUSED,
-                  unsigned int *cores ATTRIBUTE_UNUSED,
-                  unsigned int *threads ATTRIBUTE_UNUSED)
+virHostCPUGetInfo(virArch hostarch G_GNUC_UNUSED,
+                  unsigned int *cpus G_GNUC_UNUSED,
+                  unsigned int *mhz G_GNUC_UNUSED,
+                  unsigned int *nodes G_GNUC_UNUSED,
+                  unsigned int *sockets G_GNUC_UNUSED,
+                  unsigned int *cores G_GNUC_UNUSED,
+                  unsigned int *threads G_GNUC_UNUSED)
 {
 #ifdef __linux__
     int ret = -1;
@@ -985,9 +972,9 @@ virHostCPUGetInfo(virArch hostarch ATTRIBUTE_UNUSED,
 
 
 int
-virHostCPUGetStats(int cpuNum ATTRIBUTE_UNUSED,
-                   virNodeCPUStatsPtr params ATTRIBUTE_UNUSED,
-                   int *nparams ATTRIBUTE_UNUSED,
+virHostCPUGetStats(int cpuNum G_GNUC_UNUSED,
+                   virNodeCPUStatsPtr params G_GNUC_UNUSED,
+                   int *nparams G_GNUC_UNUSED,
                    unsigned int flags)
 {
     virCheckFlags(0, -1);
@@ -1020,7 +1007,7 @@ int
 virHostCPUGetCount(void)
 {
 #if defined(__linux__)
-    return virHostCPUParseCountLinux();
+    return virHostCPUCountLinux();
 #elif defined(__FreeBSD__) || defined(__APPLE__)
     return virHostCPUGetCountAppleFreeBSD();
 #else
@@ -1040,11 +1027,11 @@ virHostCPUHasBitmap(void)
 #endif
 }
 
-virBitmapPtr
+virBitmap *
 virHostCPUGetPresentBitmap(void)
 {
 #ifdef __linux__
-    virBitmapPtr ret = NULL;
+    virBitmap *ret = NULL;
 
     virFileReadValueBitmap(&ret, "%s/cpu/present", SYSFS_SYSTEM_PATH);
 
@@ -1056,11 +1043,11 @@ virHostCPUGetPresentBitmap(void)
 #endif
 }
 
-virBitmapPtr
+virBitmap *
 virHostCPUGetOnlineBitmap(void)
 {
 #ifdef __linux__
-    virBitmapPtr ret = NULL;
+    virBitmap *ret = NULL;
 
     virFileReadValueBitmap(&ret, "%s/cpu/online", SYSFS_SYSTEM_PATH);
 
@@ -1078,7 +1065,7 @@ virHostCPUGetMap(unsigned char **cpumap,
                  unsigned int *online,
                  unsigned int flags)
 {
-    virBitmapPtr cpus = NULL;
+    g_autoptr(virBitmap) cpus = NULL;
     int ret = -1;
     int dummy;
 
@@ -1100,12 +1087,39 @@ virHostCPUGetMap(unsigned char **cpumap,
  cleanup:
     if (ret < 0 && cpumap)
         VIR_FREE(*cpumap);
-    virBitmapFree(cpus);
     return ret;
 }
 
 
-#if HAVE_LINUX_KVM_H && defined(KVM_CAP_PPC_SMT)
+/* virHostCPUGetAvailableCPUsBitmap():
+ *
+ * Returns a virBitmap object with all available host CPUs.
+ *
+ * This is a glorified wrapper of virHostCPUGetOnlineBitmap()
+ * that, instead of returning NULL when 'ifndef __linux__' and
+ * the caller having to handle it outside the function, returns
+ * a virBitmap with all the possible CPUs in the host, up to
+ * virHostCPUGetCount(). */
+virBitmap *
+virHostCPUGetAvailableCPUsBitmap(void)
+{
+    g_autoptr(virBitmap) bitmap = NULL;
+
+    if (!(bitmap = virHostCPUGetOnlineBitmap())) {
+        int hostcpus;
+
+        if ((hostcpus = virHostCPUGetCount()) < 0)
+            return NULL;
+
+        bitmap = virBitmapNew(hostcpus);
+        virBitmapSetAll(bitmap);
+    }
+
+    return g_steal_pointer(&bitmap);
+}
+
+
+#if WITH_LINUX_KVM_H && defined(KVM_CAP_PPC_SMT)
 
 /* Get the number of threads per subcore.
  *
@@ -1128,7 +1142,7 @@ virHostCPUGetThreadsPerSubcore(virArch arch)
          * In either case, falling back to the subcore-unaware thread
          * counting logic is the right thing to do */
         if (!virFileExists(KVM_DEVICE))
-            goto out;
+            return 0;
 
         if ((kvmfd = open(KVM_DEVICE, O_RDONLY)) < 0) {
             /* This can happen when running as a regular user if
@@ -1138,8 +1152,7 @@ virHostCPUGetThreadsPerSubcore(virArch arch)
             virReportSystemError(errno,
                                  _("Failed to open '%s'"),
                                  KVM_DEVICE);
-            threads_per_subcore = -1;
-            goto out;
+            return -1;
         }
 
         /* For Phyp and KVM based guests the ioctl for KVM_CAP_PPC_SMT
@@ -1152,7 +1165,6 @@ virHostCPUGetThreadsPerSubcore(virArch arch)
         VIR_FORCE_CLOSE(kvmfd);
     }
 
- out:
     return threads_per_subcore;
 }
 
@@ -1161,14 +1173,14 @@ virHostCPUGetThreadsPerSubcore(virArch arch)
 /* Fallback for nodeGetThreadsPerSubcore() used when KVM headers
  * are not available on the system */
 int
-virHostCPUGetThreadsPerSubcore(virArch arch ATTRIBUTE_UNUSED)
+virHostCPUGetThreadsPerSubcore(virArch arch G_GNUC_UNUSED)
 {
     return 0;
 }
 
-#endif /* HAVE_LINUX_KVM_H && defined(KVM_CAP_PPC_SMT) */
+#endif /* WITH_LINUX_KVM_H && defined(KVM_CAP_PPC_SMT) */
 
-#if HAVE_LINUX_KVM_H
+#if WITH_LINUX_KVM_H
 int
 virHostCPUGetKVMMaxVCPUs(void)
 {
@@ -1207,7 +1219,7 @@ virHostCPUGetKVMMaxVCPUs(void)
                          _("KVM is not supported on this platform"));
     return -1;
 }
-#endif /* HAVE_LINUX_KVM_H */
+#endif /* WITH_LINUX_KVM_H */
 
 
 #ifdef __linux__
@@ -1217,39 +1229,39 @@ virHostCPUGetKVMMaxVCPUs(void)
  * some reason.
  */
 unsigned int
-virHostCPUGetMicrocodeVersion(void)
+virHostCPUGetMicrocodeVersion(virArch hostArch)
 {
-    char *outbuf = NULL;
+    g_autofree char *outbuf = NULL;
     char *cur;
     unsigned int version = 0;
 
+    if (!ARCH_IS_X86(hostArch))
+        return 0;
+
     if (virFileReadHeaderQuiet(CPUINFO_PATH, 4096, &outbuf) < 0) {
-        char ebuf[1024];
         VIR_DEBUG("Failed to read microcode version from %s: %s",
-                  CPUINFO_PATH, virStrerror(errno, ebuf, sizeof(ebuf)));
+                  CPUINFO_PATH, g_strerror(errno));
         return 0;
     }
 
     /* Account for format 'microcode    : XXXX'*/
     if (!(cur = strstr(outbuf, "microcode")) ||
         !(cur = strchr(cur, ':')))
-        goto cleanup;
+        return 0;
     cur++;
 
     /* Linux places the microcode revision in a 32-bit integer, so
      * ui is fine for us too.  */
     if (virStrToLong_ui(cur, &cur, 0, &version) < 0)
-        goto cleanup;
+        return 0;
 
- cleanup:
-    VIR_FREE(outbuf);
     return version;
 }
 
 #else
 
 unsigned int
-virHostCPUGetMicrocodeVersion(void)
+virHostCPUGetMicrocodeVersion(virArch hostArch G_GNUC_UNUSED)
 {
     return 0;
 }
@@ -1257,7 +1269,7 @@ virHostCPUGetMicrocodeVersion(void)
 #endif /* __linux__ */
 
 
-#if HAVE_LINUX_KVM_H && defined(KVM_GET_MSRS) && \
+#if WITH_LINUX_KVM_H && defined(KVM_GET_MSRS) && \
     (defined(__i386__) || defined(__x86_64__)) && \
     (defined(__linux__) || defined(__FreeBSD__))
 static int
@@ -1297,13 +1309,12 @@ virHostCPUGetMSR(unsigned long index,
                  uint64_t *msr)
 {
     VIR_AUTOCLOSE fd = -1;
-    char ebuf[1024];
 
     *msr = 0;
 
     if ((fd = open(MSR_DEVICE, O_RDONLY)) < 0) {
         VIR_DEBUG("Unable to open %s: %s",
-                  MSR_DEVICE, virStrerror(errno, ebuf, sizeof(ebuf)));
+                  MSR_DEVICE, g_strerror(errno));
     } else {
         int rc = pread(fd, msr, sizeof(*msr), index);
 
@@ -1316,7 +1327,7 @@ virHostCPUGetMSR(unsigned long index,
         }
 
         VIR_DEBUG("Cannot read MSR 0x%lx from %s: %s",
-                  index, MSR_DEVICE, virStrerror(errno, ebuf, sizeof(ebuf)));
+                  index, MSR_DEVICE, g_strerror(errno));
     }
 
     VIR_DEBUG("Falling back to KVM ioctl");
@@ -1324,17 +1335,203 @@ virHostCPUGetMSR(unsigned long index,
     return virHostCPUGetMSRFromKVM(index, msr);
 }
 
+
+# define VMX_PROCBASED_CTLS2_MSR 0x48b
+# define VMX_USE_TSC_SCALING (1 << 25)
+
+/*
+ * This function should only be called when the host CPU supports invariant TSC
+ * (invtsc CPUID feature).
+ *
+ * Returns pointer to the TSC info structure on success,
+ *         NULL when TSC cannot be probed otherwise.
+ */
+virHostCPUTscInfo *
+virHostCPUGetTscInfo(void)
+{
+    virHostCPUTscInfo *info;
+    VIR_AUTOCLOSE kvmFd = -1;
+    VIR_AUTOCLOSE vmFd = -1;
+    VIR_AUTOCLOSE vcpuFd = -1;
+    uint64_t msr = 0;
+    int rc;
+
+    if ((kvmFd = open(KVM_DEVICE, O_RDONLY)) < 0) {
+        virReportSystemError(errno, _("Unable to open %s"), KVM_DEVICE);
+        return NULL;
+    }
+
+    if ((vmFd = ioctl(kvmFd, KVM_CREATE_VM, 0)) < 0) {
+        virReportSystemError(errno, "%s",
+                             _("Unable to create KVM VM for TSC probing"));
+        return NULL;
+    }
+
+    if ((vcpuFd = ioctl(vmFd, KVM_CREATE_VCPU, 0)) < 0) {
+        virReportSystemError(errno, "%s",
+                             _("Unable to create KVM vCPU for TSC probing"));
+        return NULL;
+    }
+
+    if ((rc = ioctl(vcpuFd, KVM_GET_TSC_KHZ)) < 0) {
+        virReportSystemError(errno, "%s",
+                             _("Unable to probe TSC frequency"));
+        return NULL;
+    }
+
+    info = g_new0(virHostCPUTscInfo, 1);
+
+    info->frequency = rc * 1000ULL;
+
+    if (virHostCPUGetMSR(VMX_PROCBASED_CTLS2_MSR, &msr) == 0) {
+        /* High 32 bits of the MSR value indicate whether specific control
+         * can be set to 1. */
+        msr >>= 32;
+
+        info->scaling = virTristateBoolFromBool(!!(msr & VMX_USE_TSC_SCALING));
+    }
+
+    VIR_DEBUG("Detected TSC frequency %llu Hz, scaling %s",
+              info->frequency, virTristateBoolTypeToString(info->scaling));
+
+    return info;
+}
+
 #else
 
 int
-virHostCPUGetMSR(unsigned long index ATTRIBUTE_UNUSED,
-                 uint64_t *msr ATTRIBUTE_UNUSED)
+virHostCPUGetMSR(unsigned long index G_GNUC_UNUSED,
+                 uint64_t *msr G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Reading MSRs is not supported on this platform"));
     return -1;
 }
 
-#endif /* HAVE_LINUX_KVM_H && defined(KVM_GET_MSRS) && \
+virHostCPUTscInfo *
+virHostCPUGetTscInfo(void)
+{
+    virReportSystemError(ENOSYS, "%s",
+                         _("Probing TSC is not supported on this platform"));
+    return NULL;
+}
+
+#endif /* WITH_LINUX_KVM_H && defined(KVM_GET_MSRS) && \
           (defined(__i386__) || defined(__x86_64__)) && \
           (defined(__linux__) || defined(__FreeBSD__)) */
+
+int
+virHostCPUReadSignature(virArch arch,
+                        FILE *cpuinfo,
+                        char **signature)
+{
+    size_t lineLen = 1024;
+    g_autofree char *line = g_new0(char, lineLen);
+    g_autofree char *vendor = NULL;
+    g_autofree char *name = NULL;
+    g_autofree char *family = NULL;
+    g_autofree char *model = NULL;
+    g_autofree char *stepping = NULL;
+    g_autofree char *revision = NULL;
+    g_autofree char *proc = NULL;
+    g_autofree char *facilities = NULL;
+
+    if (!ARCH_IS_X86(arch) && !ARCH_IS_PPC64(arch) && !ARCH_IS_S390(arch))
+        return 0;
+
+    while (fgets(line, lineLen, cpuinfo)) {
+        g_auto(GStrv) parts = g_strsplit(line, ": ", 2);
+
+        if (g_strv_length(parts) != 2)
+            continue;
+
+        g_strstrip(parts[0]);
+        g_strstrip(parts[1]);
+
+        if (ARCH_IS_X86(arch)) {
+            if (STREQ(parts[0], "vendor_id")) {
+                if (!vendor)
+                    vendor = g_steal_pointer(&parts[1]);
+            } else if (STREQ(parts[0], "model name")) {
+                if (!name)
+                    name = g_steal_pointer(&parts[1]);
+            } else if (STREQ(parts[0], "cpu family")) {
+                if (!family)
+                    family = g_steal_pointer(&parts[1]);
+            } else if (STREQ(parts[0], "model")) {
+                if (!model)
+                    model = g_steal_pointer(&parts[1]);
+            } else if (STREQ(parts[0], "stepping")) {
+                if (!stepping)
+                    stepping = g_steal_pointer(&parts[1]);
+            }
+
+            if (vendor && name && family && model && stepping) {
+                *signature = g_strdup_printf("%s, %s, family: %s, model: %s, stepping: %s",
+                                             vendor, name, family, model, stepping);
+                return 0;
+            }
+        } else if (ARCH_IS_PPC64(arch)) {
+            if (STREQ(parts[0], "cpu")) {
+                if (!name)
+                    name = g_steal_pointer(&parts[1]);
+            } else if (STREQ(parts[0], "revision")) {
+                if (!revision)
+                    revision = g_steal_pointer(&parts[1]);
+            }
+
+            if (name && revision) {
+                *signature = g_strdup_printf("%s, rev %s", name, revision);
+                return 0;
+            }
+        } else if (ARCH_IS_S390(arch)) {
+            if (STREQ(parts[0], "vendor_id")) {
+                if (!vendor)
+                    vendor = g_steal_pointer(&parts[1]);
+            } else if (STREQ(parts[0], "processor 0")) {
+                if (!proc)
+                    proc = g_steal_pointer(&parts[1]);
+            } else if (STREQ(parts[0], "facilities")) {
+                if (!facilities)
+                    facilities = g_steal_pointer(&parts[1]);
+            }
+
+            if (vendor && proc && facilities) {
+                *signature = g_strdup_printf("%s, %s, facilities: %s",
+                                             vendor, proc, facilities);
+                return 0;
+            }
+        }
+    }
+
+    return 0;
+}
+
+#ifdef __linux__
+
+int
+virHostCPUGetSignature(char **signature)
+{
+    g_autoptr(FILE) cpuinfo = NULL;
+
+    *signature = NULL;
+
+    if (!(cpuinfo = fopen(CPUINFO_PATH, "r"))) {
+        virReportSystemError(errno, _("Failed to open cpuinfo file '%s'"),
+                             CPUINFO_PATH);
+        return -1;
+    }
+
+    return virHostCPUReadSignature(virArchFromHost(), cpuinfo, signature);
+}
+
+#else
+
+int
+virHostCPUGetSignature(char **signature)
+{
+    *signature = NULL;
+    return 0;
+}
+
+#endif /* __linux__ */

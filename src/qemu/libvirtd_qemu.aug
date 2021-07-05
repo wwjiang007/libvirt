@@ -58,6 +58,19 @@ module Libvirtd_qemu =
    let migrate_entry = str_entry "migrate_tls_x509_cert_dir"
                  | bool_entry "migrate_tls_x509_verify"
                  | str_entry "migrate_tls_x509_secret_uuid"
+                 | bool_entry "migrate_tls_force"
+
+   let backup_entry = str_entry "backup_tls_x509_cert_dir"
+                 | bool_entry "backup_tls_x509_verify"
+                 | str_entry "backup_tls_x509_secret_uuid"
+
+   let vxhs_entry = bool_entry "vxhs_tls"
+                 | str_entry "vxhs_tls_x509_cert_dir"
+                 | str_entry "vxhs_tls_x509_secret_uuid"
+
+   let nbd_entry = bool_entry "nbd_tls"
+                 | str_entry "nbd_tls_x509_cert_dir"
+                 | str_entry "nbd_tls_x509_secret_uuid"
 
    let nogfx_entry = bool_entry "nographics_allow_host_audio"
 
@@ -72,6 +85,7 @@ module Libvirtd_qemu =
                  | str_entry "user"
                  | str_entry "group"
                  | bool_entry "dynamic_ownership"
+                 | bool_entry "remember_owner"
                  | str_array_entry "cgroup_controllers"
                  | str_array_entry "cgroup_device_acl"
                  | int_entry "seccomp_sandbox"
@@ -85,15 +99,17 @@ module Libvirtd_qemu =
                  | bool_entry "auto_start_bypass_cache"
 
    let process_entry = str_entry "hugetlbfs_mount"
-                 | bool_entry "clear_emulator_capabilities"
                  | str_entry "bridge_helper"
                  | str_entry "pr_helper"
+                 | str_entry "slirp_helper"
+                 | str_entry "dbus_daemon"
                  | bool_entry "set_process_name"
                  | int_entry "max_processes"
                  | int_entry "max_files"
                  | limits_entry "max_core"
                  | bool_entry "dump_guest_core"
                  | str_entry "stdio_handler"
+                 | int_entry "max_threads_per_process"
 
    let device_entry = bool_entry "mac_filter"
                  | bool_entry "relaxed_acs_check"
@@ -113,18 +129,22 @@ module Libvirtd_qemu =
 
    let nvram_entry = str_array_entry "nvram"
 
-   let gluster_debug_level_entry = int_entry "gluster_debug_level"
+   let debug_level_entry = int_entry "gluster_debug_level"
+                 | bool_entry "virtiofsd_debug"
+                 | str_entry "deprecation_behavior"
 
    let memory_entry = str_entry "memory_backing_dir"
 
-   let vxhs_entry = bool_entry "vxhs_tls"
-                 | str_entry "vxhs_tls_x509_cert_dir"
-
-   let nbd_entry = bool_entry "nbd_tls"
-                | str_entry "nbd_tls_x509_cert_dir"
-
    let swtpm_entry = str_entry "swtpm_user"
                 | str_entry "swtpm_group"
+
+   (* Entries that used to exist in the config which are now
+    * deleted. We keep on parsing them so we don't break
+    * ability to parse old configs after upgrade
+    *)
+   let obsolete_entry = bool_entry "clear_emulator_capabilities"
+
+   let capability_filters_entry = str_array_entry "capability_filters"
 
    (* Each entry in the config is one of the following ... *)
    let entry = default_tls_entry
@@ -132,6 +152,7 @@ module Libvirtd_qemu =
              | spice_entry
              | chardev_entry
              | migrate_entry
+             | backup_entry
              | nogfx_entry
              | remote_display_entry
              | security_entry
@@ -142,11 +163,13 @@ module Libvirtd_qemu =
              | network_entry
              | log_entry
              | nvram_entry
-             | gluster_debug_level_entry
+             | debug_level_entry
              | memory_entry
              | vxhs_entry
              | nbd_entry
              | swtpm_entry
+             | capability_filters_entry
+             | obsolete_entry
 
    let comment = [ label "#comment" . del /#[ \t]*/ "# " .  store /([^ \t\n][^\n]*)?/ . del /\n/ "\n" ]
    let empty = [ label "#empty" . eol ]

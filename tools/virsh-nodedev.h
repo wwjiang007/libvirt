@@ -18,19 +18,16 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRSH_NODEDEV_H
-# define LIBVIRT_VIRSH_NODEDEV_H
+#pragma once
 
-# include "virsh.h"
+#include "virsh.h"
 
-struct virshNodedevEventCallback {
+struct virshNodeDeviceEventCallback {
     const char *name;
     virConnectNodeDeviceEventGenericCallback cb;
 };
-typedef struct virshNodedevEventCallback virshNodedevEventCallback;
+typedef struct virshNodeDeviceEventCallback virshNodeDeviceEventCallback;
 
-extern virshNodedevEventCallback virshNodedevEventCallbacks[];
+extern virshNodeDeviceEventCallback virshNodeDeviceEventCallbacks[];
 
 extern const vshCmdDef nodedevCmds[];
-
-#endif /* LIBVIRT_VIRSH_NODEDEV_H */

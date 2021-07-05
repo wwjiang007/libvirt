@@ -36,11 +36,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "virutil.h"
 #include "virfile.h"
-#include "c-ctype.h"
 #include "virstring.h"
 #include "virgettext.h"
+#include "virdevmapper.h"
+#include "virerror.h"
 
 /* we don't need to include the full internal.h just for this */
 #define STREQ(a, b) (strcmp(a, b) == 0)
@@ -63,11 +63,12 @@ int main(int argc, char **argv)
     PedPartition *part;
     int cmd = DISK_LAYOUT;
     const char *path;
-    char *canonical_path;
+    g_autofree char *canonical_path = NULL;
     const char *partsep;
     bool devmap_partsep = false;
 
-    if (virGettextInitialize() < 0)
+    if (virGettextInitialize() < 0 ||
+        virErrorInitialize() < 0)
         exit(EXIT_FAILURE);
 
     if (argc == 3 && STREQ(argv[2], "-g")) {
@@ -87,18 +88,17 @@ int main(int argc, char **argv)
          * path, then append the "p" partition separator. Otherwise, if
          * the path ends with a letter already, then no need for a separator.
          */
-        if (c_isdigit(path[strlen(path)-1]) || devmap_partsep)
+        if (g_ascii_isdigit(path[strlen(path)-1]) || devmap_partsep)
             partsep = "p";
         else
             partsep = "";
-        if (VIR_STRDUP_QUIET(canonical_path, path) < 0)
-            return 2;
+        canonical_path = g_strdup(path);
     } else {
         if (virFileResolveLink(path, &canonical_path) != 0)
             return 2;
 
         partsep = *canonical_path &&
-            c_isdigit(canonical_path[strlen(canonical_path)-1]) ? "p" : "";
+            g_ascii_isdigit(canonical_path[strlen(canonical_path)-1]) ? "p" : "";
     }
 
     if ((dev = ped_device_get(path)) == NULL) {
@@ -131,7 +131,6 @@ int main(int argc, char **argv)
                 content = "free";
             else if (part->type & PED_PARTITION_METADATA)
                 content = "metadata";
-            /* coverity[dead_error_condition] - not true if defined */
             else if (part->type & PED_PARTITION_PROTECTED)
                 content = "protected";
             else
@@ -145,7 +144,6 @@ int main(int argc, char **argv)
                 content = "free";
             else if (part->type & PED_PARTITION_METADATA)
                 content = "metadata";
-            /* coverity[dead_error_condition] - not true if defined */
             else if (part->type & PED_PARTITION_PROTECTED)
                 content = "protected";
             else

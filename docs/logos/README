@@ -4,7 +4,7 @@
 The master SVG files were created in InkScape, using the Overpass font from Red
 Hat:
 
-   http://overpassfont.org/
+   https://overpassfont.org/
 
 
 Logo formats
@@ -38,7 +38,7 @@ format:
 
  - logo-square-powered.svg
 
-   A variant of the square logo for use by 3rd party applications, to advertize
+   A variant of the square logo for use by 3rd party applications, to advertise
    their use of libvirt.
 
    Bitmap sizes: 64, 128, 192, 256 px square
@@ -60,6 +60,18 @@ format:
    suitable for placement over a light background.
 
    Bitmap sizes: 257x92, 800x286 px
+
+
+ - logo-sticker-square.svg
+
+   A logo formatted into a square shape with outline, suitable for printing
+   as a sticker. See https://github.com/terinjokes/StickerConstructorSpec
+
+
+ - logo-sticker-hexagon.svg
+
+   A logo formatted into a hexagon shape with outline, suitable for printing
+   as a sticker. See https://github.com/terinjokes/StickerConstructorSpec
 
 
 PNG file creation

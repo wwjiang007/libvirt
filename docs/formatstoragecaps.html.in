@@ -13,12 +13,6 @@
     supported, and if relevant the source format types, the required
     source elements, and the target volume format types. </p>
 
-    <p>The Storage Pool Capabilities XML provides more information than the
-      <a href="/html/libvirt-libvirt-host.html#virConnectGetCapabilities">
-        <code>virConnectGetCapabilities</code>
-      </a>
-    which only provides an enumerated list of supported pool types.</p>
-
     <h2><a id="elements">Element and attribute overview</a></h2>
 
     <p>A query interface was added to the virConnect API's to retrieve the
@@ -26,7 +20,7 @@
     (<span class="since">Since 5.2.0</span>):</p>
 
 <pre>
-<a href="/html/libvirt-libvirt-domain.html#virConnectGetStoragePoolCapabilities">virConnectGetStoragePoolCapabilities</a>
+<a href="/html/libvirt-libvirt-storage.html#virConnectGetStoragePoolCapabilities">virConnectGetStoragePoolCapabilities</a>
 </pre>
 
     <p>The root element that emulator capability XML document starts with is
@@ -70,7 +64,7 @@
 &lt;/storagepoolCapabilities&gt;
 </pre>
 
-    <p>The following section decribes subelements of the
+    <p>The following section describes subelements of the
     <code>poolOptions</code> and <code>volOptions</code> subelements </p>:
 
     <dl>

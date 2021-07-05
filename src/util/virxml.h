@@ -18,74 +18,163 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRXML_H
-# define LIBVIRT_VIRXML_H
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
-# include <libxml/parser.h>
-# include <libxml/tree.h>
-# include <libxml/xpath.h>
-# include <libxml/relaxng.h>
+#include <libxml/parser.h>
+#include <libxml/tree.h>
+#include <libxml/xpath.h>
+#include <libxml/relaxng.h>
 
-# include "virbuffer.h"
-# include "virautoclean.h"
+#include "virbuffer.h"
+#include "virenum.h"
 
-int              virXPathBoolean(const char *xpath,
-                                 xmlXPathContextPtr ctxt);
-char *            virXPathString(const char *xpath,
-                                 xmlXPathContextPtr ctxt);
-char *       virXPathStringLimit(const char *xpath,
-                                 size_t maxlen,
-                                 xmlXPathContextPtr ctxt);
-int               virXPathNumber(const char *xpath,
-                                 xmlXPathContextPtr ctxt,
-                                 double *value);
-int                  virXPathInt(const char *xpath,
-                                 xmlXPathContextPtr ctxt,
-                                 int *value);
-int                 virXPathUInt(const char *xpath,
-                                 xmlXPathContextPtr ctxt,
-                                 unsigned int *value);
-int                 virXPathLong(const char *xpath,
-                                 xmlXPathContextPtr ctxt,
-                                 long *value);
-int                virXPathULong(const char *xpath,
-                                 xmlXPathContextPtr ctxt,
-                                 unsigned long *value);
-int            virXPathULongLong(const char *xpath,
-                                 xmlXPathContextPtr ctxt,
-                                 unsigned long long *value);
-int             virXPathLongLong(const char *xpath,
-                                 xmlXPathContextPtr ctxt,
-                                 long long *value);
-int              virXPathLongHex(const char *xpath,
-                                 xmlXPathContextPtr ctxt,
-                                 long *value);
-int             virXPathULongHex(const char *xpath,
-                                 xmlXPathContextPtr ctxt,
-                                 unsigned long *value);
-xmlNodePtr          virXPathNode(const char *xpath,
-                                 xmlXPathContextPtr ctxt);
-int              virXPathNodeSet(const char *xpath,
-                                 xmlXPathContextPtr ctxt,
-                                 xmlNodePtr **list);
-char *          virXMLPropString(xmlNodePtr node,
-                                 const char *name);
-char *     virXMLPropStringLimit(xmlNodePtr node,
-                                 const char *name,
-                                 size_t maxlen);
-char *   virXMLNodeContentString(xmlNodePtr node);
-long     virXMLChildElementCount(xmlNodePtr node);
+xmlXPathContextPtr virXMLXPathContextNew(xmlDocPtr xml)
+    G_GNUC_WARN_UNUSED_RESULT;
+
+
+typedef enum {
+    VIR_XML_PROP_NONE = 0,
+    VIR_XML_PROP_REQUIRED = 1 << 0, /* Attribute may not be absent */
+    VIR_XML_PROP_NONZERO = 1 << 1, /* Attribute may not be zero */
+} virXMLPropFlags;
+
+
+int
+virXPathBoolean(const char *xpath,
+                xmlXPathContextPtr ctxt);
+char *
+virXPathString(const char *xpath,
+               xmlXPathContextPtr ctxt);
+char *
+virXPathStringLimit(const char *xpath,
+                    size_t maxlen,
+                    xmlXPathContextPtr ctxt);
+int
+virXPathNumber(const char *xpath,
+               xmlXPathContextPtr ctxt,
+               double *value);
+int
+virXPathInt(const char *xpath,
+            xmlXPathContextPtr ctxt,
+            int *value);
+int
+virXPathUInt(const char *xpath,
+             xmlXPathContextPtr ctxt,
+             unsigned int *value);
+int
+virXPathLong(const char *xpath,
+             xmlXPathContextPtr ctxt,
+             long *value);
+int
+virXPathULong(const char *xpath,
+              xmlXPathContextPtr ctxt,
+              unsigned long *value);
+int
+virXPathULongLong(const char *xpath,
+                  xmlXPathContextPtr ctxt,
+                  unsigned long long *value);
+int
+virXPathLongLong(const char *xpath,
+                 xmlXPathContextPtr ctxt,
+                 long long *value);
+int
+virXPathLongHex(const char *xpath,
+                xmlXPathContextPtr ctxt,
+                long *value);
+int
+virXPathULongHex(const char *xpath,
+                 xmlXPathContextPtr ctxt,
+                 unsigned long *value);
+xmlNodePtr
+virXPathNode(const char *xpath,
+             xmlXPathContextPtr ctxt);
+int
+virXPathNodeSet(const char *xpath,
+                xmlXPathContextPtr ctxt,
+                xmlNodePtr **list);
+char *
+virXMLPropString(xmlNodePtr node,
+                 const char *name);
+char *
+virXMLPropStringLimit(xmlNodePtr node,
+                      const char *name,
+                      size_t maxlen);
+char *
+virXMLNodeContentString(xmlNodePtr node);
+
+int
+virXMLPropTristateBool(xmlNodePtr node,
+                       const char *name,
+                       virXMLPropFlags flags,
+                       virTristateBool *result)
+    ATTRIBUTE_NONNULL(0) ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
+
+int
+virXMLPropTristateSwitch(xmlNodePtr node,
+                         const char *name,
+                         virXMLPropFlags flags,
+                         virTristateSwitch *result)
+    ATTRIBUTE_NONNULL(0) ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
+
+int
+virXMLPropInt(xmlNodePtr node,
+              const char *name,
+              int base,
+              virXMLPropFlags flags,
+              int *result,
+              int defaultResult)
+    ATTRIBUTE_NONNULL(0) ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(4);
+
+int
+virXMLPropUInt(xmlNodePtr node,
+               const char* name,
+               int base,
+               virXMLPropFlags flags,
+               unsigned int *result)
+    ATTRIBUTE_NONNULL(0) ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(4);
+
+int
+virXMLPropULongLong(xmlNodePtr node,
+                    const char* name,
+                    int base,
+                    virXMLPropFlags flags,
+                    unsigned long long *result)
+    ATTRIBUTE_NONNULL(0) ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(4);
+
+int
+virXMLPropEnum(xmlNodePtr node,
+               const char* name,
+               int (*strToInt)(const char*),
+               virXMLPropFlags flags,
+               unsigned int *result)
+    ATTRIBUTE_NONNULL(0) ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2)
+    ATTRIBUTE_NONNULL(4);
+
+int
+virXMLPropEnumDefault(xmlNodePtr node,
+                      const char* name,
+                      int (*strToInt)(const char*),
+                      virXMLPropFlags flags,
+                      unsigned int *result,
+                      unsigned int defaultResult)
+    ATTRIBUTE_NONNULL(0) ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2)
+    ATTRIBUTE_NONNULL(4);
+
 
 /* Internal function; prefer the macros below.  */
-xmlDocPtr      virXMLParseHelper(int domcode,
-                                 const char *filename,
-                                 const char *xmlStr,
-                                 const char *url,
-                                 xmlXPathContextPtr *pctxt);
+xmlDocPtr
+virXMLParseHelper(int domcode,
+                  const char *filename,
+                  const char *xmlStr,
+                  const char *url,
+                  const char *rootelement,
+                  xmlXPathContextPtr *ctxt);
 
-const char *virXMLPickShellSafeComment(const char *str1, const char *str2);
+const char *
+virXMLPickShellSafeComment(const char *str1,
+                           const char *str2);
 /**
  * virXMLParse:
  * @filename: file to parse, or NULL for string parsing
@@ -96,8 +185,8 @@ const char *virXMLPickShellSafeComment(const char *str1, const char *str2);
  *
  * Return the parsed document object, or NULL on failure.
  */
-# define virXMLParse(filename, xmlStr, url) \
-    virXMLParseHelper(VIR_FROM_THIS, filename, xmlStr, url, NULL)
+#define virXMLParse(filename, xmlStr, url) \
+    virXMLParseHelper(VIR_FROM_THIS, filename, xmlStr, url, NULL, NULL)
 
 /**
  * virXMLParseString:
@@ -108,8 +197,8 @@ const char *virXMLPickShellSafeComment(const char *str1, const char *str2);
  *
  * Return the parsed document object, or NULL on failure.
  */
-# define virXMLParseString(xmlStr, url) \
-    virXMLParseHelper(VIR_FROM_THIS, NULL, xmlStr, url, NULL)
+#define virXMLParseString(xmlStr, url) \
+    virXMLParseHelper(VIR_FROM_THIS, NULL, xmlStr, url, NULL, NULL)
 
 /**
  * virXMLParseFile:
@@ -119,8 +208,8 @@ const char *virXMLPickShellSafeComment(const char *str1, const char *str2);
  *
  * Return the parsed document object, or NULL on failure.
  */
-# define virXMLParseFile(filename) \
-    virXMLParseHelper(VIR_FROM_THIS, filename, NULL, NULL, NULL)
+#define virXMLParseFile(filename) \
+    virXMLParseHelper(VIR_FROM_THIS, filename, NULL, NULL, NULL, NULL)
 
 /**
  * virXMLParseCtxt:
@@ -134,8 +223,8 @@ const char *virXMLPickShellSafeComment(const char *str1, const char *str2);
  *
  * Return the parsed document object, or NULL on failure.
  */
-# define virXMLParseCtxt(filename, xmlStr, url, pctxt) \
-    virXMLParseHelper(VIR_FROM_THIS, filename, xmlStr, url, pctxt)
+#define virXMLParseCtxt(filename, xmlStr, url, pctxt) \
+    virXMLParseHelper(VIR_FROM_THIS, filename, xmlStr, url, NULL, pctxt)
 
 /**
  * virXMLParseStringCtxt:
@@ -148,8 +237,12 @@ const char *virXMLPickShellSafeComment(const char *str1, const char *str2);
  *
  * Return the parsed document object, or NULL on failure.
  */
-# define virXMLParseStringCtxt(xmlStr, url, pctxt) \
-    virXMLParseHelper(VIR_FROM_THIS, NULL, xmlStr, url, pctxt)
+#define virXMLParseStringCtxt(xmlStr, url, pctxt) \
+    virXMLParseHelper(VIR_FROM_THIS, NULL, xmlStr, url, NULL, pctxt)
+
+/* virXMLParseStringCtxtRoot is same as above, except it also validates root node name */
+#define virXMLParseStringCtxtRoot(xmlStr, url, rootnode, pctxt) \
+    virXMLParseHelper(VIR_FROM_THIS, NULL, xmlStr, url, rootnode, pctxt)
 
 /**
  * virXMLParseFileCtxt:
@@ -161,35 +254,44 @@ const char *virXMLPickShellSafeComment(const char *str1, const char *str2);
  *
  * Return the parsed document object, or NULL on failure.
  */
-# define virXMLParseFileCtxt(filename, pctxt) \
-    virXMLParseHelper(VIR_FROM_THIS, filename, NULL, NULL, pctxt)
+#define virXMLParseFileCtxt(filename, pctxt) \
+    virXMLParseHelper(VIR_FROM_THIS, filename, NULL, NULL, NULL, pctxt)
 
-int virXMLSaveFile(const char *path,
-                   const char *warnName,
-                   const char *warnCommand,
-                   const char *xml);
+int
+virXMLSaveFile(const char *path,
+               const char *warnName,
+               const char *warnCommand,
+               const char *xml);
 
-char *virXMLNodeToString(xmlDocPtr doc, xmlNodePtr node);
+char *
+virXMLNodeToString(xmlDocPtr doc,
+                   xmlNodePtr node);
 
-bool virXMLNodeNameEqual(xmlNodePtr node,
-                         const char *name);
+bool
+virXMLNodeNameEqual(xmlNodePtr node,
+                    const char *name);
 
-xmlNodePtr virXMLFindChildNodeByNs(xmlNodePtr root,
-                                   const char *uri);
+xmlNodePtr
+virXMLFindChildNodeByNs(xmlNodePtr root,
+                        const char *uri);
 
-int virXMLExtractNamespaceXML(xmlNodePtr root,
-                              const char *uri,
-                              char **doc);
-
-int virXMLInjectNamespace(xmlNodePtr node,
+int
+virXMLExtractNamespaceXML(xmlNodePtr root,
                           const char *uri,
-                          const char *key);
+                          char **doc);
 
-void virXMLNodeSanitizeNamespaces(xmlNodePtr node);
+int
+virXMLInjectNamespace(xmlNodePtr node,
+                      const char *uri,
+                      const char *key);
 
-int virXMLCheckIllegalChars(const char *nodeName,
-                            const char *str,
-                            const char *illegal);
+void
+virXMLNodeSanitizeNamespaces(xmlNodePtr node);
+
+int
+virXMLCheckIllegalChars(const char *nodeName,
+                        const char *str,
+                        const char *illegal);
 
 struct _virXMLValidator {
     xmlRelaxNGParserCtxtPtr rngParser;
@@ -199,39 +301,52 @@ struct _virXMLValidator {
     char *schemafile;
 };
 typedef struct _virXMLValidator virXMLValidator;
-typedef virXMLValidator *virXMLValidatorPtr;
 
-virXMLValidatorPtr
+virXMLValidator *
 virXMLValidatorInit(const char *schemafile);
 
 int
-virXMLValidatorValidate(virXMLValidatorPtr validator,
+virXMLValidatorValidate(virXMLValidator *validator,
                         xmlDocPtr doc);
 
 int
 virXMLValidateAgainstSchema(const char *schemafile,
                             xmlDocPtr xml);
-void
-virXMLValidatorFree(virXMLValidatorPtr validator);
 
 int
-virXMLFormatElement(virBufferPtr buf,
+virXMLValidateNodeAgainstSchema(const char *schemafile,
+                                xmlNodePtr node);
+
+void
+virXMLValidatorFree(virXMLValidator *validator);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virXMLValidator, virXMLValidatorFree);
+
+void
+virXMLFormatElement(virBuffer *buf,
                     const char *name,
-                    virBufferPtr attrBuf,
-                    virBufferPtr childBuf)
-    ATTRIBUTE_RETURN_CHECK;
+                    virBuffer *attrBuf,
+                    virBuffer *childBuf);
+
+void
+virXMLFormatElementEmpty(virBuffer *buf,
+                         const char *name,
+                         virBuffer *attrBuf,
+                         virBuffer *childBuf);
+
+int
+virXMLFormatMetadata(virBuffer *buf,
+                     xmlNodePtr metadata);
 
 struct _virXPathContextNodeSave {
     xmlXPathContextPtr ctxt;
     xmlNodePtr node;
 };
 typedef struct _virXPathContextNodeSave virXPathContextNodeSave;
-typedef virXPathContextNodeSave *virXPathContextNodeSavePtr;
 
 void
-virXPathContextNodeRestore(virXPathContextNodeSavePtr save);
+virXPathContextNodeRestore(virXPathContextNodeSave *save);
 
-VIR_DEFINE_AUTOCLEAN_FUNC(virXPathContextNodeSave, virXPathContextNodeRestore);
+G_DEFINE_AUTO_CLEANUP_CLEAR_FUNC(virXPathContextNodeSave, virXPathContextNodeRestore);
 
 /**
  * VIR_XPATH_NODE_AUTORESTORE:
@@ -240,12 +355,53 @@ VIR_DEFINE_AUTOCLEAN_FUNC(virXPathContextNodeSave, virXPathContextNodeRestore);
  * This macro ensures that when the scope where it's used ends, @ctxt's current
  * node pointer is reset to the original value when this macro was used.
  */
-# define VIR_XPATH_NODE_AUTORESTORE(_ctxt) \
-    VIR_AUTOCLEAN(virXPathContextNodeSave) _ctxt ## CtxtSave = { .ctxt = _ctxt,\
-                                                                 .node = _ctxt->node}; \
-    ignore_value(&_ctxt ## CtxtSave)
+#define VIR_XPATH_NODE_AUTORESTORE(_ctxt) \
+    VIR_WARNINGS_NO_UNUSED_VARIABLE \
+    g_auto(virXPathContextNodeSave) _ctxt ## CtxtSave = { .ctxt = _ctxt,\
+                                                          .node = _ctxt->node}; \
+    VIR_WARNINGS_RESET
 
-VIR_DEFINE_AUTOPTR_FUNC(xmlDoc, xmlFreeDoc);
-VIR_DEFINE_AUTOPTR_FUNC(xmlXPathContext, xmlXPathFreeContext);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(xmlDoc, xmlFreeDoc);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(xmlXPathContext, xmlXPathFreeContext);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(xmlBuffer, xmlBufferFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(xmlNode, xmlFreeNode);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(xmlParserCtxt, xmlFreeParserCtxt);
 
-#endif /* LIBVIRT_VIRXML_H */
+typedef int (*virXMLNamespaceParse)(xmlXPathContextPtr ctxt,
+                                    void **nsdata);
+typedef void (*virXMLNamespaceFree)(void *nsdata);
+typedef int (*virXMLNamespaceFormat)(virBuffer *buf,
+                                     void *nsdata);
+typedef const char *(*virXMLNamespaceHref)(void);
+
+struct _virXMLNamespace {
+    virXMLNamespaceParse parse;
+    virXMLNamespaceFree free;
+    virXMLNamespaceFormat format;
+    const char *prefix;
+    const char *uri;
+};
+typedef struct _virXMLNamespace virXMLNamespace;
+
+void
+virXMLNamespaceFormatNS(virBuffer *buf,
+                        virXMLNamespace const *ns);
+int
+virXMLNamespaceRegister(xmlXPathContextPtr ctxt,
+                        virXMLNamespace const *ns);
+
+int
+virParseScaledValue(const char *xpath,
+                    const char *units_xpath,
+                    xmlXPathContextPtr ctxt,
+                    unsigned long long *val,
+                    unsigned long long scale,
+                    unsigned long long max,
+                    bool required);
+
+xmlBufferPtr
+virXMLBufferCreate(void);
+
+xmlNodePtr
+virXMLNewNode(xmlNsPtr ns,
+              const char *name);

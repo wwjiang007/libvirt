@@ -143,38 +143,51 @@
 &lt;domainCapabilities&gt;
 </pre>
 
-    <p>The <code>firmware</code> enum corresponds to
-      <code>firmware</code> attribute of the <code>os</code> element.
-      Plain presence of this enum means that libvirt is capable of so
-      called firmware auto selection. The listed values then represent
-      accepted values for the domain attribute. Only values for which
-      there exists a firmware descriptor that matches machine type and
-      architecture are listed, i.e. those which won't cause a failure
-      on domain startup.
+    <p>The <code>firmware</code> enum corresponds to the
+      <code>firmware</code> attribute of the <code>os</code> element in
+      the domain XML. The presence of this enum means libvirt is capable
+      of the so-called firmware auto-selection feature. And the listed
+      firmware values represent the accepted input in the domain
+      XML. Note that the <code>firmware</code> enum reports only those
+      values for which a firmware "descriptor file" exists on the host.
+      Firmware descriptor file is a small JSON document that describes
+      details about a given BIOS or UEFI binary on the host, e.g. the
+      firmware binary path, its architecture, supported machine types,
+      NVRAM template, etc. This ensures that the reported values won't
+      cause a failure on guest boot.
     </p>
 
     <p>For the <code>loader</code> element, the following can occur:</p>
 
     <dl>
       <dt><code>value</code></dt>
-      <dd>List of known loader paths. Currently this is only used
-      to advertise known locations of OVMF binaries for qemu. Binaries
-      will only be listed if they actually exist on disk.</dd>
+      <dd>List of known firmware binary paths. Currently this is used
+      only to advertise the known location of OVMF binaries for
+      QEMU. OVMF binaries will only be listed if they actually exist on
+      host.</dd>
 
       <dt><code>type</code></dt>
-      <dd>Whether loader is a typical BIOS (<code>rom</code>) or
-      an UEFI binary (<code>pflash</code>). This refers to
-      <code>type</code> attribute of the &lt;loader/&gt;
-      element.</dd>
+      <dd>Whether the boot loader is a typical BIOS (<code>rom</code>)
+      or a UEFI firmware (<code>pflash</code>). Each <code>value</code>
+      sub-element under the <code>type</code> enum represents a possible
+      value for the <code>type</code> attribute for the &lt;loader/&gt;
+      element in the domain XML. E.g. the presence
+      of <code>pfalsh</code> under the <code>type</code> enum means that
+      a domain XML can use UEFI firmware via: &lt;loader/&gt;
+      type="pflash" ...&gt;/path/to/the/firmware/binary/&lt;/loader&gt;.
+      </dd>
 
       <dt><code>readonly</code></dt>
       <dd>Options for the <code>readonly</code> attribute of the
-      &lt;loader/&gt; element.</dd>
+      &lt;loader/&gt; element in the domain XML.</dd>
 
       <dt><code>secure</code></dt>
       <dd>Options for the <code>secure</code> attribute of the
-      &lt;loader/&gt; element. Note, that <code>yes</code> is listed
-      only if there is a firmware that supports it.</dd>
+      &lt;loader/&gt; element in the domain XML. Note that the
+      value <code>yes</code> is listed only if libvirt detects a
+      firmware descriptor file that has path to an OVMF binary that
+      supports Secure boot, and lists its architecture and supported
+      machine type.</dd>
     </dl>
 
     <h3><a id="elementsCPU">CPU configuration</a></h3>
@@ -188,7 +201,18 @@
 &lt;domainCapabilities&gt;
   ...
   &lt;cpu&gt;
-    &lt;mode name='host-passthrough' supported='yes'/&gt;
+    &lt;mode name='host-passthrough' supported='yes'&gt;
+      &lt;enum name='hostPassthroughMigratable'&gt;
+        &lt;value&gt;on&lt;/value&gt;
+        &lt;value&gt;off&lt;/value&gt;
+      &lt;/enum&gt;
+    &lt;/mode&gt;
+    &lt;mode name='maximum' supported='yes'&gt;
+      &lt;enum name='maximumMigratable'&gt;
+        &lt;value&gt;on&lt;/value&gt;
+        &lt;value&gt;off&lt;/value&gt;
+      &lt;/enum&gt;
+    &lt;/mode&gt;
     &lt;mode name='host-model' supported='yes'&gt;
       &lt;model fallback='allow'&gt;Broadwell&lt;/model&gt;
       &lt;vendor&gt;Intel&lt;/vendor&gt;
@@ -196,9 +220,9 @@
       &lt;feature policy='require' name='vmx'/&gt;
     &lt;/mode&gt;
     &lt;mode name='custom' supported='yes'&gt;
-      &lt;model usable='no'&gt;Broadwell&lt;/model&gt;
-      &lt;model usable='yes'&gt;Broadwell-noTSX&lt;/model&gt;
-      &lt;model usable='no'&gt;Haswell&lt;/model&gt;
+      &lt;model usable='no' deprecated='no'&gt;Broadwell&lt;/model&gt;
+      &lt;model usable='yes' deprecated='no'&gt;Broadwell-noTSX&lt;/model&gt;
+      &lt;model usable='no' deprecated='yes'&gt;Haswell&lt;/model&gt;
       ...
     &lt;/mode&gt;
   &lt;/cpu&gt;
@@ -214,7 +238,11 @@
 
     <dl>
       <dt><code>host-passthrough</code></dt>
-      <dd>No mode specific details are provided.</dd>
+      <dd>
+        The <code>hostPassthroughMigratable</code> enum shows possible values
+        of the <code>migratable</code> attribute for the &lt;cpu&gt; element
+        with <code>mode='host-passthrough'</code> in the domain XML.
+      </dd>
 
       <dt><code>host-model</code></dt>
       <dd>
@@ -236,9 +264,13 @@
         The <code>mode</code> element contains a list of supported CPU
         models, each described by a dedicated <code>model</code> element.
         The <code>usable</code> attribute specifies whether the model can
-        be used on the host. A special value <code>unknown</code> indicates
-        libvirt does not have enough information to provide the usability
-        data.
+        be used directly on the host. When usable='no' the corresponding model
+        cannot be used without disabling some features that the CPU of such
+        model is expected to have. A special value <code>unknown</code>
+        indicates libvirt does not have enough information to provide the
+        usability data. The <code>deprecated</code> attribute reflects
+        the hypervisor's policy on usage of this model
+        <span class="since">(since 7.1.0)</span>.
       </dd>
     </dl>
 
@@ -450,6 +482,70 @@
       element.</dd>
     </dl>
 
+
+    <h4><a id="elementsRNG">RNG device</a></h4>
+    <p>RNG device capabilities are exposed under the
+    <code>rng</code> element. For instance:</p>
+
+<pre>
+&lt;domainCapabilities&gt;
+  ...
+  &lt;devices&gt;
+    &lt;rng supported='yes'&gt;
+      &lt;enum name='model'&gt;
+        &lt;value&gt;virtio&lt;/value&gt;
+        &lt;value&gt;virtio-transitional&lt;/value&gt;
+        &lt;value&gt;virtio-non-transitional&lt;/value&gt;
+      &lt;/enum&gt;
+      &lt;enum name='backendModel'&gt;
+        &lt;value&gt;random&lt;/value&gt;
+        &lt;value&gt;egd&lt;/value&gt;
+        &lt;value&gt;builtin&lt;/value&gt;
+      &lt;/enum&gt;
+    &lt;/rng&gt;
+    ...
+  &lt;/devices&gt;
+&lt;/domainCapabilities&gt;
+</pre>
+
+    <dl>
+      <dt><code>model</code></dt>
+      <dd>Options for the <code>model</code> attribute of the
+      &lt;rng&gt; element.</dd>
+      <dt><code>backendModel</code></dt>
+      <dd>Options for the <code>model</code> attribute of the
+      &lt;rng&gt;&lt;backend&gt; element.</dd>
+    </dl>
+
+
+    <h4><a id="elementsFilesystem">Filesystem device</a></h4>
+    <p>Filesystem device capabilities are exposed under the
+    <code>filesystem</code> element. For instance:</p>
+
+<pre>
+&lt;domainCapabilities&gt;
+  ...
+  &lt;devices&gt;
+    &lt;filesystem supported='yes'&gt;
+      &lt;enum name='driverType'&gt;
+        &lt;value&gt;default&lt;/value&gt;
+        &lt;value&gt;path&lt;/value&gt;
+        &lt;value&gt;handle&lt;/value&gt;
+        &lt;value&gt;virtiofs&lt;/value&gt;
+      &lt;/enum&gt;
+    &lt;/filesystem&gt;
+    ...
+  &lt;/devices&gt;
+&lt;/domainCapabilities&gt;
+</pre>
+
+    <dl>
+      <dt><code>driverType</code></dt>
+      <dd>Options for the <code>type</code> attribute of the
+      &lt;filesystem&gt;&lt;driver&gt; element.</dd>
+    </dl>
+
+
     <h3><a id="elementsFeatures">Features</a></h3>
 
     <p>One more set of XML elements describe the supported features and
@@ -468,6 +564,8 @@
     &lt;/gic&gt;
     &lt;vmcoreinfo supported='yes'/&gt;
     &lt;genid supported='yes'/&gt;
+    &lt;backingStoreInput supported='yes'/&gt;
+    &lt;backup supported='yes'/&gt;
     &lt;sev&gt;
       &lt;cbitpos&gt;47&lt;/cbitpos&gt;
       &lt;reduced-phys-bits&gt;1&lt;/reduced-phys-bits&gt;
@@ -504,6 +602,24 @@
 
     <p>Reports whether the genid feature can be used by the domain.</p>
 
+    <h4><a id="featureBackingStoreInput">backingStoreInput</a></h4>
+
+    <p>Reports whether the hypervisor will obey the &lt;backingStore&gt;
+    elements configured for a &lt;disk&gt; when booting the guest, hotplugging
+    the disk to a running guest, or similar.
+    <span class="since">(Since 5.10)</span>
+    </p>
+
+    <h4><a id="featureBackup">backup</a></h4>
+
+    <p>Reports whether the hypervisor supports the backup, checkpoint, and
+    related features. (<code>virDomainBackupBegin</code>,
+    <code>virDomainCheckpointCreateXML</code> etc). The presence of the
+    <code>backup</code> element even if <code>supported='no'</code> implies that
+    the <code>VIR_DOMAIN_UNDEFINE_CHECKPOINTS_METADATA</code> flag for
+    <code>virDomainUndefine</code> is supported.
+    </p>
+
     <h4><a id="elementsSEV">SEV capabilities</a></h4>
 
     <p>AMD Secure Encrypted Virtualization (SEV) capabilities are exposed under
@@ -514,10 +630,9 @@
     encrypted with a key unique to that VM.</p>
 
     <p>
-    For more details on SEV feature see:
-      <a href="https://support.amd.com/TechDocs/55766_SEV-KM_API_Specification.pdf">
-        SEV API spec</a> and <a href="http://amd-dev.wpengine.netdna-cdn.com/wordpress/media/2013/12/AMD_Memory_Encryption_Whitepaper_v7-Public.pdf">
-        SEV White Paper</a>
+      For more details on the SEV feature, please follow resources in the
+      AMD developer's document store. In order to use SEV with libvirt have
+      a look at <a href="formatdomain.html#launchSecurity">SEV in domain XML</a>
     </p>
 
     <dl>

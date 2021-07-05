@@ -26,10 +26,9 @@
 #include "virarch.h"
 
 
-virCPUDefPtr
-virQEMUCapsProbeHostCPUForEmulator(virArch hostArch ATTRIBUTE_UNUSED,
-                                   virQEMUCapsPtr qemuCaps ATTRIBUTE_UNUSED,
-                                   virDomainVirtType type ATTRIBUTE_UNUSED)
+virCPUDef *
+virQEMUCapsProbeHostCPU(virArch hostArch G_GNUC_UNUSED,
+                        virDomainCapsCPUModels *models G_GNUC_UNUSED)
 {
     const char *model = getenv("VIR_TEST_MOCK_FAKE_HOST_CPU");
 

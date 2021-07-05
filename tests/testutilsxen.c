@@ -6,12 +6,14 @@
 #include "testutilshostcpus.h"
 #include "domain_conf.h"
 
-virCapsPtr
+#define VIR_FROM_THIS VIR_FROM_LIBXL
+
+static virCaps *
 testXLInitCaps(void)
 {
-    virCapsPtr caps;
-    virCapsGuestPtr guest;
-    virCapsGuestMachinePtr *machines;
+    virCaps *caps;
+    virCapsGuest *guest;
+    virCapsGuestMachine **machines;
     int nmachines;
     static const char *const x86_machines[] = {
         "xenfv"
@@ -29,7 +31,7 @@ testXLInitCaps(void)
 
     caps->host.cpu = virCPUDefCopy(&cpuDefaultData);
 
-    nmachines = ARRAY_CARDINALITY(x86_machines);
+    nmachines = G_N_ELEMENTS(x86_machines);
     if ((machines = virCapabilitiesAllocMachines(x86_machines, nmachines)) == NULL)
         goto cleanup;
     if ((guest = virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_HVM,
@@ -42,7 +44,7 @@ testXLInitCaps(void)
     if (virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_XEN, NULL,
                                       NULL, 0, NULL) == NULL)
         goto cleanup;
-    nmachines = ARRAY_CARDINALITY(xen_machines);
+    nmachines = G_N_ELEMENTS(xen_machines);
     if ((machines = virCapabilitiesAllocMachines(xen_machines, nmachines)) == NULL)
         goto cleanup;
 
@@ -57,7 +59,7 @@ testXLInitCaps(void)
     if (virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_XEN, NULL,
                                       NULL, 0, NULL) == NULL)
         goto cleanup;
-    nmachines = ARRAY_CARDINALITY(pvh_machines);
+    nmachines = G_N_ELEMENTS(pvh_machines);
     if ((machines = virCapabilitiesAllocMachines(pvh_machines, nmachines)) == NULL)
         goto cleanup;
 
@@ -78,4 +80,40 @@ testXLInitCaps(void)
     virCapabilitiesFreeMachines(machines, nmachines);
     virObjectUnref(caps);
     return NULL;
+}
+
+
+libxlDriverPrivate *testXLInitDriver(void)
+{
+    libxlDriverPrivate *driver = g_new0(libxlDriverPrivate, 1);
+
+    if (virMutexInit(&driver->lock) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       "%s", "cannot initialize mutex");
+        g_free(driver);
+        return NULL;
+    }
+
+    if (!(driver->config = libxlDriverConfigNew()))
+        return NULL;
+
+    g_free(driver->config->logDir);
+    driver->config->logDir = g_strdup(abs_builddir);
+
+    if (libxlDriverConfigInit(driver->config) < 0)
+        return NULL;
+
+    driver->config->caps = testXLInitCaps();
+
+    driver->xmlopt = libxlCreateXMLConf(driver);
+
+    return driver;
+}
+
+void testXLFreeDriver(libxlDriverPrivate *driver)
+{
+    virObjectUnref(driver->config);
+    virObjectUnref(driver->xmlopt);
+    virMutexDestroy(&driver->lock);
+    g_free(driver);
 }

@@ -29,7 +29,6 @@
 #include "virbuffer.h"
 #include "virconf.h"
 #include "virutil.h"
-#include "c-ctype.h"
 #include "virlog.h"
 #include "viralloc.h"
 #include "virfile.h"
@@ -41,8 +40,6 @@
 VIR_LOG_INIT("util.conf");
 
 typedef struct _virConfParserCtxt virConfParserCtxt;
-typedef virConfParserCtxt *virConfParserCtxtPtr;
-
 struct _virConfParserCtxt {
     const char* filename;
     const char* base;
@@ -50,19 +47,20 @@ struct _virConfParserCtxt {
     const char *end;
     int line;
 
-    virConfPtr conf;
+    virConf *conf;
 };
 
 #define CUR (*ctxt->cur)
 #define NEXT if (ctxt->cur < ctxt->end) ctxt->cur++;
 #define IS_EOL(c) (((c) == '\n') || ((c) == '\r'))
+#define IS_BLANK(c) (((c) == ' ') || ((c) == '\t'))
 
 #define SKIP_BLANKS_AND_EOL \
-  do { while ((ctxt->cur < ctxt->end) && (c_isblank(CUR) || IS_EOL(CUR))) { \
+  do { while ((ctxt->cur < ctxt->end) && (IS_BLANK(CUR) || IS_EOL(CUR))) { \
          if (CUR == '\n') ctxt->line++; \
          ctxt->cur++; } } while (0)
 #define SKIP_BLANKS \
-  do { while ((ctxt->cur < ctxt->end) && (c_isblank(CUR))) \
+  do { while ((ctxt->cur < ctxt->end) && (IS_BLANK(CUR))) \
           ctxt->cur++; } while (0)
 
 VIR_ENUM_IMPL(virConf,
@@ -75,19 +73,17 @@ VIR_ENUM_IMPL(virConf,
 );
 
 typedef struct _virConfEntry virConfEntry;
-typedef virConfEntry *virConfEntryPtr;
-
 struct _virConfEntry {
-    virConfEntryPtr next;
+    virConfEntry *next;
     char* name;
     char* comment;
-    virConfValuePtr value;
+    virConfValue *value;
 };
 
 struct _virConf {
     char *filename;
     unsigned int flags;
-    virConfEntryPtr entries;
+    virConfEntry *entries;
 };
 
 /**
@@ -102,7 +98,7 @@ struct _virConf {
     virConfErrorHelper(__FILE__, __FUNCTION__, __LINE__, ctxt, error, info)
 static void
 virConfErrorHelper(const char *file, const char *func, size_t line,
-                   virConfParserCtxtPtr ctxt,
+                   virConfParserCtxt *ctxt,
                    virErrorNumber error, const char *info)
 {
     if (error == VIR_ERR_OK)
@@ -126,13 +122,12 @@ virConfErrorHelper(const char *file, const char *func, size_t line,
  * Free a list
  */
 static void
-virConfFreeList(virConfValuePtr list)
+virConfFreeList(virConfValue *list)
 {
-    virConfValuePtr next;
+    virConfValue *next;
 
     while (list != NULL) {
-        next = list->next;
-        list->next = NULL;
+        next = g_steal_pointer(&list->next);
         virConfFreeValue(list);
         list = next;
     }
@@ -145,26 +140,25 @@ virConfFreeList(virConfValuePtr list)
  * Free a value
  */
 void
-virConfFreeValue(virConfValuePtr val)
+virConfFreeValue(virConfValue *val)
 {
     if (val == NULL)
         return;
     if (val->type == VIR_CONF_STRING &&
         val->str != NULL)
-        VIR_FREE(val->str);
+        g_free(val->str);
     if (val->type == VIR_CONF_LIST &&
         val->list != NULL)
         virConfFreeList(val->list);
-    VIR_FREE(val);
+    g_free(val);
 }
 
-virConfPtr
+virConf *
 virConfNew(void)
 {
-    virConfPtr ret;
+    virConf *ret;
 
-    if (VIR_ALLOC(ret) < 0)
-        return NULL;
+    ret = g_new0(virConf, 1);
     ret->filename = NULL;
     ret->flags = 0;
 
@@ -180,17 +174,14 @@ virConfNew(void)
  *
  * Returns a pointer or NULL in case of error.
  */
-static virConfPtr
+static virConf *
 virConfCreate(const char *filename, unsigned int flags)
 {
-    virConfPtr ret = virConfNew();
+    virConf *ret = virConfNew();
     if (!ret)
         return NULL;
 
-    if (VIR_STRDUP(ret->filename, filename) < 0) {
-        VIR_FREE(ret);
-        return NULL;
-    }
+    ret->filename = g_strdup(filename);
 
     ret->flags = flags;
     return ret;
@@ -208,10 +199,11 @@ virConfCreate(const char *filename, unsigned int flags)
  *
  * Returns a pointer to the entry or NULL in case of failure
  */
-static virConfEntryPtr
-virConfAddEntry(virConfPtr conf, char *name, virConfValuePtr value, char *comm)
+static virConfEntry *
+virConfAddEntry(virConf *conf, char *name, virConfValue *value, char *comm)
 {
-    virConfEntryPtr ret, prev;
+    virConfEntry *ret;
+    virConfEntry *prev;
 
     if (conf == NULL)
         return NULL;
@@ -222,8 +214,7 @@ virConfAddEntry(virConfPtr conf, char *name, virConfValuePtr value, char *comm)
     if (name)
         VIR_DEBUG("Add entry %s %p", name, value);
 
-    if (VIR_ALLOC(ret) < 0)
-        return NULL;
+    ret = g_new0(virConfEntry, 1);
 
     ret->name = name;
     ret->value = value;
@@ -251,7 +242,7 @@ virConfAddEntry(virConfPtr conf, char *name, virConfValuePtr value, char *comm)
  * Returns 0 in case of success, -1 in case of error.
  */
 static int
-virConfSaveValue(virBufferPtr buf, virConfValuePtr val)
+virConfSaveValue(virBuffer *buf, virConfValue *val)
 {
     if (val == NULL)
         return -1;
@@ -278,7 +269,7 @@ virConfSaveValue(virBufferPtr buf, virConfValuePtr val)
             }
             break;
         case VIR_CONF_LIST: {
-            virConfValuePtr cur;
+            virConfValue *cur;
 
             cur = val->list;
             virBufferAddLit(buf, "[ ");
@@ -312,7 +303,7 @@ virConfSaveValue(virBufferPtr buf, virConfValuePtr val)
  * Returns 0 in case of success, -1 in case of error.
  */
 static int
-virConfSaveEntry(virBufferPtr buf, virConfEntryPtr cur)
+virConfSaveEntry(virBuffer *buf, virConfEntry *cur)
 {
     if (cur->name != NULL) {
         virBufferAdd(buf, cur->name, -1);
@@ -341,7 +332,7 @@ virConfSaveEntry(virBufferPtr buf, virConfEntryPtr cur)
  * Returns 0 in case of success and -1 in case of error
  */
 static int
-virConfParseLong(virConfParserCtxtPtr ctxt, long long *val)
+virConfParseLong(virConfParserCtxt *ctxt, long long *val)
 {
     long long l = 0;
     int neg = 0;
@@ -352,11 +343,11 @@ virConfParseLong(virConfParserCtxtPtr ctxt, long long *val)
     } else if (CUR == '+') {
         NEXT;
     }
-    if ((ctxt->cur >= ctxt->end) || (!c_isdigit(CUR))) {
+    if ((ctxt->cur >= ctxt->end) || (!g_ascii_isdigit(CUR))) {
         virConfError(ctxt, VIR_ERR_CONF_SYNTAX, _("unterminated number"));
         return -1;
     }
-    while ((ctxt->cur < ctxt->end) && (c_isdigit(CUR))) {
+    while ((ctxt->cur < ctxt->end) && (g_ascii_isdigit(CUR))) {
         l = l * 10 + (CUR - '0');
         NEXT;
     }
@@ -375,7 +366,7 @@ virConfParseLong(virConfParserCtxtPtr ctxt, long long *val)
  * Returns a pointer to the string or NULL in case of error
  */
 static char *
-virConfParseString(virConfParserCtxtPtr ctxt)
+virConfParseString(virConfParserCtxt *ctxt)
 {
     const char *base;
     char *ret = NULL;
@@ -389,8 +380,7 @@ virConfParseString(virConfParserCtxtPtr ctxt)
             virConfError(ctxt, VIR_ERR_CONF_SYNTAX, _("unterminated string"));
             return NULL;
         }
-        if (VIR_STRNDUP(ret, base, ctxt->cur - base) < 0)
-            return NULL;
+        ret = g_strndup(base, ctxt->cur - base);
         NEXT;
     } else if ((ctxt->cur + 6 < ctxt->end) &&
                (STRPREFIX(ctxt->cur, "\"\"\""))) {
@@ -410,8 +400,7 @@ virConfParseString(virConfParserCtxtPtr ctxt)
             virConfError(ctxt, VIR_ERR_CONF_SYNTAX, _("unterminated string"));
             return NULL;
         }
-        if (VIR_STRNDUP(ret, base, ctxt->cur - base) < 0)
-            return NULL;
+        ret = g_strndup(base, ctxt->cur - base);
         ctxt->cur += 3;
     } else if (CUR == '"') {
         NEXT;
@@ -422,8 +411,7 @@ virConfParseString(virConfParserCtxtPtr ctxt)
             virConfError(ctxt, VIR_ERR_CONF_SYNTAX, _("unterminated string"));
             return NULL;
         }
-        if (VIR_STRNDUP(ret, base, ctxt->cur - base) < 0)
-            return NULL;
+        ret = g_strndup(base, ctxt->cur - base);
         NEXT;
     } else if (ctxt->conf->flags & VIR_CONF_FLAG_LXC_FORMAT) {
         base = ctxt->cur;
@@ -431,10 +419,9 @@ virConfParseString(virConfParserCtxtPtr ctxt)
         while ((ctxt->cur < ctxt->end) && (!IS_EOL(CUR)))
             NEXT;
         /* Reverse to exclude the trailing blanks from the value */
-        while ((ctxt->cur > base) && (c_isblank(CUR)))
+        while ((ctxt->cur > base) && (IS_BLANK(CUR)))
             ctxt->cur--;
-        if (VIR_STRNDUP(ret, base, ctxt->cur - base) < 0)
-            return NULL;
+        ret = g_strndup(base, ctxt->cur - base);
     }
     return ret;
 }
@@ -447,10 +434,13 @@ virConfParseString(virConfParserCtxtPtr ctxt)
  *
  * Returns a pointer to the value or NULL in case of error
  */
-static virConfValuePtr
-virConfParseValue(virConfParserCtxtPtr ctxt)
+static virConfValue *
+virConfParseValue(virConfParserCtxt *ctxt)
 {
-    virConfValuePtr ret, lst = NULL, tmp, prev;
+    virConfValue *ret;
+    virConfValue *lst = NULL;
+    virConfValue *tmp;
+    virConfValue *prev;
     virConfType type = VIR_CONF_NONE;
     char *str = NULL;
     long long l = 0;
@@ -482,12 +472,6 @@ virConfParseValue(virConfParserCtxtPtr ctxt)
         }
         while ((ctxt->cur < ctxt->end) && (CUR != ']')) {
 
-            /* Tell Clang that when execution reaches this point
-               "lst" is guaranteed to be non-NULL.  This stops it
-               from issuing an invalid NULL-dereference warning about
-               "prev = lst; while (prev->next..." below.  */
-            sa_assert(lst);
-
             if (CUR != ',') {
                 virConfError(ctxt, VIR_ERR_CONF_SYNTAX,
                              _("expecting a separator in list"));
@@ -516,7 +500,7 @@ virConfParseValue(virConfParserCtxtPtr ctxt)
             virConfFreeList(lst);
             return NULL;
         }
-    } else if (c_isdigit(CUR) || (CUR == '-') || (CUR == '+')) {
+    } else if (g_ascii_isdigit(CUR) || (CUR == '-') || (CUR == '+')) {
         if (ctxt->conf->flags & VIR_CONF_FLAG_VMX_FORMAT) {
             virConfError(ctxt, VIR_ERR_CONF_SYNTAX,
                          _("numbers not allowed in VMX format"));
@@ -529,11 +513,7 @@ virConfParseValue(virConfParserCtxtPtr ctxt)
         virConfError(ctxt, VIR_ERR_CONF_SYNTAX, _("expecting a value"));
         return NULL;
     }
-    if (VIR_ALLOC(ret) < 0) {
-        virConfFreeList(lst);
-        VIR_FREE(str);
-        return NULL;
-    }
+    ret = g_new0(virConfValue, 1);
     ret->type = type;
     ret->l = l;
     ret->str = str;
@@ -550,7 +530,7 @@ virConfParseValue(virConfParserCtxtPtr ctxt)
  * Returns a copy of the new string, NULL in case of error
  */
 static char *
-virConfParseName(virConfParserCtxtPtr ctxt)
+virConfParseName(virConfParserCtxt *ctxt)
 {
     const char *base;
     char *ret;
@@ -558,20 +538,19 @@ virConfParseName(virConfParserCtxtPtr ctxt)
     SKIP_BLANKS;
     base = ctxt->cur;
     /* TODO: probably need encoding support and UTF-8 parsing ! */
-    if (!c_isalpha(CUR) &&
+    if (!g_ascii_isalpha(CUR) &&
         !((ctxt->conf->flags & VIR_CONF_FLAG_VMX_FORMAT) && (CUR == '.'))) {
         virConfError(ctxt, VIR_ERR_CONF_SYNTAX, _("expecting a name"));
         return NULL;
     }
     while ((ctxt->cur < ctxt->end) &&
-           (c_isalnum(CUR) || (CUR == '_') ||
+           (g_ascii_isalnum(CUR) || (CUR == '_') ||
             ((ctxt->conf->flags & VIR_CONF_FLAG_VMX_FORMAT) &&
              ((CUR == ':') || (CUR == '.') || (CUR == '-'))) ||
             ((ctxt->conf->flags & VIR_CONF_FLAG_LXC_FORMAT) &&
              (CUR == '.'))))
         NEXT;
-    if (VIR_STRNDUP(ret, base, ctxt->cur - base) < 0)
-        return NULL;
+    ret = g_strndup(base, ctxt->cur - base);
     return ret;
 }
 
@@ -584,7 +563,7 @@ virConfParseName(virConfParserCtxtPtr ctxt)
  * Returns 0 in case of success and -1 in case of error
  */
 static int
-virConfParseComment(virConfParserCtxtPtr ctxt)
+virConfParseComment(virConfParserCtxt *ctxt)
 {
     const char *base;
     char *comm;
@@ -594,8 +573,7 @@ virConfParseComment(virConfParserCtxtPtr ctxt)
     NEXT;
     base = ctxt->cur;
     while ((ctxt->cur < ctxt->end) && (!IS_EOL(CUR))) NEXT;
-    if (VIR_STRNDUP(comm, base, ctxt->cur - base) < 0)
-        return -1;
+    comm = g_strndup(base, ctxt->cur - base);
     if (virConfAddEntry(ctxt->conf, NULL, NULL, comm) == NULL) {
         VIR_FREE(comm);
         return -1;
@@ -612,7 +590,7 @@ virConfParseComment(virConfParserCtxtPtr ctxt)
  * Returns 0 in case of success and -1 in case of error
  */
 static int
-virConfParseSeparator(virConfParserCtxtPtr ctxt)
+virConfParseSeparator(virConfParserCtxt *ctxt)
 {
     SKIP_BLANKS;
     if (ctxt->cur >= ctxt->end)
@@ -638,11 +616,11 @@ virConfParseSeparator(virConfParserCtxtPtr ctxt)
  * Returns 0 in case of success and -1 in case of error
  */
 static int
-virConfParseStatement(virConfParserCtxtPtr ctxt)
+virConfParseStatement(virConfParserCtxt *ctxt)
 {
     const char *base;
     char *name;
-    virConfValuePtr value;
+    virConfValue *value;
     char *comm = NULL;
 
     SKIP_BLANKS_AND_EOL;
@@ -669,11 +647,7 @@ virConfParseStatement(virConfParserCtxtPtr ctxt)
         NEXT;
         base = ctxt->cur;
         while ((ctxt->cur < ctxt->end) && (!IS_EOL(CUR))) NEXT;
-        if (VIR_STRNDUP(comm, base, ctxt->cur - base) < 0) {
-            VIR_FREE(name);
-            virConfFreeValue(value);
-            return -1;
-        }
+        comm = g_strndup(base, ctxt->cur - base);
     }
     if (virConfAddEntry(ctxt->conf, name, value, comm) == NULL) {
         VIR_FREE(name);
@@ -697,7 +671,7 @@ virConfParseStatement(virConfParserCtxtPtr ctxt)
  * Returns a handle to lookup settings or NULL if it failed to
  *         read or parse the file, use virConfFree() to free the data.
  */
-static virConfPtr
+static virConf *
 virConfParse(const char *filename, const char *content, int len,
              unsigned int flags)
 {
@@ -740,12 +714,12 @@ virConfParse(const char *filename, const char *content, int len,
  * Returns a handle to lookup settings or NULL if it failed to
  *         read or parse the file, use virConfFree() to free the data.
  */
-virConfPtr
+virConf *
 virConfReadFile(const char *filename, unsigned int flags)
 {
     char *content;
     int len;
-    virConfPtr conf;
+    virConf *conf;
 
     VIR_DEBUG("filename=%s", NULLSTR(filename));
 
@@ -775,7 +749,7 @@ virConfReadFile(const char *filename, unsigned int flags)
  * Returns a handle to lookup settings or NULL if it failed to
  *         parse the content, use virConfFree() to free the data.
  */
-virConfPtr
+virConf *
 virConfReadString(const char *memory, unsigned int flags)
 {
     size_t len;
@@ -798,24 +772,24 @@ virConfReadString(const char *memory, unsigned int flags)
  * Returns 0 in case of success, -1 in case of error.
  */
 int
-virConfFree(virConfPtr conf)
+virConfFree(virConf *conf)
 {
-    virConfEntryPtr tmp;
+    virConfEntry *tmp;
     if (conf == NULL)
         return 0;
 
     tmp = conf->entries;
     while (tmp) {
-        virConfEntryPtr next;
-        VIR_FREE(tmp->name);
+        virConfEntry *next;
+        g_free(tmp->name);
         virConfFreeValue(tmp->value);
-        VIR_FREE(tmp->comment);
+        g_free(tmp->comment);
         next = tmp->next;
-        VIR_FREE(tmp);
+        g_free(tmp);
         tmp = next;
     }
-    VIR_FREE(conf->filename);
-    VIR_FREE(conf);
+    g_free(conf->filename);
+    g_free(conf);
     return 0;
 }
 
@@ -829,10 +803,10 @@ virConfFree(virConfPtr conf)
  * Returns a pointer to the value or NULL if the lookup failed, the data
  *         associated will be freed when virConfFree() is called
  */
-virConfValuePtr
-virConfGetValue(virConfPtr conf, const char *setting)
+virConfValue *
+virConfGetValue(virConf *conf, const char *setting)
 {
-    virConfEntryPtr cur;
+    virConfEntry *cur;
 
     if (conf == NULL)
         return NULL;
@@ -859,10 +833,10 @@ virConfGetValue(virConfPtr conf, const char *setting)
  *
  * Returns: the entry type, or VIR_CONF_NONE if not set.
  */
-virConfType virConfGetValueType(virConfPtr conf,
+virConfType virConfGetValueType(virConf *conf,
                                 const char *setting)
 {
-    virConfValuePtr cval = virConfGetValue(conf, setting);
+    virConfValue *cval = virConfGetValue(conf, setting);
     if (!cval)
         return VIR_CONF_NONE;
 
@@ -885,11 +859,11 @@ virConfType virConfGetValueType(virConfPtr conf,
  *
  * Returns: 1 if the value was present, 0 if missing, -1 on error
  */
-int virConfGetValueString(virConfPtr conf,
+int virConfGetValueString(virConf *conf,
                           const char *setting,
                           char **value)
 {
-    virConfValuePtr cval = virConfGetValue(conf, setting);
+    virConfValue *cval = virConfGetValue(conf, setting);
 
     VIR_DEBUG("Get value string %p %d",
               cval, cval ? cval->type : VIR_CONF_NONE);
@@ -905,8 +879,7 @@ int virConfGetValueString(virConfPtr conf,
     }
 
     VIR_FREE(*value);
-    if (VIR_STRDUP(*value, cval->str) < 0)
-        return -1;
+    *value = g_strdup(cval->str);
 
     return 1;
 }
@@ -931,14 +904,14 @@ int virConfGetValueString(virConfPtr conf,
  *
  * Returns: 1 if the value was present, 0 if missing, -1 on error
  */
-int virConfGetValueStringList(virConfPtr conf,
+int virConfGetValueStringList(virConf *conf,
                               const char *setting,
                               bool compatString,
                               char ***values)
 {
-    virConfValuePtr cval = virConfGetValue(conf, setting);
+    virConfValue *cval = virConfGetValue(conf, setting);
     size_t len;
-    virConfValuePtr eval;
+    virConfValue *eval;
 
     VIR_DEBUG("Get value string list %p %d",
               cval, cval ? cval->type : VIR_CONF_NONE);
@@ -946,7 +919,7 @@ int virConfGetValueStringList(virConfPtr conf,
     if (!cval)
         return 0;
 
-    virStringListFree(*values);
+    g_strfreev(*values);
     *values = NULL;
 
     switch (cval->type) {
@@ -961,30 +934,20 @@ int virConfGetValueStringList(virConfPtr conf,
             }
         }
 
-        if (VIR_ALLOC_N(*values, len + 1) < 0)
-            return -1;
+        *values = g_new0(char *, len + 1);
 
-        for (len = 0, eval = cval->list; eval; len++, eval = eval->next) {
-            if (VIR_STRDUP((*values)[len], eval->str) < 0) {
-                virStringListFree(*values);
-                *values = NULL;
-                return -1;
-            }
-        }
+        for (len = 0, eval = cval->list; eval; len++, eval = eval->next)
+            (*values)[len] = g_strdup(eval->str);
         break;
 
     case VIR_CONF_STRING:
         if (compatString) {
-            if (VIR_ALLOC_N(*values, cval->str ? 2 : 1) < 0)
-                return -1;
-            if (cval->str &&
-                VIR_STRDUP((*values)[0], cval->str) < 0) {
-                VIR_FREE(*values);
-                return -1;
-            }
+            *values = g_new0(char *, cval->str ? 2 : 1);
+            if (cval->str)
+                (*values)[0] = g_strdup(cval->str);
             break;
         }
-        ATTRIBUTE_FALLTHROUGH;
+        G_GNUC_FALLTHROUGH;
 
     case VIR_CONF_LLONG:
     case VIR_CONF_ULLONG:
@@ -1021,11 +984,11 @@ int virConfGetValueStringList(virConfPtr conf,
  *
  * Returns: 1 if the value was present, 0 if missing, -1 on error
  */
-int virConfGetValueBool(virConfPtr conf,
+int virConfGetValueBool(virConf *conf,
                         const char *setting,
                         bool *value)
 {
-    virConfValuePtr cval = virConfGetValue(conf, setting);
+    virConfValue *cval = virConfGetValue(conf, setting);
 
     VIR_DEBUG("Get value bool %p %d",
               cval, cval ? cval->type : VIR_CONF_NONE);
@@ -1069,11 +1032,11 @@ int virConfGetValueBool(virConfPtr conf,
  *
  * Returns: 1 if the value was present, 0 if missing, -1 on error
  */
-int virConfGetValueInt(virConfPtr conf,
+int virConfGetValueInt(virConf *conf,
                        const char *setting,
                        int *value)
 {
-    virConfValuePtr cval = virConfGetValue(conf, setting);
+    virConfValue *cval = virConfGetValue(conf, setting);
 
     VIR_DEBUG("Get value int %p %d",
               cval, cval ? cval->type : VIR_CONF_NONE);
@@ -1118,11 +1081,11 @@ int virConfGetValueInt(virConfPtr conf,
  *
  * Returns: 1 if the value was present, 0 if missing, -1 on error
  */
-int virConfGetValueUInt(virConfPtr conf,
+int virConfGetValueUInt(virConf *conf,
                         const char *setting,
                         unsigned int *value)
 {
-    virConfValuePtr cval = virConfGetValue(conf, setting);
+    virConfValue *cval = virConfGetValue(conf, setting);
 
     VIR_DEBUG("Get value uint %p %d",
               cval, cval ? cval->type : VIR_CONF_NONE);
@@ -1166,11 +1129,11 @@ int virConfGetValueUInt(virConfPtr conf,
  *
  * Returns: 1 if the value was present, 0 if missing, -1 on error
  */
-int virConfGetValueSizeT(virConfPtr conf,
+int virConfGetValueSizeT(virConf *conf,
                          const char *setting,
                          size_t *value)
 {
-    virConfValuePtr cval = virConfGetValue(conf, setting);
+    virConfValue *cval = virConfGetValue(conf, setting);
 
     VIR_DEBUG("Get value size_t %p %d",
               cval, cval ? cval->type : VIR_CONF_NONE);
@@ -1216,11 +1179,11 @@ int virConfGetValueSizeT(virConfPtr conf,
  *
  * Returns: 1 if the value was present, 0 if missing, -1 on error
  */
-int virConfGetValueSSizeT(virConfPtr conf,
+int virConfGetValueSSizeT(virConf *conf,
                           const char *setting,
                           ssize_t *value)
 {
-    virConfValuePtr cval = virConfGetValue(conf, setting);
+    virConfValue *cval = virConfGetValue(conf, setting);
 
     VIR_DEBUG("Get value ssize_t %p %d",
               cval, cval ? cval->type : VIR_CONF_NONE);
@@ -1273,11 +1236,11 @@ int virConfGetValueSSizeT(virConfPtr conf,
  *
  * Returns: 1 if the value was present, 0 if missing, -1 on error
  */
-int virConfGetValueLLong(virConfPtr conf,
+int virConfGetValueLLong(virConf *conf,
                          const char *setting,
                          long long *value)
 {
-    virConfValuePtr cval = virConfGetValue(conf, setting);
+    virConfValue *cval = virConfGetValue(conf, setting);
 
     VIR_DEBUG("Get value long long %p %d",
               cval, cval ? cval->type : VIR_CONF_NONE);
@@ -1320,11 +1283,11 @@ int virConfGetValueLLong(virConfPtr conf,
  *
  * Returns: 1 if the value was present, 0 if missing, -1 on error
  */
-int virConfGetValueULLong(virConfPtr conf,
+int virConfGetValueULLong(virConf *conf,
                           const char *setting,
                           unsigned long long *value)
 {
-    virConfValuePtr cval = virConfGetValue(conf, setting);
+    virConfValue *cval = virConfGetValue(conf, setting);
 
     VIR_DEBUG("Get value unsigned long long %p %d",
               cval, cval ? cval->type : VIR_CONF_NONE);
@@ -1358,11 +1321,12 @@ int virConfGetValueULLong(virConfPtr conf,
  * Returns 0 on success, or -1 on failure.
  */
 int
-virConfSetValue(virConfPtr conf,
+virConfSetValue(virConf *conf,
                 const char *setting,
-                virConfValuePtr value)
+                virConfValue *value)
 {
-    virConfEntryPtr cur, prev = NULL;
+    virConfEntry *cur;
+    virConfEntry *prev = NULL;
 
     if (value && value->type == VIR_CONF_STRING && value->str == NULL) {
         virConfFreeValue(value);
@@ -1378,16 +1342,9 @@ virConfSetValue(virConfPtr conf,
     }
 
     if (!cur) {
-        if (VIR_ALLOC(cur) < 0) {
-            virConfFreeValue(value);
-            return -1;
-        }
+        cur = g_new0(virConfEntry, 1);
         cur->comment = NULL;
-        if (VIR_STRDUP(cur->name, setting) < 0) {
-            virConfFreeValue(value);
-            VIR_FREE(cur);
-            return -1;
-        }
+        cur->name = g_strdup(setting);
         cur->value = value;
         if (prev) {
             cur->next = prev->next;
@@ -1414,11 +1371,11 @@ virConfSetValue(virConfPtr conf,
  *
  * Returns 0 on success, or -1 on failure.
  */
-int virConfWalk(virConfPtr conf,
+int virConfWalk(virConf *conf,
                 virConfWalkCallback callback,
                 void *opaque)
 {
-    virConfEntryPtr cur;
+    virConfEntry *cur;
 
     if (!conf)
         return 0;
@@ -1443,10 +1400,10 @@ int virConfWalk(virConfPtr conf,
  * Returns the number of bytes written or -1 in case of error.
  */
 int
-virConfWriteFile(const char *filename, virConfPtr conf)
+virConfWriteFile(const char *filename, virConf *conf)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
-    virConfEntryPtr cur;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+    virConfEntry *cur;
     int ret;
     int fd;
     char *content;
@@ -1461,12 +1418,8 @@ virConfWriteFile(const char *filename, virConfPtr conf)
         cur = cur->next;
     }
 
-    if (virBufferCheckError(&buf) < 0)
-        return -1;
-
     fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     if (fd < 0) {
-        virBufferFreeAndReset(&buf);
         virConfError(NULL, VIR_ERR_WRITE_FAILED, _("failed to open file"));
         return -1;
     }
@@ -1498,10 +1451,10 @@ virConfWriteFile(const char *filename, virConfPtr conf)
  * Returns the number of bytes written or -1 in case of error.
  */
 int
-virConfWriteMem(char *memory, int *len, virConfPtr conf)
+virConfWriteMem(char *memory, int *len, virConf *conf)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
-    virConfEntryPtr cur;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+    virConfEntry *cur;
     char *content;
     unsigned int use;
 
@@ -1513,9 +1466,6 @@ virConfWriteMem(char *memory, int *len, virConfPtr conf)
         virConfSaveEntry(&buf, cur);
         cur = cur->next;
     }
-
-    if (virBufferCheckError(&buf) < 0)
-        return -1;
 
     use = virBufferUse(&buf);
     content = virBufferContentAndReset(&buf);
@@ -1536,27 +1486,18 @@ virConfLoadConfigPath(const char *name)
 {
     char *path;
     if (geteuid() == 0) {
-        if (virAsprintf(&path, "%s/libvirt/%s",
-                        SYSCONFDIR, name) < 0)
-            return NULL;
+        path = g_strdup_printf("%s/libvirt/%s", SYSCONFDIR, name);
     } else {
-        char *userdir = virGetUserConfigDirectory();
-        if (!userdir)
-            return NULL;
+        g_autofree char *userdir = virGetUserConfigDirectory();
 
-        if (virAsprintf(&path, "%s/%s",
-                        userdir, name) < 0) {
-            VIR_FREE(userdir);
-            return NULL;
-        }
-        VIR_FREE(userdir);
+        path = g_strdup_printf("%s/%s", userdir, name);
     }
 
     return path;
 }
 
 int
-virConfLoadConfig(virConfPtr *conf, const char *name)
+virConfLoadConfig(virConf **conf, const char *name)
 {
     char *path = NULL;
     int ret = -1;

@@ -23,6 +23,7 @@
 #include "virfile.h"
 #include "virstring.h"
 #include "viralloc.h"
+#include "virxml.h"
 
 static virDomainPtr
 virshLookupDomainInternal(vshControl *ctl,
@@ -32,8 +33,9 @@ virshLookupDomainInternal(vshControl *ctl,
 {
     virDomainPtr dom = NULL;
     int id;
+    virshControl *priv = ctl->privData;
+
     virCheckFlags(VIRSH_BYID | VIRSH_BYUUID | VIRSH_BYNAME, NULL);
-    virshControlPtr priv = ctl->privData;
 
     /* try it by ID */
     if (flags & VIRSH_BYID) {
@@ -115,7 +117,7 @@ virshDomainState(vshControl *ctl,
                  int *reason)
 {
     virDomainInfo info;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     if (reason)
         *reason = -1;
@@ -141,24 +143,24 @@ virshDomainState(vshControl *ctl,
 
 
 int
-virshStreamSink(virStreamPtr st ATTRIBUTE_UNUSED,
+virshStreamSink(virStreamPtr st G_GNUC_UNUSED,
                 const char *bytes,
                 size_t nbytes,
                 void *opaque)
 {
-    int *fd = opaque;
+    virshStreamCallbackData *cbData = opaque;
 
-    return safewrite(*fd, bytes, nbytes);
+    return safewrite(cbData->fd, bytes, nbytes);
 }
 
 
 int
-virshStreamSource(virStreamPtr st ATTRIBUTE_UNUSED,
+virshStreamSource(virStreamPtr st G_GNUC_UNUSED,
                   char *bytes,
                   size_t nbytes,
                   void *opaque)
 {
-    virshStreamCallbackDataPtr cbData = opaque;
+    virshStreamCallbackData *cbData = opaque;
     int fd = cbData->fd;
 
     return saferead(fd, bytes, nbytes);
@@ -166,15 +168,14 @@ virshStreamSource(virStreamPtr st ATTRIBUTE_UNUSED,
 
 
 int
-virshStreamSourceSkip(virStreamPtr st ATTRIBUTE_UNUSED,
+virshStreamSourceSkip(virStreamPtr st G_GNUC_UNUSED,
                       long long offset,
                       void *opaque)
 {
-    virshStreamCallbackDataPtr cbData = opaque;
+    virshStreamCallbackData *cbData = opaque;
     int fd = cbData->fd;
-    off_t cur;
 
-    if ((cur = lseek(fd, offset, SEEK_CUR)) == (off_t) -1)
+    if (lseek(fd, offset, SEEK_CUR) == (off_t) -1)
         return -1;
 
     return 0;
@@ -182,38 +183,73 @@ virshStreamSourceSkip(virStreamPtr st ATTRIBUTE_UNUSED,
 
 
 int
-virshStreamSkip(virStreamPtr st ATTRIBUTE_UNUSED,
+virshStreamSkip(virStreamPtr st G_GNUC_UNUSED,
                 long long offset,
                 void *opaque)
 {
-    int *fd = opaque;
+    virshStreamCallbackData *cbData = opaque;
     off_t cur;
 
-    if ((cur = lseek(*fd, offset, SEEK_CUR)) == (off_t) -1)
-        return -1;
+    if (cbData->isBlock) {
+        g_autofree char * buf = NULL;
+        const size_t buflen = 1 * 1024 * 1024; /* 1MiB */
 
-    if (ftruncate(*fd, cur) < 0)
-        return -1;
+        /* While for files it's enough to lseek() and ftruncate() to create
+         * a hole which would emulate zeroes on read(), for block devices
+         * we have to write zeroes to read() zeroes. And we have to write
+         * @got bytes of zeroes. Do that in smaller chunks though.*/
+
+        buf = g_new0(char, buflen);
+
+        while (offset) {
+            size_t count = MIN(offset, buflen);
+            ssize_t r;
+
+            if ((r = safewrite(cbData->fd, buf, count)) < 0)
+                return -1;
+
+            offset -= r;
+        }
+    } else {
+        if ((cur = lseek(cbData->fd, offset, SEEK_CUR)) == (off_t) -1)
+            return -1;
+
+        if (ftruncate(cbData->fd, cur) < 0)
+            return -1;
+    }
 
     return 0;
 }
 
 
 int
-virshStreamInData(virStreamPtr st ATTRIBUTE_UNUSED,
+virshStreamInData(virStreamPtr st G_GNUC_UNUSED,
                   int *inData,
                   long long *offset,
                   void *opaque)
 {
-    virshStreamCallbackDataPtr cbData = opaque;
+    virshStreamCallbackData *cbData = opaque;
     vshControl *ctl = cbData->ctl;
     int fd = cbData->fd;
-    int ret;
 
-    if ((ret = virFileInData(fd, inData, offset)) < 0)
-        vshError(ctl, "%s", _("Unable to get current position in stream"));
+    if (cbData->isBlock) {
+        /* Block devices are always in data section by definition. The
+         * @sectionLen is slightly more tricky. While we could try and get
+         * how much bytes is there left until EOF, we can pretend there is
+         * always X bytes left and let the saferead() below hit EOF (which
+         * is then handled gracefully anyway). Worst case scenario, this
+         * branch is called more than once.
+         * X was chosen to be 1MiB but it has ho special meaning. */
+        *inData = 1;
+        *offset = 1 * 1024 * 1024;
+    } else {
+        if (virFileInData(fd, inData, offset) < 0) {
+            vshError(ctl, "%s", _("Unable to get current position in stream"));
+            return -1;
+        }
+    }
 
-    return ret;
+    return 0;
 }
 
 
@@ -229,6 +265,17 @@ virshDomainFree(virDomainPtr dom)
 
 
 void
+virshDomainCheckpointFree(virDomainCheckpointPtr chk)
+{
+    if (!chk)
+        return;
+
+    vshSaveLibvirtHelperError();
+    virDomainCheckpointFree(chk); /* sc_prohibit_obj_free_apis_in_virsh */
+}
+
+
+void
 virshDomainSnapshotFree(virDomainSnapshotPtr snap)
 {
     if (!snap)
@@ -236,6 +283,17 @@ virshDomainSnapshotFree(virDomainSnapshotPtr snap)
 
     vshSaveLibvirtHelperError();
     virDomainSnapshotFree(snap); /* sc_prohibit_obj_free_apis_in_virsh */
+}
+
+
+void
+virshSecretFree(virSecretPtr secret)
+{
+    if (!secret)
+        return;
+
+    vshSaveLibvirtHelperError();
+    virSecretFree(secret); /* sc_prohibit_obj_free_apis_in_virsh */
 }
 
 

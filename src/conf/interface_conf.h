@@ -18,18 +18,16 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_INTERFACE_CONF_H
-# define LIBVIRT_INTERFACE_CONF_H
+#pragma once
 
-# include <libxml/parser.h>
-# include <libxml/tree.h>
-# include <libxml/xpath.h>
+#include <libxml/parser.h>
+#include <libxml/tree.h>
+#include <libxml/xpath.h>
 
-# include "internal.h"
-# include "virutil.h"
-# include "virthread.h"
-# include "device_conf.h"
-# include "virenum.h"
+#include "internal.h"
+#include "virthread.h"
+#include "device_conf.h"
+#include "virenum.h"
 
 /* There is currently 3 types of interfaces */
 
@@ -86,7 +84,6 @@ typedef enum {
 struct _virInterfaceDef; /* forward declaration required for bridge/bond */
 
 typedef struct _virInterfaceBridgeDef virInterfaceBridgeDef;
-typedef virInterfaceBridgeDef *virInterfaceBridgeDefPtr;
 struct _virInterfaceBridgeDef {
     int stp;         /* 0, 1 or -1 if undefined */
     char *delay;
@@ -95,7 +92,6 @@ struct _virInterfaceBridgeDef {
 };
 
 typedef struct _virInterfaceBondDef virInterfaceBondDef;
-typedef virInterfaceBondDef *virInterfaceBondDefPtr;
 struct _virInterfaceBondDef {
     int mode;                    /* virInterfaceBondMode */
     int monit;                   /* virInterfaceBondMonit */
@@ -111,14 +107,12 @@ struct _virInterfaceBondDef {
 };
 
 typedef struct _virInterfaceVlanDef virInterfaceVlanDef;
-typedef virInterfaceVlanDef *virInterfaceVlanDefPtr;
 struct _virInterfaceVlanDef {
     char *tag;       /* TAG for vlan */
     char *dev_name;   /* device name for vlan */
 };
 
 typedef struct _virInterfaceIPDef virInterfaceIPDef;
-typedef virInterfaceIPDef *virInterfaceIPDefPtr;
 struct _virInterfaceIPDef {
     char *address;   /* ip address */
     int prefix;      /* ip prefix */
@@ -126,20 +120,18 @@ struct _virInterfaceIPDef {
 
 
 typedef struct _virInterfaceProtocolDef virInterfaceProtocolDef;
-typedef virInterfaceProtocolDef *virInterfaceProtocolDefPtr;
 struct _virInterfaceProtocolDef {
     char *family;    /* ipv4 or ipv6 */
     int dhcp;        /* use dhcp */
     int peerdns;     /* dhcp peerdns ? */
     int autoconf;    /* only useful if family is ipv6 */
     int nips;
-    virInterfaceIPDefPtr *ips; /* ptr to array of ips[nips] */
+    virInterfaceIPDef **ips; /* ptr to array of ips[nips] */
     char *gateway;   /* route gateway */
 };
 
 
 typedef struct _virInterfaceDef virInterfaceDef;
-typedef virInterfaceDef *virInterfaceDefPtr;
 struct _virInterfaceDef {
     int type;                /* interface type */
     char *name;              /* interface name */
@@ -156,27 +148,25 @@ struct _virInterfaceDef {
     } data;
 
     int nprotos;
-    virInterfaceProtocolDefPtr *protos; /* ptr to array of protos[nprotos] */
+    virInterfaceProtocolDef **protos; /* ptr to array of protos[nprotos] */
 };
 
 void
-virInterfaceDefFree(virInterfaceDefPtr def);
+virInterfaceDefFree(virInterfaceDef *def);
 
-virInterfaceDefPtr
+virInterfaceDef *
 virInterfaceDefParseString(const char *xmlStr);
 
-virInterfaceDefPtr
+virInterfaceDef *
 virInterfaceDefParseFile(const char *filename);
 
-virInterfaceDefPtr
+virInterfaceDef *
 virInterfaceDefParseNode(xmlDocPtr xml,
                          xmlNodePtr root);
 
 char *
 virInterfaceDefFormat(const virInterfaceDef *def);
 
-# define VIR_CONNECT_LIST_INTERFACES_FILTERS_ACTIVE \
+#define VIR_CONNECT_LIST_INTERFACES_FILTERS_ACTIVE \
                 (VIR_CONNECT_LIST_INTERFACES_ACTIVE | \
                  VIR_CONNECT_LIST_INTERFACES_INACTIVE)
-
-#endif /* LIBVIRT_INTERFACE_CONF_H */

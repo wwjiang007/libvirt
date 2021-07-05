@@ -19,13 +19,12 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_NWFILTER_PARAMS_H
-# define LIBVIRT_NWFILTER_PARAMS_H
+#pragma once
 
-# include "virhash.h"
-# include "virbuffer.h"
-# include "virmacaddr.h"
-# include "virxml.h"
+#include "virhash.h"
+#include "virbuffer.h"
+#include "virmacaddr.h"
+#include "virxml.h"
 
 typedef enum {
     NWFILTER_VALUE_TYPE_SIMPLE,
@@ -35,7 +34,6 @@ typedef enum {
 } virNWFilterVarValueType;
 
 typedef struct _virNWFilterVarValue virNWFilterVarValue;
-typedef virNWFilterVarValue *virNWFilterVarValuePtr;
 struct _virNWFilterVarValue {
     virNWFilterVarValueType valType;
     union {
@@ -49,41 +47,41 @@ struct _virNWFilterVarValue {
     } u;
 };
 
-virNWFilterVarValuePtr virNWFilterVarValueCreateSimple(char *);
-virNWFilterVarValuePtr virNWFilterVarValueCreateSimpleCopyValue(const char *);
-virNWFilterVarValuePtr virNWFilterVarValueCopy(const virNWFilterVarValue *);
-void virNWFilterVarValueFree(virNWFilterVarValuePtr val);
+virNWFilterVarValue *virNWFilterVarValueCreateSimple(char *);
+virNWFilterVarValue *virNWFilterVarValueCreateSimpleCopyValue(const char *);
+virNWFilterVarValue *virNWFilterVarValueCopy(const virNWFilterVarValue *);
+void virNWFilterVarValueFree(virNWFilterVarValue *val);
+void virNWFilterVarValueHashFree(void *payload);
 const char *virNWFilterVarValueGetSimple(const virNWFilterVarValue *val);
 const char *virNWFilterVarValueGetNthValue(const virNWFilterVarValue *val,
                                            unsigned int idx);
 unsigned int virNWFilterVarValueGetCardinality(const virNWFilterVarValue *);
 bool virNWFilterVarValueEqual(const virNWFilterVarValue *a,
                               const virNWFilterVarValue *b);
-int virNWFilterVarValueAddValue(virNWFilterVarValuePtr val, char *value);
-int virNWFilterVarValueAddValueCopy(virNWFilterVarValuePtr val, const char *value);
-int virNWFilterVarValueDelValue(virNWFilterVarValuePtr val, const char *value);
+int virNWFilterVarValueAddValue(virNWFilterVarValue *val, char *value);
+int virNWFilterVarValueAddValueCopy(virNWFilterVarValue *val, const char *value);
+int virNWFilterVarValueDelValue(virNWFilterVarValue *val, const char *value);
 
-virHashTablePtr virNWFilterParseParamAttributes(xmlNodePtr cur);
-int virNWFilterFormatParamAttributes(virBufferPtr buf,
-                                     virHashTablePtr table,
+GHashTable *virNWFilterParseParamAttributes(xmlNodePtr cur);
+int virNWFilterFormatParamAttributes(virBuffer *buf,
+                                     GHashTable *table,
                                      const char *filterref);
 
-virHashTablePtr virNWFilterHashTableCreate(int n);
-int virNWFilterHashTablePutAll(virHashTablePtr src,
-                               virHashTablePtr dest);
-bool virNWFilterHashTableEqual(virHashTablePtr a,
-                               virHashTablePtr b);
+int virNWFilterHashTablePutAll(GHashTable *src,
+                               GHashTable *dest);
+bool virNWFilterHashTableEqual(GHashTable *a,
+                               GHashTable *b);
 
-# define VALID_VARNAME \
+#define VALID_VARNAME \
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
 
-# define VALID_VARVALUE \
+#define VALID_VARVALUE \
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:"
 
-# define NWFILTER_VARNAME_IP "IP"
-# define NWFILTER_VARNAME_MAC "MAC"
-# define NWFILTER_VARNAME_CTRL_IP_LEARNING "CTRL_IP_LEARNING"
-# define NWFILTER_VARNAME_DHCPSERVER "DHCPSERVER"
+#define NWFILTER_VARNAME_IP "IP"
+#define NWFILTER_VARNAME_MAC "MAC"
+#define NWFILTER_VARNAME_CTRL_IP_LEARNING "CTRL_IP_LEARNING"
+#define NWFILTER_VARNAME_DHCPSERVER "DHCPSERVER"
 
 typedef enum {
     VIR_NWFILTER_VAR_ACCESS_ELEMENT = 0,
@@ -93,7 +91,6 @@ typedef enum {
 } virNWFilterVarAccessType;
 
 typedef struct _virNWFilterVarAccess virNWFilterVarAccess;
-typedef virNWFilterVarAccess *virNWFilterVarAccessPtr;
 struct  _virNWFilterVarAccess {
     virNWFilterVarAccessType accessType;
     union {
@@ -106,24 +103,23 @@ struct  _virNWFilterVarAccess {
     char *varName;
 };
 
-# define VIR_NWFILTER_MAX_ITERID   1000
+#define VIR_NWFILTER_MAX_ITERID   1000
 
-void virNWFilterVarAccessFree(virNWFilterVarAccessPtr varAccess);
+void virNWFilterVarAccessFree(virNWFilterVarAccess *varAccess);
 bool virNWFilterVarAccessEqual(const virNWFilterVarAccess *a,
                                const virNWFilterVarAccess *b);
-virNWFilterVarAccessPtr virNWFilterVarAccessParse(const char *varAccess);
-void virNWFilterVarAccessPrint(virNWFilterVarAccessPtr vap,
-                               virBufferPtr buf);
+virNWFilterVarAccess *virNWFilterVarAccessParse(const char *varAccess);
+void virNWFilterVarAccessPrint(virNWFilterVarAccess *vap,
+                               virBuffer *buf);
 const char *virNWFilterVarAccessGetVarName(const virNWFilterVarAccess *vap);
 virNWFilterVarAccessType virNWFilterVarAccessGetType(
                                            const virNWFilterVarAccess *vap);
 unsigned int virNWFilterVarAccessGetIterId(const virNWFilterVarAccess *vap);
 unsigned int virNWFilterVarAccessGetIndex(const virNWFilterVarAccess *vap);
 bool virNWFilterVarAccessIsAvailable(const virNWFilterVarAccess *vap,
-                                     const virHashTable *hash);
+                                     GHashTable *hash);
 
 typedef struct _virNWFilterVarCombIterEntry virNWFilterVarCombIterEntry;
-typedef virNWFilterVarCombIterEntry *virNWFilterVarCombIterEntryPtr;
 struct _virNWFilterVarCombIterEntry {
     unsigned int iterId;
     const char **varNames;
@@ -134,22 +130,18 @@ struct _virNWFilterVarCombIterEntry {
 };
 
 typedef struct _virNWFilterVarCombIter virNWFilterVarCombIter;
-typedef virNWFilterVarCombIter *virNWFilterVarCombIterPtr;
 struct _virNWFilterVarCombIter {
-    virHashTablePtr hashTable;
+    GHashTable *hashTable;
     size_t nIter;
-    virNWFilterVarCombIterEntry iter[0];
+    virNWFilterVarCombIterEntry *iter;
 };
-virNWFilterVarCombIterPtr virNWFilterVarCombIterCreate(
-                             virHashTablePtr hash,
-                             virNWFilterVarAccessPtr *vars,
+virNWFilterVarCombIter *virNWFilterVarCombIterCreate(
+                             GHashTable *hash,
+                             virNWFilterVarAccess **vars,
                              size_t nVars);
 
-void virNWFilterVarCombIterFree(virNWFilterVarCombIterPtr ci);
-virNWFilterVarCombIterPtr virNWFilterVarCombIterNext(
-                                virNWFilterVarCombIterPtr ci);
-const char *virNWFilterVarCombIterGetVarValue(virNWFilterVarCombIterPtr ci,
+void virNWFilterVarCombIterFree(virNWFilterVarCombIter *ci);
+virNWFilterVarCombIter *virNWFilterVarCombIterNext(
+                                virNWFilterVarCombIter *ci);
+const char *virNWFilterVarCombIterGetVarValue(virNWFilterVarCombIter *ci,
                                               const virNWFilterVarAccess *);
-
-
-#endif /* LIBVIRT_NWFILTER_PARAMS_H */

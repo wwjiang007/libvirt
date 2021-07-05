@@ -20,13 +20,12 @@
 #include "virfile.h"
 #include "testutils.h"
 
-#if HAVE_DLFCN_H
+#if WITH_DLFCN_H
 # include <dlfcn.h>
 #endif
 
 #if defined(__linux__) && defined(RTLD_NEXT)
 
-# include "virutil.h"
 # include "virerror.h"
 # include "viralloc.h"
 # include "virlog.h"
@@ -37,9 +36,9 @@
 
 VIR_LOG_INIT("tests.portallocatortest");
 
-static int testAllocAll(const void *args ATTRIBUTE_UNUSED)
+static int testAllocAll(const void *args G_GNUC_UNUSED)
 {
-    virPortAllocatorRangePtr ports = virPortAllocatorRangeNew("test", 5900, 5909);
+    virPortAllocatorRange *ports = virPortAllocatorRangeNew("test", 5900, 5909);
     int ret = -1;
     unsigned short p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0;
 
@@ -109,9 +108,9 @@ static int testAllocAll(const void *args ATTRIBUTE_UNUSED)
 
 
 
-static int testAllocReuse(const void *args ATTRIBUTE_UNUSED)
+static int testAllocReuse(const void *args G_GNUC_UNUSED)
 {
-    virPortAllocatorRangePtr ports = virPortAllocatorRangeNew("test", 5900, 5910);
+    virPortAllocatorRange *ports = virPortAllocatorRangeNew("test", 5900, 5910);
     int ret = -1;
     unsigned short p1 = 0, p2 = 0, p3 = 0, p4 = 0;
 
@@ -171,7 +170,7 @@ mymain(void)
     if (virTestRun("Test alloc reuse", testAllocReuse, NULL) < 0)
         ret = -1;
 
-    setenv("LIBVIRT_TEST_IPV4ONLY", "really", 1);
+    g_setenv("LIBVIRT_TEST_IPV4ONLY", "really", TRUE);
 
     if (virTestRun("Test IPv4-only alloc all", testAllocAll, NULL) < 0)
         ret = -1;
@@ -182,7 +181,7 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/virportallocatormock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("virportallocator"))
 #else /* defined(__linux__) && defined(RTLD_NEXT) */
 int
 main(void)

@@ -19,10 +19,9 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRHOOK_H
-# define LIBVIRT_VIRHOOK_H
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 typedef enum {
     VIR_HOOK_DRIVER_DAEMON = 0,        /* Daemon related events */
@@ -30,6 +29,7 @@ typedef enum {
     VIR_HOOK_DRIVER_LXC,               /* LXC domains related events */
     VIR_HOOK_DRIVER_NETWORK,           /* network related events */
     VIR_HOOK_DRIVER_LIBXL,             /* Xen libxl domains related events */
+    VIR_HOOK_DRIVER_BHYVE,             /* Bhyve domains related events */
 
     VIR_HOOK_DRIVER_LAST,
 } virHookDriverType;
@@ -79,8 +79,8 @@ typedef enum {
     VIR_HOOK_NETWORK_OP_START,          /* network is about to start */
     VIR_HOOK_NETWORK_OP_STARTED,        /* network has start */
     VIR_HOOK_NETWORK_OP_STOPPED,        /* network has stopped */
-    VIR_HOOK_NETWORK_OP_IFACE_PLUGGED,  /* an interface has been plugged into the network */
-    VIR_HOOK_NETWORK_OP_IFACE_UNPLUGGED,    /* an interface was unplugged from the network */
+    VIR_HOOK_NETWORK_OP_PORT_CREATED,   /* port has been created in the network */
+    VIR_HOOK_NETWORK_OP_PORT_DELETED,   /* port has been deleted in the network */
     VIR_HOOK_NETWORK_OP_UPDATED,        /* network has been updated */
 
     VIR_HOOK_NETWORK_OP_LAST,
@@ -98,11 +98,19 @@ typedef enum {
     VIR_HOOK_LIBXL_OP_LAST,
 } virHookLibxlOpType;
 
+typedef enum {
+    VIR_HOOK_BHYVE_OP_START,            /* domain is about to start */
+    VIR_HOOK_BHYVE_OP_STOPPED,          /* domain has stopped */
+    VIR_HOOK_BHYVE_OP_PREPARE,          /* domain startup initiated */
+    VIR_HOOK_BHYVE_OP_RELEASE,          /* domain destruction is over */
+    VIR_HOOK_BHYVE_OP_STARTED,          /* domain has started */
+
+    VIR_HOOK_BHYVE_OP_LAST,
+} virHookBhyveOpType;
+
 int virHookInitialize(void);
 
 int virHookPresent(int driver);
 
 int virHookCall(int driver, const char *id, int op, int sub_op,
                 const char *extra, const char *input, char **output);
-
-#endif /* LIBVIRT_VIRHOOK_H */

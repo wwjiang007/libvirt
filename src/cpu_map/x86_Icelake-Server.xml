@@ -1,6 +1,7 @@
 <cpus>
   <model name='Icelake-Server'>
-    <signature family='6' model='134'/> <!-- 080660 -->
+    <decode host='on' guest='on'/>
+    <signature family='6' model='106'/> <!-- 0606A5 -->
     <vendor name='Intel'/>
     <feature name='3dnowprefetch'/>
     <feature name='abm'/>
@@ -37,7 +38,7 @@
     <feature name='fxsr'/>
     <feature name='gfni'/>
     <feature name='hle'/>
-    <feature name='intel-pt'/>
+    <feature name='intel-pt' removed='yes'/>
     <feature name='invpcid'/>
     <feature name='la57'/>
     <feature name='lahf_lm'/>
@@ -50,13 +51,10 @@
     <feature name='msr'/>
     <feature name='mtrr'/>
     <feature name='nx'/>
-    <!-- 'ospke' is a dynamic feature and cannot be enabled manually
-         see QEMU's commit 9ccb9784b57 for more details -->
     <feature name='pae'/>
     <feature name='pat'/>
     <feature name='pcid'/>
     <feature name='pclmuldq'/>
-    <feature name='pconfig'/>
     <feature name='pdpe1gb'/>
     <feature name='pge'/>
     <feature name='pku'/>

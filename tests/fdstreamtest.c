@@ -29,7 +29,6 @@
 #include "virlog.h"
 #include "virstring.h"
 #include "virfile.h"
-#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -55,15 +54,13 @@ static int testFDStreamReadCommon(const char *scratchdir, bool blocking)
     if (!(conn = virConnectOpen("test:///default")))
         goto cleanup;
 
-    if (VIR_ALLOC_N(pattern, PATTERN_LEN) < 0 ||
-        VIR_ALLOC_N(buf, PATTERN_LEN) < 0)
-        goto cleanup;
+    pattern = g_new0(char, PATTERN_LEN);
+    buf = g_new0(char, PATTERN_LEN);
 
     for (i = 0; i < PATTERN_LEN; i++)
         pattern[i] = i;
 
-    if (virAsprintf(&file, "%s/input.data", scratchdir) < 0)
-        goto cleanup;
+    file = g_strdup_printf("%s/input.data", scratchdir);
 
     if ((fd = open(file, O_CREAT|O_WRONLY|O_EXCL, 0600)) < 0)
         goto cleanup;
@@ -101,19 +98,19 @@ static int testFDStreamReadCommon(const char *scratchdir, bool blocking)
             got = st->driver->streamRecv(st, buf + offset, want);
             if (got < 0) {
                 if (got == -2 && !blocking) {
-                    usleep(20 * 1000);
+                    g_usleep(20 * 1000);
                     goto reread;
                 }
-                virFilePrintf(stderr, "Failed to read stream: %s\n",
-                              virGetLastErrorMessage());
+                fprintf(stderr, "Failed to read stream: %s\n",
+                        virGetLastErrorMessage());
                 goto cleanup;
             }
             if (got == 0) {
                 /* Expect EOF 1/2 through last pattern */
                 if (i == 9 && want == (PATTERN_LEN / 2))
                     break;
-                virFilePrintf(stderr, "Unexpected EOF block %zu want %zu\n",
-                              i, want);
+                fprintf(stderr, "Unexpected EOF block %zu want %zu\n",
+                        i, want);
                 goto cleanup;
             }
             offset += got;
@@ -121,25 +118,25 @@ static int testFDStreamReadCommon(const char *scratchdir, bool blocking)
         }
         if (i == 0) {
             if (memcmp(buf, pattern + (PATTERN_LEN / 2), PATTERN_LEN / 2) != 0) {
-                virFilePrintf(stderr, "Mismatched pattern data iteration %zu\n", i);
+                fprintf(stderr, "Mismatched pattern data iteration %zu\n", i);
                 goto cleanup;
             }
         } else if (i == 9) {
             if (memcmp(buf, pattern, PATTERN_LEN / 2) != 0) {
-                virFilePrintf(stderr, "Mismatched pattern data iteration %zu\n", i);
+                fprintf(stderr, "Mismatched pattern data iteration %zu\n", i);
                 goto cleanup;
             }
         } else {
             if (memcmp(buf, pattern, PATTERN_LEN) != 0) {
-                virFilePrintf(stderr, "Mismatched pattern data iteration %zu\n", i);
+                fprintf(stderr, "Mismatched pattern data iteration %zu\n", i);
                 goto cleanup;
             }
         }
     }
 
     if (st->driver->streamFinish(st) != 0) {
-        virFilePrintf(stderr, "Failed to finish stream: %s\n",
-                      virGetLastErrorMessage());
+        fprintf(stderr, "Failed to finish stream: %s\n",
+                virGetLastErrorMessage());
         goto cleanup;
     }
 
@@ -187,15 +184,13 @@ static int testFDStreamWriteCommon(const char *scratchdir, bool blocking)
     if (!(conn = virConnectOpen("test:///default")))
         goto cleanup;
 
-    if (VIR_ALLOC_N(pattern, PATTERN_LEN) < 0 ||
-        VIR_ALLOC_N(buf, PATTERN_LEN) < 0)
-        goto cleanup;
+    pattern = g_new0(char, PATTERN_LEN);
+    buf = g_new0(char, PATTERN_LEN);
 
     for (i = 0; i < PATTERN_LEN; i++)
         pattern[i] = i;
 
-    if (virAsprintf(&file, "%s/input.data", scratchdir) < 0)
-        goto cleanup;
+    file = g_strdup_printf("%s/input.data", scratchdir);
 
     if (!(st = virStreamNew(conn, flags)))
         goto cleanup;
@@ -222,14 +217,14 @@ static int testFDStreamWriteCommon(const char *scratchdir, bool blocking)
             got = st->driver->streamSend(st, pattern + offset, want);
             if (got < 0) {
                 if (got == -2 && !blocking) {
-                    usleep(20 * 1000);
+                    g_usleep(20 * 1000);
                     goto rewrite;
                 }
                 if (i == 9 &&
                     want == (PATTERN_LEN / 2))
                     break;
-                virFilePrintf(stderr, "Failed to write stream: %s\n",
-                              virGetLastErrorMessage());
+                fprintf(stderr, "Failed to write stream: %s\n",
+                        virGetLastErrorMessage());
                 goto cleanup;
             }
             offset += got;
@@ -238,8 +233,8 @@ static int testFDStreamWriteCommon(const char *scratchdir, bool blocking)
     }
 
     if (st->driver->streamFinish(st) != 0) {
-        virFilePrintf(stderr, "Failed to finish stream: %s\n",
-                      virGetLastErrorMessage());
+        fprintf(stderr, "Failed to finish stream: %s\n",
+                virGetLastErrorMessage());
         goto cleanup;
    }
 
@@ -254,9 +249,9 @@ static int testFDStreamWriteCommon(const char *scratchdir, bool blocking)
             want = PATTERN_LEN;
 
         if ((got = saferead(fd, buf, want)) != want) {
-            virFilePrintf(stderr,
-                          "Short read from data, i=%zu got=%zu want=%zu\n",
-                          i, got, want);
+            fprintf(stderr,
+                    "Short read from data, i=%zu got=%zu want=%zu\n",
+                    i, got, want);
             goto cleanup;
         }
 
@@ -264,22 +259,22 @@ static int testFDStreamWriteCommon(const char *scratchdir, bool blocking)
             size_t j;
             for (j = 0; j < (PATTERN_LEN / 2); j++) {
                 if (buf[j] != 0) {
-                    virFilePrintf(stderr, "Mismatched pattern data iteration %zu\n", i);
+                    fprintf(stderr, "Mismatched pattern data iteration %zu\n", i);
                     goto cleanup;
                 }
             }
             if (memcmp(buf + (PATTERN_LEN / 2), pattern, PATTERN_LEN / 2) != 0) {
-                virFilePrintf(stderr, "Mismatched pattern data iteration %zu\n", i);
+                fprintf(stderr, "Mismatched pattern data iteration %zu\n", i);
                 goto cleanup;
             }
         } else if (i == 9) {
             if (memcmp(buf, pattern, PATTERN_LEN / 2) != 0) {
-                virFilePrintf(stderr, "Mismatched pattern data iteration %zu\n", i);
+                fprintf(stderr, "Mismatched pattern data iteration %zu\n", i);
                 goto cleanup;
             }
         } else {
             if (memcmp(buf, pattern, PATTERN_LEN) != 0) {
-                virFilePrintf(stderr, "Mismatched pattern data iteration %zu\n", i);
+                fprintf(stderr, "Mismatched pattern data iteration %zu\n", i);
                 goto cleanup;
             }
         }
@@ -321,8 +316,8 @@ mymain(void)
     char scratchdir[] = SCRATCHDIRTEMPLATE;
     int ret = 0;
 
-    if (!mkdtemp(scratchdir)) {
-        virFilePrintf(stderr, "Cannot create fdstreamdir");
+    if (!g_mkdtemp(scratchdir)) {
+        fprintf(stderr, "Cannot create fdstreamdir");
         abort();
     }
 

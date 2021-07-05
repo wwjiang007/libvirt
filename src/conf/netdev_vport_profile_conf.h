@@ -16,13 +16,12 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_NETDEV_VPORT_PROFILE_CONF_H
-# define LIBVIRT_NETDEV_VPORT_PROFILE_CONF_H
+#pragma once
 
-# include "internal.h"
-# include "virnetdevvportprofile.h"
-# include "virbuffer.h"
-# include "virxml.h"
+#include "internal.h"
+#include "virnetdevvportprofile.h"
+#include "virbuffer.h"
+#include "virxml.h"
 
 typedef enum {
     /* generate random defaults for interfaceID/interfaceID
@@ -37,12 +36,9 @@ typedef enum {
     VIR_VPORT_XML_REQUIRE_TYPE              = (1<<2),
 } virNetDevVPortXMLFlags;
 
-virNetDevVPortProfilePtr
+virNetDevVPortProfile *
 virNetDevVPortProfileParse(xmlNodePtr node, unsigned int flags);
 
 int
-virNetDevVPortProfileFormat(virNetDevVPortProfilePtr virtPort,
-                            virBufferPtr buf);
-
-
-#endif /* LIBVIRT_NETDEV_VPORT_PROFILE_CONF_H */
+virNetDevVPortProfileFormat(const virNetDevVPortProfile *virtPort,
+                            virBuffer *buf);

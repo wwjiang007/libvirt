@@ -18,18 +18,11 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_DRIVER_SECRET_H
-# define LIBVIRT_DRIVER_SECRET_H
+#pragma once
 
-# ifndef __VIR_DRIVER_H_INCLUDES___
-#  error "Don't include this file directly, only use driver.h"
-# endif
-
-enum {
-    /* This getValue call is inside libvirt, override the "private" flag.
-       This flag cannot be set by outside callers. */
-    VIR_SECRET_GET_VALUE_INTERNAL_CALL = 1 << 0,
-};
+#ifndef __VIR_DRIVER_H_INCLUDES___
+# error "Don't include this file directly, only use driver.h"
+#endif
 
 typedef virSecretPtr
 (*virDrvSecretLookupByUUID)(virConnectPtr conn,
@@ -58,8 +51,7 @@ typedef int
 typedef unsigned char *
 (*virDrvSecretGetValue)(virSecretPtr secret,
                         size_t *value_size,
-                        unsigned int flags,
-                        unsigned int internalFlags);
+                        unsigned int flags);
 
 typedef int
 (*virDrvSecretUndefine)(virSecretPtr secret);
@@ -90,7 +82,6 @@ typedef int
                                          int callbackID);
 
 typedef struct _virSecretDriver virSecretDriver;
-typedef virSecretDriver *virSecretDriverPtr;
 
 /**
  * _virSecretDriver:
@@ -113,6 +104,3 @@ struct _virSecretDriver {
     virDrvConnectSecretEventRegisterAny connectSecretEventRegisterAny;
     virDrvConnectSecretEventDeregisterAny connectSecretEventDeregisterAny;
 };
-
-
-#endif /* LIBVIRT_DRIVER_SECRET_H */

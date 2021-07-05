@@ -10,6 +10,7 @@
 #include "network_conf.h"
 #include "testutilsqemu.h"
 #include "virstring.h"
+#include "network/bridge_driver.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -28,16 +29,20 @@ testCompareXMLToXMLFiles(const char *inxml, const char *outxml,
     char *actual = NULL;
     int ret;
     testCompareNetXML2XMLResult result = TEST_COMPARE_NET_XML2XML_RESULT_SUCCESS;
-    virNetworkDefPtr dev = NULL;
+    virNetworkDef *dev = NULL;
+    virNetworkXMLOption *xmlopt = NULL;
 
-    if (!(dev = virNetworkDefParseFile(inxml))) {
+    if (!(xmlopt = networkDnsmasqCreateXMLConf()))
+        goto cleanup;
+
+    if (!(dev = virNetworkDefParseFile(inxml, xmlopt))) {
         result = TEST_COMPARE_NET_XML2XML_RESULT_FAIL_PARSE;
         goto cleanup;
     }
     if (expectResult == TEST_COMPARE_NET_XML2XML_RESULT_FAIL_PARSE)
         goto cleanup;
 
-    if (!(actual = virNetworkDefFormat(dev, flags))) {
+    if (!(actual = virNetworkDefFormat(dev, xmlopt, flags))) {
         result = TEST_COMPARE_NET_XML2XML_RESULT_FAIL_FORMAT;
         goto cleanup;
     }
@@ -67,6 +72,7 @@ testCompareXMLToXMLFiles(const char *inxml, const char *outxml,
 
     VIR_FREE(actual);
     virNetworkDefFree(dev);
+    virObjectUnref(xmlopt);
     return ret;
 }
 
@@ -84,17 +90,12 @@ testCompareXMLToXMLHelper(const void *data)
     char *inxml = NULL;
     char *outxml = NULL;
 
-    if (virAsprintf(&inxml, "%s/networkxml2xmlin/%s.xml",
-                    abs_srcdir, info->name) < 0 ||
-        virAsprintf(&outxml, "%s/networkxml2xmlout/%s.xml",
-                    abs_srcdir, info->name) < 0) {
-        goto cleanup;
-    }
+    inxml = g_strdup_printf("%s/networkxml2xmlin/%s.xml", abs_srcdir, info->name);
+    outxml = g_strdup_printf("%s/networkxml2xmlout/%s.xml", abs_srcdir, info->name);
 
     result = testCompareXMLToXMLFiles(inxml, outxml, info->flags,
                                       info->expectResult);
 
- cleanup:
     VIR_FREE(inxml);
     VIR_FREE(outxml);
 
@@ -139,6 +140,7 @@ mymain(void)
     DO_TEST("nat-network-dns-forward-plain");
     DO_TEST("nat-network-dns-forwarders");
     DO_TEST("nat-network-dns-forwarder-no-resolv");
+    DO_TEST("nat-network-forward-nat-ipv6");
     DO_TEST("nat-network-forward-nat-address");
     DO_TEST("nat-network-forward-nat-no-address");
     DO_TEST("nat-network-mtu");
@@ -158,6 +160,12 @@ mymain(void)
     DO_TEST_PARSE_ERROR("passthrough-duplicate");
     DO_TEST("metadata");
     DO_TEST("set-mtu");
+    DO_TEST("dnsmasq-options");
+    DO_TEST("leasetime-seconds");
+    DO_TEST("leasetime-minutes");
+    DO_TEST("leasetime-hours");
+    DO_TEST("leasetime-infinite");
+    DO_TEST("isolated-ports");
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

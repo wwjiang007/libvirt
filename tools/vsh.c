@@ -24,36 +24,28 @@
 #include <assert.h>
 #include <stdarg.h>
 #include <unistd.h>
-#include <sys/time.h>
-#include "c-ctype.h"
 #include <fcntl.h>
-#include <time.h>
 #include <sys/stat.h>
 #include <inttypes.h>
 #include <signal.h>
 
 #if WITH_READLINE
+/* In order to have proper rl_message declaration with older
+ * versions of readline, we have to declare this. See 9ea3424a178
+ * for more info. */
+# define HAVE_STDARG_H
 # include <readline/readline.h>
 # include <readline/history.h>
 #endif
 
 #include "internal.h"
-#include "virerror.h"
 #include "virbuffer.h"
 #include "viralloc.h"
-#include <libvirt/libvirt-qemu.h>
-#include <libvirt/libvirt-lxc.h>
 #include "virfile.h"
 #include "virthread.h"
 #include "vircommand.h"
-#include "conf/domain_conf.h"
-#include "virtypedparam.h"
 #include "virstring.h"
-
-/* Gnulib doesn't guarantee SA_SIGINFO support.  */
-#ifndef SA_SIGINFO
-# define SA_SIGINFO 0
-#endif
+#include "virutil.h"
 
 #ifdef WITH_READLINE
 /* For autocompletion */
@@ -66,17 +58,6 @@ vshControl *autoCompleteOpaque;
  */
 const vshCmdGrp *cmdGroups;
 const vshCmdDef *cmdSet;
-
-
-/* simple handler for oom conditions */
-static void
-vshErrorOOM(void)
-{
-    fflush(stdout);
-    fputs(_("error: Out of memory\n"), stderr);
-    fflush(stderr);
-    exit(EXIT_FAILURE);
-}
 
 
 double
@@ -119,44 +100,6 @@ vshPrettyCapacity(unsigned long long val, const char **unit)
 }
 
 
-void *
-_vshMalloc(vshControl *ctl, size_t size, const char *filename, int line)
-{
-    char *x;
-
-    if (VIR_ALLOC_N(x, size) == 0)
-        return x;
-    vshError(ctl, _("%s: %d: failed to allocate %d bytes"),
-             filename, line, (int) size);
-    exit(EXIT_FAILURE);
-}
-
-void *
-_vshCalloc(vshControl *ctl, size_t nmemb, size_t size, const char *filename,
-           int line)
-{
-    char *x;
-
-    if (!xalloc_oversized(nmemb, size) &&
-        VIR_ALLOC_N(x, nmemb * size) == 0)
-        return x;
-    vshError(ctl, _("%s: %d: failed to allocate %d bytes"),
-             filename, line, (int) (size*nmemb));
-    exit(EXIT_FAILURE);
-}
-
-char *
-_vshStrdup(vshControl *ctl, const char *s, const char *filename, int line)
-{
-    char *x;
-
-    if (VIR_STRDUP(x, s) >= 0)
-        return x;
-    vshError(ctl, _("%s: %d: failed to allocate %lu bytes"),
-             filename, line, (unsigned long)strlen(s));
-    exit(EXIT_FAILURE);
-}
-
 int
 vshNameSorter(const void *a, const void *b)
 {
@@ -170,7 +113,7 @@ vshNameSorter(const void *a, const void *b)
 /*
  * Convert the strings separated by ',' into array. The returned
  * array is a NULL terminated string list. The caller has to free
- * the array using virStringListFree or a similar method.
+ * the array using g_strfreev or a similar method.
  *
  * Returns the length of the filled array on success, or -1
  * on error.
@@ -179,7 +122,7 @@ int
 vshStringToArray(const char *str,
                  char ***array)
 {
-    char *str_copied = vshStrdup(NULL, str);
+    char *str_copied = g_strdup(str);
     char *str_tok = NULL;
     char *tmp;
     unsigned int nstr_tokens = 0;
@@ -201,10 +144,7 @@ vshStringToArray(const char *str,
     }
 
     /* reserve the NULL element at the end */
-    if (VIR_ALLOC_N(arr, nstr_tokens + 1) < 0) {
-        VIR_FREE(str_copied);
-        return -1;
-    }
+    arr = g_new0(char *, nstr_tokens + 1);
 
     /* tokenize the input string, while treating ,, as a literal comma */
     nstr_tokens = 0;
@@ -217,10 +157,10 @@ vshStringToArray(const char *str,
             continue;
         }
         *tmp++ = '\0';
-        arr[nstr_tokens++] = vshStrdup(NULL, str_tok);
+        arr[nstr_tokens++] = g_strdup(str_tok);
         str_tok = tmp;
     }
-    arr[nstr_tokens++] = vshStrdup(NULL, str_tok);
+    arr[nstr_tokens++] = g_strdup(str_tok);
 
     *array = arr;
     VIR_FREE(str_copied);
@@ -233,8 +173,8 @@ virErrorPtr last_error;
  * Quieten libvirt until we're done with the command.
  */
 void
-vshErrorHandler(void *opaque ATTRIBUTE_UNUSED,
-                virErrorPtr error ATTRIBUTE_UNUSED)
+vshErrorHandler(void *opaque G_GNUC_UNUSED,
+                virErrorPtr error G_GNUC_UNUSED)
 {
     virFreeError(last_error);
     last_error = virSaveLastError();
@@ -336,6 +276,7 @@ vshCmddefCheckInternals(vshControl *ctl,
 {
     size_t i;
     const char *help = NULL;
+    bool seenOptionalOption = false;
 
     /* in order to perform the validation resolve the alias first */
     if (cmd->flags & VSH_CMD_FLAG_ALIAS) {
@@ -367,10 +308,12 @@ vshCmddefCheckInternals(vshControl *ctl,
         case VSH_OT_STRING:
         case VSH_OT_BOOL:
             if (opt->flags & VSH_OFLAG_REQ) {
-                vshError(ctl, _("command '%s' misused VSH_OFLAG_REQ"),
-                         cmd->name);
+                vshError(ctl, _("parameter '%s' of command '%s' misused VSH_OFLAG_REQ"),
+                         opt->name, cmd->name);
                 return -1; /* neither bool nor string options can be mandatory */
             }
+
+            seenOptionalOption = true;
             break;
 
         case VSH_OT_ALIAS: {
@@ -379,13 +322,12 @@ vshCmddefCheckInternals(vshControl *ctl,
             char *p;
 
             if (opt->flags || !opt->help) {
-                vshError(ctl, _("command '%s' has incorrect alias option"),
-                         cmd->name);
+                vshError(ctl, _("parameter '%s' of command '%s' has incorrect alias option"),
+                         opt->name, cmd->name);
                 return -1; /* alias options are tracked by the original name */
             }
-            if ((p = strchr(name, '=')) &&
-                VIR_STRNDUP(name, name, p - name) < 0)
-                vshErrorOOM();
+            if ((p = strchr(name, '=')))
+                name = g_strndup(name, p - name);
             for (j = i + 1; cmd->opts[j].name; j++) {
                 if (STREQ(name, cmd->opts[j].name) &&
                     cmd->opts[j].type != VSH_OT_ALIAS)
@@ -395,35 +337,51 @@ vshCmddefCheckInternals(vshControl *ctl,
                 VIR_FREE(name);
                 /* If alias comes with value, replacement must not be bool */
                 if (cmd->opts[j].type == VSH_OT_BOOL) {
-                    vshError(ctl, _("command '%s' has mismatched alias type"),
-                             cmd->name);
+                    vshError(ctl, _("alias '%s' of command '%s' has mismatched alias type"),
+                             opt->name, cmd->name);
                     return -1;
                 }
             }
             if (!cmd->opts[j].name) {
-                vshError(ctl, _("command '%s' has missing alias option"),
-                         cmd->name);
+                vshError(ctl, _("alias '%s' of command '%s' has missing alias option"),
+                         opt->name, cmd->name);
                 return -1; /* alias option must map to a later option name */
             }
         }
             break;
         case VSH_OT_ARGV:
             if (cmd->opts[i + 1].name) {
-                vshError(ctl, _("command '%s' does not list argv option last"),
-                         cmd->name);
+                vshError(ctl, _("parameter '%s' of command '%s' must be listed last"),
+                         opt->name, cmd->name);
                 return -1; /* argv option must be listed last */
             }
             break;
 
         case VSH_OT_DATA:
             if (!(opt->flags & VSH_OFLAG_REQ)) {
-                vshError(ctl, _("command '%s' has non-required VSH_OT_DATA"),
-                         cmd->name);
+                vshError(ctl, _("parameter '%s' of command '%s' must use VSH_OFLAG_REQ flag"),
+                         opt->name, cmd->name);
                 return -1; /* OT_DATA should always be required. */
+            }
+
+            if (seenOptionalOption) {
+                vshError(ctl, _("parameter '%s' of command '%s' must be listed before optional parameters"),
+                         opt->name, cmd->name);
+                return -1;  /* mandatory options must be listed first */
             }
             break;
 
         case VSH_OT_INT:
+            if (opt->flags & VSH_OFLAG_REQ) {
+                if (seenOptionalOption) {
+                    vshError(ctl, _("parameter '%s' of command '%s' must be listed before optional parameters"),
+                             opt->name, cmd->name);
+                    return -1;  /* mandatory options must be listed first */
+                }
+            } else {
+                seenOptionalOption = true;
+            }
+
             break;
         }
     }
@@ -431,54 +389,36 @@ vshCmddefCheckInternals(vshControl *ctl,
 }
 
 /* Parse the options associated with @cmd, i.e. test whether options are
- * required or need an argument.
- *
- * Returns -1 on error or 0 on success, filling the caller-provided bitmaps
- * which keep track of required options and options needing an argument.
+ * required or need an argument and fill the appropriate caller-provided bitmaps
  */
-static int
-vshCmddefOptParse(const vshCmdDef *cmd, uint64_t *opts_need_arg,
+static void
+vshCmddefOptParse(const vshCmdDef *cmd,
+                  uint64_t *opts_need_arg,
                   uint64_t *opts_required)
 {
     size_t i;
-    bool optional = false;
 
     *opts_need_arg = 0;
     *opts_required = 0;
 
     if (!cmd->opts)
-        return 0;
+        return;
 
     for (i = 0; cmd->opts[i].name; i++) {
         const vshCmdOptDef *opt = &cmd->opts[i];
 
-        if (opt->type == VSH_OT_BOOL) {
-            optional = true;
+        if (opt->type == VSH_OT_BOOL)
             continue;
-        }
-
-        if (opt->flags & VSH_OFLAG_REQ_OPT) {
-            if (opt->flags & VSH_OFLAG_REQ)
-                *opts_required |= 1ULL << i;
-            else
-                optional = true;
-            continue;
-        }
 
         if (opt->type == VSH_OT_ALIAS)
             continue; /* skip the alias option */
 
-        *opts_need_arg |= 1ULL << i;
-        if (opt->flags & VSH_OFLAG_REQ) {
-            if (optional && opt->type != VSH_OT_ARGV)
-                return -1; /* mandatory options must be listed first */
-            *opts_required |= 1ULL << i;
-        } else {
-            optional = true;
-        }
-    }
+        if (!(opt->flags & VSH_OFLAG_REQ_OPT))
+            *opts_need_arg |= 1ULL << i;
 
-    return 0;
+        if (opt->flags & VSH_OFLAG_REQ)
+            *opts_required |= 1ULL << i;
+    }
 }
 
 static vshCmdOptDef helpopt = {
@@ -509,9 +449,7 @@ vshCmddefGetOption(vshControl *ctl, const vshCmdDef *cmd, const char *name,
                    opt->help = "string": straight replacement of name
                    opt->help = "string=value": treat boolean flag as
                    alias of option and its default value */
-                sa_assert(!alias);
-                if (VIR_STRDUP(alias, opt->help) < 0)
-                    goto cleanup;
+                alias = g_strdup(opt->help);
                 name = alias;
                 if ((value = strchr(name, '='))) {
                     *value = '\0';
@@ -521,8 +459,7 @@ vshCmddefGetOption(vshControl *ctl, const vshCmdDef *cmd, const char *name,
                                      opt->name);
                         goto cleanup;
                     }
-                    if (VIR_STRDUP(*optstr, value + 1) < 0)
-                        goto cleanup;
+                    *optstr = g_strdup(value + 1);
                 }
                 continue;
             }
@@ -558,7 +495,7 @@ vshCmddefGetData(const vshCmdDef *cmd, uint64_t *opts_need_arg,
         return NULL;
 
     /* Grab least-significant set bit */
-    i = ffsl(*opts_need_arg) - 1;
+    i = __builtin_ffsl(*opts_need_arg) - 1;
     opt = &cmd->opts[i];
     if (opt->type != VSH_OT_ARGV)
         *opts_need_arg &= ~(1ULL << i);
@@ -663,20 +600,12 @@ vshCmdGrpHelp(vshControl *ctl, const vshCmdGrp *grp)
     return true;
 }
 
-bool
-vshCmddefHelp(vshControl *ctl, const vshCmdDef *def)
+static bool
+vshCmddefHelp(const vshCmdDef *def)
 {
     const char *desc = NULL;
     char buf[256];
-    uint64_t opts_need_arg;
-    uint64_t opts_required;
     bool shortopt = false; /* true if 'arg' works instead of '--opt arg' */
-
-    if (vshCmddefOptParse(def, &opts_need_arg, &opts_required)) {
-        vshError(ctl, _("internal error: bad options in command: '%s'"),
-                 def->name);
-        return false;
-    }
 
     fputs(_("  NAME\n"), stdout);
     fprintf(stdout, "    %s - %s\n", def->name,
@@ -732,7 +661,7 @@ vshCmddefHelp(vshControl *ctl, const vshCmdDef *def)
     fputc('\n', stdout);
 
     desc = vshCmddefGetInfo(def, "desc");
-    if (*desc) {
+    if (desc && *desc) {
         /* Print the description only if it's not empty.  */
         fputs(_("\n  DESCRIPTION\n"), stdout);
         fprintf(stdout, "    %s\n", _(desc));
@@ -744,24 +673,24 @@ vshCmddefHelp(vshControl *ctl, const vshCmdDef *def)
         for (opt = def->opts; opt->name; opt++) {
             switch (opt->type) {
             case VSH_OT_BOOL:
-                snprintf(buf, sizeof(buf), "--%s", opt->name);
+                g_snprintf(buf, sizeof(buf), "--%s", opt->name);
                 break;
             case VSH_OT_INT:
-                snprintf(buf, sizeof(buf),
-                         (opt->flags & VSH_OFLAG_REQ) ? _("[--%s] <number>")
-                         : _("--%s <number>"), opt->name);
+                g_snprintf(buf, sizeof(buf),
+                           (opt->flags & VSH_OFLAG_REQ) ? _("[--%s] <number>")
+                           : _("--%s <number>"), opt->name);
                 break;
             case VSH_OT_STRING:
-                snprintf(buf, sizeof(buf), _("--%s <string>"), opt->name);
+                g_snprintf(buf, sizeof(buf), _("--%s <string>"), opt->name);
                 break;
             case VSH_OT_DATA:
-                snprintf(buf, sizeof(buf), _("[--%s] <string>"),
-                         opt->name);
+                g_snprintf(buf, sizeof(buf), _("[--%s] <string>"),
+                           opt->name);
                 break;
             case VSH_OT_ARGV:
-                snprintf(buf, sizeof(buf),
-                         shortopt ? _("[--%s] <string>") : _("<%s>"),
-                         opt->name);
+                g_snprintf(buf, sizeof(buf),
+                           shortopt ? _("[--%s] <string>") : _("<%s>"),
+                           opt->name);
                 break;
             case VSH_OT_ALIAS:
                 continue;
@@ -789,8 +718,8 @@ vshCommandOptFree(vshCmdOpt * arg)
 
         a = a->next;
 
-        VIR_FREE(tmp->data);
-        VIR_FREE(tmp);
+        g_free(tmp->data);
+        g_free(tmp);
     }
 }
 
@@ -805,9 +734,11 @@ vshCommandFree(vshCmd *cmd)
         c = c->next;
 
         vshCommandOptFree(tmp->opts);
-        VIR_FREE(tmp);
+        g_free(tmp);
     }
 }
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(vshCmd, vshCommandFree);
 
 /**
  * vshCommandOpt:
@@ -1029,7 +960,7 @@ vshCommandOptULWrap(vshControl *ctl, const vshCmd *cmd,
  * <0 in all other cases (@value untouched)
  */
 int
-vshCommandOptStringQuiet(vshControl *ctl ATTRIBUTE_UNUSED, const vshCmd *cmd,
+vshCommandOptStringQuiet(vshControl *ctl G_GNUC_UNUSED, const vshCmd *cmd,
                          const char *name, const char **value)
 {
     vshCmdOpt *arg;
@@ -1077,7 +1008,7 @@ vshCommandOptStringReq(vshControl *ctl,
     /* this should not be propagated here, just to be sure */
     if (ret == -1)
         error = N_("Mandatory option not present");
-    else if (!*arg->data && !(arg->def->flags & VSH_OFLAG_EMPTY_OK))
+    else if (arg && !*arg->data && !(arg->def->flags & VSH_OFLAG_EMPTY_OK))
         error = N_("Option argument is empty");
 
     if (error) {
@@ -1248,7 +1179,7 @@ vshCommandOptBool(const vshCmd *cmd, const char *name)
  * list of supported options in CMD->def->opts.
  */
 const vshCmdOpt *
-vshCommandOptArgv(vshControl *ctl ATTRIBUTE_UNUSED, const vshCmd *cmd,
+vshCommandOptArgv(vshControl *ctl G_GNUC_UNUSED, const vshCmd *cmd,
                   const vshCmdOpt *opt)
 {
     opt = opt ? opt->next : cmd->opts;
@@ -1324,11 +1255,10 @@ vshCommandRun(vshControl *ctl, const vshCmd *cmd)
     bool ret = true;
 
     while (cmd) {
-        struct timeval before, after;
+        gint64 before, after;
         bool enable_timing = ctl->timing;
 
-        if (enable_timing)
-            GETTIMEOFDAY(&before);
+        before = g_get_real_time();
 
         if ((cmd->def->flags & VSH_CMD_FLAG_NOCONNECT) ||
             (hooks && hooks->connHandler && hooks->connHandler(ctl))) {
@@ -1338,8 +1268,7 @@ vshCommandRun(vshControl *ctl, const vshCmd *cmd)
             ret = false;
         }
 
-        if (enable_timing)
-            GETTIMEOFDAY(&after);
+        after = g_get_real_time();
 
         /* try to automatically catch disconnections */
         if (!ret &&
@@ -1359,8 +1288,7 @@ vshCommandRun(vshControl *ctl, const vshCmd *cmd)
             return ret;
 
         if (enable_timing) {
-            double diff_ms = (((after.tv_sec - before.tv_sec) * 1000.0) +
-                              ((after.tv_usec - before.tv_usec) / 1000.0));
+            double diff_ms = (after - before) / 1000.0;
 
             vshPrint(ctl, _("\n(Time: %.3f ms)\n\n"), diff_ms);
         } else {
@@ -1389,6 +1317,8 @@ struct _vshCommandParser {
                                  char **, bool);
     /* vshCommandStringGetArg() */
     char *pos;
+    const char *originalLine;
+    size_t point;
     /* vshCommandArgvGetArg() */
     char **arg_pos;
     char **arg_end;
@@ -1454,28 +1384,22 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
                 /* aliases need to be resolved to the actual commands */
                 if (cmd->flags & VSH_CMD_FLAG_ALIAS) {
                     VIR_FREE(tkdata);
-                    tkdata = vshStrdup(ctl, cmd->alias);
+                    tkdata = g_strdup(cmd->alias);
                     cmd = vshCmddefSearch(tkdata);
                 }
-                if (vshCmddefOptParse(cmd, &opts_need_arg,
-                                      &opts_required) < 0) {
-                    if (!partial)
-                        vshError(ctl,
-                                 _("internal error: bad options in command: '%s'"),
-                                 tkdata);
-                    goto syntaxError;
-                }
+
+                vshCmddefOptParse(cmd, &opts_need_arg, &opts_required);
                 VIR_FREE(tkdata);
             } else if (data_only) {
                 goto get_data;
             } else if (tkdata[0] == '-' && tkdata[1] == '-' &&
-                       c_isalnum(tkdata[2])) {
+                       g_ascii_isalnum(tkdata[2])) {
                 char *optstr = strchr(tkdata + 2, '=');
                 size_t opt_index = 0;
 
                 if (optstr) {
                     *optstr = '\0'; /* convert the '=' to '\0' */
-                    optstr = vshStrdup(ctl, optstr + 1);
+                    optstr = g_strdup(optstr + 1);
                 }
                 /* Special case 'help' to ignore all spurious options */
                 if (!(opt = vshCmddefGetOption(ctl, cmd, tkdata + 2,
@@ -1493,16 +1417,19 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
                     if (optstr)
                         tkdata = optstr;
                     else
-                        tk = parser->getNextArg(ctl, parser, &tkdata, true);
+                        tk = parser->getNextArg(ctl, parser, &tkdata, partial == NULL);
                     if (tk == VSH_TK_ERROR)
                         goto syntaxError;
                     if (tk != VSH_TK_ARG) {
                         if (partial) {
-                            vshCmdOpt *arg = vshMalloc(ctl, sizeof(vshCmdOpt));
+                            vshCmdOpt *arg = g_new0(vshCmdOpt, 1);
                             arg->def = opt;
-                            arg->data = tkdata;
-                            tkdata = NULL;
+                            arg->data = g_steal_pointer(&tkdata);
                             arg->next = NULL;
+
+                            if (parser->pos - parser->originalLine == parser->point - 1)
+                                arg->completeThis = true;
+
                             if (!first)
                                 first = arg;
                             if (last)
@@ -1547,12 +1474,14 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
             }
             if (opt) {
                 /* save option */
-                vshCmdOpt *arg = vshMalloc(ctl, sizeof(vshCmdOpt));
+                vshCmdOpt *arg = g_new0(vshCmdOpt, 1);
 
                 arg->def = opt;
-                arg->data = tkdata;
+                arg->data = g_steal_pointer(&tkdata);
                 arg->next = NULL;
-                tkdata = NULL;
+
+                if (parser->pos - parser->originalLine == parser->point)
+                    arg->completeThis = true;
 
                 if (!first)
                     first = arg;
@@ -1571,7 +1500,7 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
 
         /* command parsed -- allocate new struct for the command */
         if (cmd) {
-            vshCmd *c = vshMalloc(ctl, sizeof(vshCmd));
+            vshCmd *c = g_new0(vshCmd, 1);
             vshCmdOpt *tmpopt = first;
 
             /* if we encountered --help, replace parsed command with
@@ -1583,9 +1512,9 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
 
                 help = vshCmddefSearch("help");
                 vshCommandOptFree(first);
-                first = vshMalloc(ctl, sizeof(vshCmdOpt));
+                first = g_new0(vshCmdOpt, 1);
                 first->def = help->opts;
-                first->data = vshStrdup(ctl, cmd->name);
+                first->data = g_strdup(cmd->name);
                 first->next = NULL;
 
                 cmd = help;
@@ -1594,14 +1523,13 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
                 break;
             }
 
-            c->opts = first;
+            c->opts = g_steal_pointer(&first);
             c->def = cmd;
             c->next = NULL;
-            first = NULL;
 
             if (!partial &&
                 vshCommandCheckOpts(ctl, c, opts_required, opts_seen) < 0) {
-                VIR_FREE(c);
+                vshCommandFree(c);
                 goto syntaxError;
             }
 
@@ -1627,7 +1555,7 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
     if (partial) {
         vshCmd *tmp;
 
-        tmp = vshMalloc(ctl, sizeof(*tmp));
+        tmp = g_new0(vshCmd, 1);
         tmp->opts = first;
         tmp->def = cmd;
 
@@ -1647,15 +1575,17 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser, vshCmd **partial)
  */
 
 static vshCommandToken ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
-vshCommandArgvGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
-                     bool report ATTRIBUTE_UNUSED)
+vshCommandArgvGetArg(vshControl *ctl G_GNUC_UNUSED,
+                     vshCommandParser *parser,
+                     char **res,
+                     bool report G_GNUC_UNUSED)
 {
     if (parser->arg_pos == parser->arg_end) {
         *res = NULL;
         return VSH_TK_END;
     }
 
-    *res = vshStrdup(ctl, *parser->arg_pos);
+    *res = g_strdup(*parser->arg_pos);
     parser->arg_pos++;
     return VSH_TK_ARG;
 }
@@ -1663,7 +1593,7 @@ vshCommandArgvGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
 bool
 vshCommandArgvParse(vshControl *ctl, int nargs, char **argv)
 {
-    vshCommandParser parser;
+    vshCommandParser parser = { 0 };
 
     if (nargs <= 0)
         return false;
@@ -1685,9 +1615,8 @@ vshCommandStringGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
 {
     bool single_quote = false;
     bool double_quote = false;
-    int sz = 0;
     char *p = parser->pos;
-    char *q = vshStrdup(ctl, p);
+    char *q = g_strdup(p);
 
     *res = q;
 
@@ -1739,12 +1668,17 @@ vshCommandStringGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
         }
 
         *q++ = *p++;
-        sz++;
     }
+
     if (double_quote) {
-        if (report)
+        /* We have seen a double quote, but not it's companion
+         * ending. It's valid though, in case when we're called
+         * from completer (report = false), but it's not valid
+         * when parsing real command (report= true).  */
+        if (report) {
             vshError(ctl, "%s", _("missing \""));
-        return VSH_TK_ERROR;
+            return VSH_TK_ERROR;
+        }
     }
 
     *q = '\0';
@@ -1752,15 +1686,38 @@ vshCommandStringGetArg(vshControl *ctl, vshCommandParser *parser, char **res,
     return VSH_TK_ARG;
 }
 
+
+/**
+ * vshCommandStringParse:
+ * @ctl virsh control structure
+ * @cmdstr: string to parse
+ * @partial: store partially parsed command here
+ * @point: position of cursor (rl_point)
+ *
+ * Parse given string @cmdstr as a command and store it under
+ * @ctl->cmd. For readline completion, if @partial is not NULL on
+ * the input then errors in parsing are ignored (because user is
+ * still in progress of writing the command string) and partially
+ * parsed command is stored at *@partial (caller has to free it
+ * afterwards). Among with @partial, caller must set @point which
+ * is the position of cursor in @cmdstr (offset, numbered from 1).
+ * Parser will then set @completeThis attribute to true for the
+ * vshCmdOpt that appeared under the cursor.
+ */
 bool
-vshCommandStringParse(vshControl *ctl, char *cmdstr, vshCmd **partial)
+vshCommandStringParse(vshControl *ctl,
+                      char *cmdstr,
+                      vshCmd **partial,
+                      size_t point)
 {
-    vshCommandParser parser;
+    vshCommandParser parser = { 0 };
 
     if (cmdstr == NULL || *cmdstr == '\0')
         return false;
 
     parser.pos = cmdstr;
+    parser.originalLine = cmdstr;
+    parser.point = point;
     parser.getNextArg = vshCommandStringGetArg;
     return vshCommandParse(ctl, &parser, partial);
 }
@@ -1810,43 +1767,42 @@ vshCommandOptTimeoutToMs(vshControl *ctl, const vshCmd *cmd, int *timeout)
 char *
 vshGetTypedParamValue(vshControl *ctl, virTypedParameterPtr item)
 {
-    int ret = 0;
     char *str = NULL;
 
     switch (item->type) {
     case VIR_TYPED_PARAM_INT:
-        ret = virAsprintf(&str, "%d", item->value.i);
+        str = g_strdup_printf("%d", item->value.i);
         break;
 
     case VIR_TYPED_PARAM_UINT:
-        ret = virAsprintf(&str, "%u", item->value.ui);
+        str = g_strdup_printf("%u", item->value.ui);
         break;
 
     case VIR_TYPED_PARAM_LLONG:
-        ret = virAsprintf(&str, "%lld", item->value.l);
+        str = g_strdup_printf("%lld", item->value.l);
         break;
 
     case VIR_TYPED_PARAM_ULLONG:
-        ret = virAsprintf(&str, "%llu", item->value.ul);
+        str = g_strdup_printf("%llu", item->value.ul);
         break;
 
     case VIR_TYPED_PARAM_DOUBLE:
-        ret = virAsprintf(&str, "%f", item->value.d);
+        str = g_strdup_printf("%f", item->value.d);
         break;
 
     case VIR_TYPED_PARAM_BOOLEAN:
-        str = vshStrdup(ctl, item->value.b ? _("yes") : _("no"));
+        str = g_strdup(item->value.b ? _("yes") : _("no"));
         break;
 
     case VIR_TYPED_PARAM_STRING:
-        str = vshStrdup(ctl, item->value.s);
+        str = g_strdup(item->value.s);
         break;
 
     default:
         vshError(ctl, _("unimplemented parameter type %d"), item->type);
     }
 
-    if (ret < 0) {
+    if (!str) {
         vshError(ctl, "%s", _("Out of memory"));
         exit(EXIT_FAILURE);
     }
@@ -1871,11 +1827,7 @@ vshDebug(vshControl *ctl, int level, const char *format, ...)
     va_end(ap);
 
     va_start(ap, format);
-    if (virVasprintf(&str, format, ap) < 0) {
-        /* Skip debug messages on low memory */
-        va_end(ap);
-        return;
-    }
+    str = g_strdup_vprintf(format, ap);
     va_end(ap);
     fputs(str, stdout);
     VIR_FREE(str);
@@ -1891,8 +1843,7 @@ vshPrintExtra(vshControl *ctl, const char *format, ...)
         return;
 
     va_start(ap, format);
-    if (virVasprintfQuiet(&str, format, ap) < 0)
-        vshErrorOOM();
+    str = g_strdup_vprintf(format, ap);
     va_end(ap);
     fputs(str, stdout);
     VIR_FREE(str);
@@ -1900,14 +1851,13 @@ vshPrintExtra(vshControl *ctl, const char *format, ...)
 
 
 void
-vshPrint(vshControl *ctl ATTRIBUTE_UNUSED, const char *format, ...)
+vshPrint(vshControl *ctl G_GNUC_UNUSED, const char *format, ...)
 {
     va_list ap;
     char *str;
 
     va_start(ap, format);
-    if (virVasprintfQuiet(&str, format, ap) < 0)
-        vshErrorOOM();
+    str = g_strdup_vprintf(format, ap);
     va_end(ap);
     fputs(str, stdout);
     VIR_FREE(str);
@@ -1915,8 +1865,8 @@ vshPrint(vshControl *ctl ATTRIBUTE_UNUSED, const char *format, ...)
 
 
 bool
-vshTTYIsInterruptCharacter(vshControl *ctl ATTRIBUTE_UNUSED,
-                           const char chr ATTRIBUTE_UNUSED)
+vshTTYIsInterruptCharacter(vshControl *ctl G_GNUC_UNUSED,
+                           const char chr G_GNUC_UNUSED)
 {
 #ifndef WIN32
     if (ctl->istty &&
@@ -1936,7 +1886,7 @@ vshTTYAvailable(vshControl *ctl)
 
 
 int
-vshTTYDisableInterrupt(vshControl *ctl ATTRIBUTE_UNUSED)
+vshTTYDisableInterrupt(vshControl *ctl G_GNUC_UNUSED)
 {
 #ifndef WIN32
     struct termios termset = ctl->termattr;
@@ -1960,7 +1910,7 @@ vshTTYDisableInterrupt(vshControl *ctl ATTRIBUTE_UNUSED)
 
 
 int
-vshTTYRestore(vshControl *ctl ATTRIBUTE_UNUSED)
+vshTTYRestore(vshControl *ctl G_GNUC_UNUSED)
 {
 #ifndef WIN32
     if (!ctl->istty)
@@ -1974,28 +1924,13 @@ vshTTYRestore(vshControl *ctl ATTRIBUTE_UNUSED)
 }
 
 
-#if !defined(WIN32) && !defined(HAVE_CFMAKERAW)
-/* provide fallback in case cfmakeraw isn't available */
-static void
-cfmakeraw(struct termios *attr)
-{
-    attr->c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP
-                         | INLCR | IGNCR | ICRNL | IXON);
-    attr->c_oflag &= ~OPOST;
-    attr->c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
-    attr->c_cflag &= ~(CSIZE | PARENB);
-    attr->c_cflag |= CS8;
-}
-#endif /* !WIN32 && !HAVE_CFMAKERAW */
-
-
 int
-vshTTYMakeRaw(vshControl *ctl ATTRIBUTE_UNUSED,
-              bool report_errors ATTRIBUTE_UNUSED)
+vshTTYMakeRaw(vshControl *ctl G_GNUC_UNUSED,
+              bool report_errors G_GNUC_UNUSED)
 {
 #ifndef WIN32
     struct termios rawattr = ctl->termattr;
-    char ebuf[1024];
+
 
     if (!ctl->istty) {
         if (report_errors) {
@@ -2011,7 +1946,7 @@ vshTTYMakeRaw(vshControl *ctl ATTRIBUTE_UNUSED,
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &rawattr) < 0) {
         if (report_errors)
             vshError(ctl, _("unable to set tty attributes: %s"),
-                     virStrerror(errno, ebuf, sizeof(ebuf)));
+                     g_strerror(errno));
         return -1;
     }
 #endif
@@ -2039,9 +1974,7 @@ vshError(vshControl *ctl, const char *format, ...)
     fputs(_("error: "), stderr);
 
     va_start(ap, format);
-    /* We can't recursively call vshError on an OOM situation, so ignore
-       failure here. */
-    ignore_value(virVasprintf(&str, format, ap));
+    str = g_strdup_vprintf(format, ap);
     va_end(ap);
 
     fprintf(stderr, "%s\n", NULLSTR(str));
@@ -2076,25 +2009,27 @@ vshEventLoop(void *opaque)
 
 /* We want to use SIGINT to cancel a wait; but as signal handlers
  * don't have an opaque argument, we have to use static storage.  */
+#ifndef WIN32
 static int vshEventFd = -1;
 static struct sigaction vshEventOldAction;
 
 
 /* Signal handler installed in vshEventStart, removed in vshEventCleanup.  */
 static void
-vshEventInt(int sig ATTRIBUTE_UNUSED,
-            siginfo_t *siginfo ATTRIBUTE_UNUSED,
-            void *context ATTRIBUTE_UNUSED)
+vshEventInt(int sig G_GNUC_UNUSED,
+            siginfo_t *siginfo G_GNUC_UNUSED,
+            void *context G_GNUC_UNUSED)
 {
     char reason = VSH_EVENT_INTERRUPT;
     if (vshEventFd >= 0)
         ignore_value(safewrite(vshEventFd, &reason, 1));
 }
+#endif /* !WIN32 */
 
 
 /* Event loop handler used to limit length of waiting for any other event. */
 void
-vshEventTimeout(int timer ATTRIBUTE_UNUSED,
+vshEventTimeout(int timer G_GNUC_UNUSED,
                 void *opaque)
 {
     vshControl *ctl = opaque;
@@ -2120,23 +2055,27 @@ vshEventTimeout(int timer ATTRIBUTE_UNUSED,
 int
 vshEventStart(vshControl *ctl, int timeout_ms)
 {
+#ifndef WIN32
     struct sigaction action;
+    assert(vshEventFd == -1);
+#endif /* !WIN32 */
 
     assert(ctl->eventPipe[0] == -1 && ctl->eventPipe[1] == -1 &&
-           vshEventFd == -1 && ctl->eventTimerId >= 0);
-    if (pipe2(ctl->eventPipe, O_CLOEXEC) < 0) {
-        char ebuf[1024];
-
-        vshError(ctl, _("failed to create pipe: %s"),
-                 virStrerror(errno, ebuf, sizeof(ebuf)));
+           ctl->eventTimerId >= 0);
+    if (virPipe(ctl->eventPipe) < 0) {
+        vshSaveLibvirtError();
+        vshReportError(ctl);
         return -1;
     }
+
+#ifndef WIN32
     vshEventFd = ctl->eventPipe[1];
 
     action.sa_sigaction = vshEventInt;
     action.sa_flags = SA_SIGINFO;
     sigemptyset(&action.sa_mask);
     sigaction(SIGINT, &action, &vshEventOldAction);
+#endif /* !WIN32 */
 
     if (timeout_ms)
         virEventUpdateTimeout(ctl->eventTimerId, timeout_ms);
@@ -2181,12 +2120,10 @@ vshEventWait(vshControl *ctl)
     assert(ctl->eventPipe[0] >= 0);
     while ((rv = read(ctl->eventPipe[0], &buf, 1)) < 0 && errno == EINTR);
     if (rv != 1) {
-        char ebuf[1024];
-
         if (!rv)
             errno = EPIPE;
         vshError(ctl, _("failed to determine loop exit status: %s"),
-                 virStrerror(errno, ebuf, sizeof(ebuf)));
+                 g_strerror(errno));
         return -1;
     }
     return buf;
@@ -2203,16 +2140,22 @@ vshEventWait(vshControl *ctl)
 void
 vshEventCleanup(vshControl *ctl)
 {
+#ifndef WIN32
     if (vshEventFd >= 0) {
         sigaction(SIGINT, &vshEventOldAction, NULL);
         vshEventFd = -1;
     }
+#endif /* !WIN32 */
     VIR_FORCE_CLOSE(ctl->eventPipe[0]);
     VIR_FORCE_CLOSE(ctl->eventPipe[1]);
     virEventUpdateTimeout(ctl->eventTimerId, -1);
 }
 
-#define LOGFILE_FLAGS (O_WRONLY | O_APPEND | O_CREAT | O_SYNC)
+#ifdef O_SYNC
+# define LOGFILE_FLAGS (O_WRONLY | O_APPEND | O_CREAT | O_SYNC)
+#else
+# define LOGFILE_FLAGS (O_WRONLY | O_APPEND | O_CREAT)
+#endif
 
 /**
  * vshOpenLogFile:
@@ -2241,12 +2184,12 @@ void
 vshOutputLogFile(vshControl *ctl, int log_level, const char *msg_format,
                  va_list ap)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     char *str = NULL;
     size_t len;
     const char *lvl = "";
-    time_t stTime;
-    struct tm stTm;
+    g_autoptr(GDateTime) now = g_date_time_new_now_local();
+    g_autofree gchar *nowstr = NULL;
 
     if (ctl->log_fd == -1)
         return;
@@ -2256,15 +2199,9 @@ vshOutputLogFile(vshControl *ctl, int log_level, const char *msg_format,
      *
      * [YYYY.MM.DD HH:MM:SS SIGNATURE PID] LOG_LEVEL message
     */
-    time(&stTime);
-    localtime_r(&stTime, &stTm);
-    virBufferAsprintf(&buf, "[%d.%02d.%02d %02d:%02d:%02d %s %d] ",
-                      (1900 + stTm.tm_year),
-                      (1 + stTm.tm_mon),
-                      stTm.tm_mday,
-                      stTm.tm_hour,
-                      stTm.tm_min,
-                      stTm.tm_sec,
+    nowstr = g_date_time_format(now, "%Y.%m.%d %H:%M:%S");
+    virBufferAsprintf(&buf, "[%s %s %d] ",
+                      nowstr,
                       ctl->progname,
                       (int) getpid());
     switch (log_level) {
@@ -2289,11 +2226,8 @@ vshOutputLogFile(vshControl *ctl, int log_level, const char *msg_format,
     }
     virBufferAsprintf(&buf, "%s ", lvl);
     virBufferVasprintf(&buf, msg_format, ap);
-    virBufferTrim(&buf, "\n", -1);
+    virBufferTrim(&buf, "\n");
     virBufferAddChar(&buf, '\n');
-
-    if (virBufferError(&buf))
-        goto error;
 
     str = virBufferContentAndReset(&buf);
     len = strlen(str);
@@ -2308,7 +2242,6 @@ vshOutputLogFile(vshControl *ctl, int log_level, const char *msg_format,
  error:
     vshCloseLogFile(ctl);
     vshError(ctl, "%s", _("failed to write the log file"));
-    virBufferFreeAndReset(&buf);
     VIR_FREE(str);
 }
 
@@ -2320,13 +2253,11 @@ vshOutputLogFile(vshControl *ctl, int log_level, const char *msg_format,
 void
 vshCloseLogFile(vshControl *ctl)
 {
-    char ebuf[1024];
-
     /* log file close */
     if (VIR_CLOSE(ctl->log_fd) < 0) {
         vshError(ctl, _("%s: failed to write log file: %s"),
                  ctl->logfile ? ctl->logfile : "?",
-                 virStrerror(errno, ebuf, sizeof(ebuf)));
+                 g_strerror(errno));
     }
 
     if (ctl->logfile) {
@@ -2378,7 +2309,7 @@ vshAskReedit(vshControl *ctl, const char *msg, bool relax_avail)
     while (true) {
         vshPrint(ctl, "\r%s %s %s: ", msg, _("Try again?"),
                  relax_avail ? "[y,n,i,f,?]" : "[y,n,f,?]");
-        c = c_tolower(getchar());
+        c = g_ascii_tolower(getchar());
 
         if (c == '?') {
             vshPrintRaw(ctl,
@@ -2413,8 +2344,8 @@ vshAskReedit(vshControl *ctl, const char *msg, bool relax_avail)
 #else /* WIN32 */
 int
 vshAskReedit(vshControl *ctl,
-             const char *msg ATTRIBUTE_UNUSED,
-             bool relax_avail ATTRIBUTE_UNUSED)
+             const char *msg G_GNUC_UNUSED,
+             bool relax_avail G_GNUC_UNUSED)
 {
     vshDebug(ctl, VSH_ERR_WARNING, "%s", _("This function is not "
                                            "supported on WIN32 platform"));
@@ -2430,25 +2361,21 @@ vshEditWriteToTempFile(vshControl *ctl, const char *doc)
     char *ret;
     const char *tmpdir;
     int fd;
-    char ebuf[1024];
 
-    tmpdir = virGetEnvBlockSUID("TMPDIR");
+    tmpdir = getenv("TMPDIR");
     if (!tmpdir) tmpdir = "/tmp";
-    if (virAsprintf(&ret, "%s/virshXXXXXX.xml", tmpdir) < 0) {
-        vshError(ctl, "%s", _("out of memory"));
-        return NULL;
-    }
-    fd = mkostemps(ret, 4, O_CLOEXEC);
+    ret = g_strdup_printf("%s/virshXXXXXX.xml", tmpdir);
+    fd = g_mkstemp_full(ret, O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR);
     if (fd == -1) {
-        vshError(ctl, _("mkostemps: failed to create temporary file: %s"),
-                 virStrerror(errno, ebuf, sizeof(ebuf)));
+        vshError(ctl, _("g_mkstemp_full: failed to create temporary file: %s"),
+                 g_strerror(errno));
         VIR_FREE(ret);
         return NULL;
     }
 
     if (safewrite(fd, doc, strlen(doc)) == -1) {
         vshError(ctl, _("write: %s: failed to write to temporary file: %s"),
-                 ret, virStrerror(errno, ebuf, sizeof(ebuf)));
+                 ret, g_strerror(errno));
         VIR_FORCE_CLOSE(fd);
         unlink(ret);
         VIR_FREE(ret);
@@ -2456,7 +2383,7 @@ vshEditWriteToTempFile(vshControl *ctl, const char *doc)
     }
     if (VIR_CLOSE(fd) < 0) {
         vshError(ctl, _("close: %s: failed to write or close temporary file: %s"),
-                 ret, virStrerror(errno, ebuf, sizeof(ebuf)));
+                 ret, g_strerror(errno));
         unlink(ret);
         VIR_FREE(ret);
         return NULL;
@@ -2470,18 +2397,22 @@ vshEditWriteToTempFile(vshControl *ctl, const char *doc)
 #define ACCEPTED_CHARS \
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/_.:@"
 
+/* Hard-code default editor used as a fallback if not configured by
+ * VISUAL or EDITOR environment variables. */
+#define DEFAULT_EDITOR "vi"
+
 int
 vshEditFile(vshControl *ctl, const char *filename)
 {
     const char *editor;
-    virCommandPtr cmd;
+    virCommand *cmd;
     int ret = -1;
     int outfd = STDOUT_FILENO;
     int errfd = STDERR_FILENO;
 
-    editor = virGetEnvBlockSUID("VISUAL");
+    editor = getenv("VISUAL");
     if (!editor)
-        editor = virGetEnvBlockSUID("EDITOR");
+        editor = getenv("EDITOR");
     if (!editor)
         editor = DEFAULT_EDITOR;
 
@@ -2526,12 +2457,11 @@ char *
 vshEditReadBackFile(vshControl *ctl, const char *filename)
 {
     char *ret;
-    char ebuf[1024];
 
     if (virFileReadAll(filename, VSH_MAX_XML_FILE, &ret) == -1) {
         vshError(ctl,
                  _("%s: failed to read temporary file: %s"),
-                 filename, virStrerror(errno, ebuf, sizeof(ebuf)));
+                 filename, g_strerror(errno));
         return NULL;
     }
     return ret;
@@ -2548,15 +2478,11 @@ vshTreePrintInternal(vshControl *ctl,
                      int devid,
                      int lastdev,
                      bool root,
-                     virBufferPtr indent)
+                     virBuffer *indent)
 {
     size_t i;
     int nextlastdev = -1;
-    int ret = -1;
     const char *dev = (lookup)(devid, false, opaque);
-
-    if (virBufferError(indent))
-        goto cleanup;
 
     /* Print this device, with indent if not at root */
     vshPrint(ctl, "%s%s%s\n", virBufferCurrentContent(indent),
@@ -2566,8 +2492,6 @@ vshTreePrintInternal(vshControl *ctl,
     if (!root) {
         virBufferAddChar(indent, devid == lastdev ? ' ' : '|');
         virBufferAddChar(indent, ' ');
-        if (virBufferError(indent))
-            goto cleanup;
     }
 
     /* Determine the index of the last child device */
@@ -2584,8 +2508,6 @@ vshTreePrintInternal(vshControl *ctl,
 
     /* Finally print all children */
     virBufferAddLit(indent, "  ");
-    if (virBufferError(indent))
-        goto cleanup;
     for (i = 0; i < num_devices; i++) {
         const char *parent = (lookup)(i, true, opaque);
 
@@ -2593,9 +2515,9 @@ vshTreePrintInternal(vshControl *ctl,
             vshTreePrintInternal(ctl, lookup, opaque,
                                  num_devices, i, nextlastdev,
                                  false, indent) < 0)
-            goto cleanup;
+            return -1;
     }
-    virBufferTrim(indent, "  ", -1);
+    virBufferTrim(indent, "  ");
 
     /* If there was no child device, and we're the last in
      * a list of devices, then print another blank line */
@@ -2603,10 +2525,9 @@ vshTreePrintInternal(vshControl *ctl,
         vshPrint(ctl, "%s\n", virBufferCurrentContent(indent));
 
     if (!root)
-        virBufferTrim(indent, NULL, 2);
-    ret = 0;
- cleanup:
-    return ret;
+        virBufferTrimLen(indent, 2);
+
+    return 0;
 }
 
 int
@@ -2614,13 +2535,12 @@ vshTreePrint(vshControl *ctl, vshTreeLookup lookup, void *opaque,
              int num_devices, int devid)
 {
     int ret;
-    virBuffer indent = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) indent = VIR_BUFFER_INITIALIZER;
 
     ret = vshTreePrintInternal(ctl, lookup, opaque, num_devices,
                                devid, devid, true, &indent);
     if (ret < 0)
         vshError(ctl, "%s", _("Failed to complete tree listing"));
-    virBufferFreeAndReset(&indent);
     return ret;
 }
 
@@ -2633,67 +2553,50 @@ vshTreePrint(vshControl *ctl, vshTreeLookup lookup, void *opaque,
 
 /**
  * vshReadlineCommandGenerator:
- * @text: optional command prefix
  *
  * Generator function for command completion.
  *
- * Returns a string list of commands with @text prefix,
- * NULL if there's no such command.
+ * Returns a string list of all commands, or NULL on failure.
  */
 static char **
-vshReadlineCommandGenerator(const char *text)
+vshReadlineCommandGenerator(void)
 {
-    size_t grp_list_index = 0, cmd_list_index = 0;
-    size_t len = strlen(text);
-    const char *name;
+    size_t grp_list_index = 0;
     const vshCmdGrp *grp;
-    const vshCmdDef *cmds;
     size_t ret_size = 0;
-    char **ret = NULL;
+    g_auto(GStrv) ret = NULL;
 
     grp = cmdGroups;
 
-    /* Return the next name which partially matches from the
-     * command list.
-     */
-    while (grp[grp_list_index].name) {
-        cmds = grp[grp_list_index].commands;
+    for (grp_list_index = 0; grp[grp_list_index].name; grp_list_index++) {
+        const vshCmdDef *cmds = grp[grp_list_index].commands;
+        size_t cmd_list_index;
 
-        if (cmds[cmd_list_index].name) {
-            while ((name = cmds[cmd_list_index].name)) {
-                if (cmds[cmd_list_index++].flags & VSH_CMD_FLAG_ALIAS)
-                    continue;
+        for (cmd_list_index = 0; cmds[cmd_list_index].name; cmd_list_index++) {
+            const char *name = cmds[cmd_list_index].name;
 
-                if (STREQLEN(name, text, len)) {
-                    if (VIR_REALLOC_N(ret, ret_size + 2) < 0) {
-                        virStringListFree(ret);
-                        return NULL;
-                    }
-                    ret[ret_size] = vshStrdup(NULL, name);
-                    ret_size++;
-                    /* Terminate the string list properly. */
-                    ret[ret_size] = NULL;
-                }
-            }
-        } else {
-            cmd_list_index = 0;
-            grp_list_index++;
+            if (cmds[cmd_list_index].flags & VSH_CMD_FLAG_ALIAS)
+                continue;
+
+            VIR_REALLOC_N(ret, ret_size + 2);
+
+            ret[ret_size] = g_strdup(name);
+            ret_size++;
+            /* Terminate the string list properly. */
+            ret[ret_size] = NULL;
         }
     }
 
-    return ret;
+    return g_steal_pointer(&ret);
 }
 
 static char **
-vshReadlineOptionsGenerator(const char *text,
-                            const vshCmdDef *cmd,
+vshReadlineOptionsGenerator(const vshCmdDef *cmd,
                             vshCmd *last)
 {
     size_t list_index = 0;
-    size_t len = strlen(text);
-    const char *name;
     size_t ret_size = 0;
-    char **ret = NULL;
+    g_auto(GStrv) ret = NULL;
 
     if (!cmd)
         return NULL;
@@ -2701,22 +2604,14 @@ vshReadlineOptionsGenerator(const char *text,
     if (!cmd->opts)
         return NULL;
 
-    while ((name = cmd->opts[list_index].name)) {
+    for (list_index = 0; cmd->opts[list_index].name; list_index++) {
+        const char *name = cmd->opts[list_index].name;
         bool exists = false;
         vshCmdOpt *opt =  last->opts;
-        size_t name_len;
 
-        list_index++;
-
-        if (len > 2) {
-            /* provide auto-complete only when the text starts with -- */
-            if (STRNEQLEN(text, "--", 2))
-                return NULL;
-            if (STRNEQLEN(name, text + 2, len - 2))
-                continue;
-        } else if (STRNEQLEN(text, "--", len)) {
-            return NULL;
-        }
+        /* Skip aliases, we do not report them in help output either. */
+        if (cmd->opts[list_index].type == VSH_OT_ALIAS)
+            continue;
 
         while (opt) {
             if (STREQ(opt->def->name, name) && opt->def->type != VSH_OT_ARGV) {
@@ -2730,46 +2625,33 @@ vshReadlineOptionsGenerator(const char *text,
         if (exists)
             continue;
 
-        if (VIR_REALLOC_N(ret, ret_size + 2) < 0) {
-            virStringListFree(ret);
-            return NULL;
-        }
+        VIR_REALLOC_N(ret, ret_size + 2);
 
-        name_len = strlen(name);
-        ret[ret_size] = vshMalloc(NULL, name_len + 3);
-        snprintf(ret[ret_size], name_len + 3,  "--%s", name);
+        ret[ret_size] = g_strdup_printf("--%s", name);
         ret_size++;
         /* Terminate the string list properly. */
         ret[ret_size] = NULL;
     }
 
-    return ret;
+    return g_steal_pointer(&ret);
 }
 
 
 static const vshCmdOptDef *
-vshReadlineCommandFindOpt(const vshCmd *partial,
-                          const char *text)
+vshReadlineCommandFindOpt(const vshCmd *partial)
 {
     const vshCmd *tmp = partial;
 
-    while (tmp && tmp->next) {
-        if (tmp->def == tmp->next->def &&
-            !tmp->next->opts)
-            break;
-        tmp = tmp->next;
-    }
-
-    if (tmp && tmp->opts) {
+    while (tmp) {
         const vshCmdOpt *opt = tmp->opts;
 
         while (opt) {
-            if (STREQ_NULLABLE(opt->data, text) ||
-                STREQ_NULLABLE(opt->data, " "))
+            if (opt->completeThis)
                 return opt->def;
 
             opt = opt->next;
         }
+        tmp = tmp->next;
     }
 
     return NULL;
@@ -2786,25 +2668,23 @@ vshCompleterFilter(char ***list,
     size_t i;
 
     if (!list || !*list)
-        return -1;
+        return 0;
 
-    list_len = virStringListLength((const char **) *list);
-
-    if (VIR_ALLOC_N(newList, list_len + 1) < 0)
-        return -1;
+    list_len = g_strv_length(*list);
+    newList = g_new0(char *, list_len + 1);
 
     for (i = 0; i < list_len; i++) {
         if (!STRPREFIX((*list)[i], text)) {
-            VIR_FREE((*list)[i]);
+            g_clear_pointer(&(*list)[i], g_free);
             continue;
         }
 
-        VIR_STEAL_PTR(newList[newList_len], (*list)[i]);
+        newList[newList_len] = g_steal_pointer(&(*list)[i]);
         newList_len++;
     }
 
-    ignore_value(VIR_REALLOC_N_QUIET(newList, newList_len + 1));
-    VIR_FREE(*list);
+    newList = g_renew(char *, newList, newList_len + 1);
+    g_free(*list);
     *list = newList;
     return 0;
 }
@@ -2813,27 +2693,27 @@ vshCompleterFilter(char ***list,
 static char *
 vshReadlineParse(const char *text, int state)
 {
-    static vshCmd *partial;
     static char **list;
     static size_t list_index;
-    const vshCmdDef *cmd = NULL;
-    const vshCmdOptDef *opt = NULL;
     char *ret = NULL;
 
+    /* Readline calls this function until NULL is returned. On
+     * the very first call @state is zero which means we should
+     * initialize those static variables above. On subsequent
+     * calls @state is non zero. */
     if (!state) {
-        char *buf = vshStrdup(NULL, rl_line_buffer);
+        g_autoptr(vshCmd) partial = NULL;
+        const vshCmdDef *cmd = NULL;
+        const vshCmdOptDef *opt = NULL;
+        g_autofree char *line = g_strdup(rl_line_buffer);
 
-        vshCommandFree(partial);
-        partial = NULL;
-        virStringListFree(list);
+        g_strfreev(list);
         list = NULL;
         list_index = 0;
 
-        *(buf + rl_point) = '\0';
+        *(line + rl_point) = '\0';
 
-        vshCommandStringParse(NULL, buf, &partial);
-
-        VIR_FREE(buf);
+        vshCommandStringParse(NULL, line, &partial, rl_point);
 
         if (partial) {
             cmd = partial->def;
@@ -2851,72 +2731,63 @@ vshReadlineParse(const char *text, int state)
             cmd = NULL;
         }
 
-        opt = vshReadlineCommandFindOpt(partial, text);
-    }
+        opt = vshReadlineCommandFindOpt(partial);
 
-    if (!list) {
         if (!cmd) {
-            list = vshReadlineCommandGenerator(text);
-        } else {
-            if (!opt || (opt->type != VSH_OT_DATA &&
-                         opt->type != VSH_OT_STRING &&
-                         opt->type != VSH_OT_ARGV))
-                list = vshReadlineOptionsGenerator(text, cmd, partial);
+            list = vshReadlineCommandGenerator();
+        } else if (!opt || opt->type == VSH_OT_BOOL) {
+            list = vshReadlineOptionsGenerator(cmd, partial);
+        } else if (opt && opt->completer) {
+            list = opt->completer(autoCompleteOpaque,
+                                  partial,
+                                  opt->completer_flags);
+        }
 
-            if (opt && opt->completer) {
-                char **completer_list = opt->completer(autoCompleteOpaque,
-                                                       partial,
-                                                       opt->completer_flags);
+        /* Escape completions, if needed (i.e. argument
+         * we are completing wasn't started with a quote
+         * character). This also enables filtering done
+         * below to work properly. */
+        if (list &&
+            !rl_completion_quote_character) {
+            size_t i;
 
-                /* For string list returned by completer we have to do
-                 * filtering based on @text because completer returns all
-                 * possible strings. */
+            for (i = 0; list[i]; i++) {
+                g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
-                if (completer_list &&
-                    (vshCompleterFilter(&completer_list, text) < 0 ||
-                     virStringListMerge(&list, &completer_list) < 0)) {
-                    virStringListFree(completer_list);
-                    goto cleanup;
-                }
+                virBufferEscape(&buf, '\\', " ", "%s", list[i]);
+                VIR_FREE(list[i]);
+                list[i] = virBufferContentAndReset(&buf);
             }
         }
+
+        /* For string list returned by completers we have to do
+         * filtering based on @text because completers returns all
+         * possible strings. */
+        if (vshCompleterFilter(&list, text) < 0)
+            goto cleanup;
     }
 
     if (list) {
-        ret = vshStrdup(NULL, list[list_index]);
+        ret = g_strdup(list[list_index]);
         list_index++;
-    }
-
-    if (ret &&
-        !rl_completion_quote_character) {
-        virBuffer buf = VIR_BUFFER_INITIALIZER;
-        virBufferEscapeShell(&buf, ret);
-        VIR_FREE(ret);
-        ret = virBufferContentAndReset(&buf);
     }
 
  cleanup:
     if (!ret) {
-        vshCommandFree(partial);
-        partial = NULL;
-        virStringListFree(list);
+        g_strfreev(list);
         list = NULL;
         list_index = 0;
     }
 
     return ret;
-
 }
 
 static char **
 vshReadlineCompletion(const char *text,
-                      int start ATTRIBUTE_UNUSED,
-                      int end ATTRIBUTE_UNUSED)
+                      int start G_GNUC_UNUSED,
+                      int end G_GNUC_UNUSED)
 {
-    char **matches = (char **) NULL;
-
-    matches = rl_completion_matches(text, vshReadlineParse);
-    return matches;
+    return rl_completion_matches(text, vshReadlineParse);
 }
 
 
@@ -2939,7 +2810,7 @@ vshReadlineInit(vshControl *ctl)
     int ret = -1;
     char *histsize_env = NULL;
     const char *histsize_str = NULL;
-    const char *break_characters = " \t\n\\`@$><=;|&{(";
+    const char *break_characters = " \t\n`@$><=;|&{(";
     const char *quote_characters = "\"'";
 
     /* Opaque data for autocomplete callbacks. */
@@ -2955,11 +2826,10 @@ vshReadlineInit(vshControl *ctl)
     rl_completer_quote_characters = quote_characters;
     rl_char_is_quoted_p = vshReadlineCharIsQuoted;
 
-    if (virAsprintf(&histsize_env, "%s_HISTSIZE", ctl->env_prefix) < 0)
-        goto cleanup;
+    histsize_env = g_strdup_printf("%s_HISTSIZE", ctl->env_prefix);
 
     /* Limit the total size of the history buffer */
-    if ((histsize_str = virGetEnvBlockSUID(histsize_env))) {
+    if ((histsize_str = getenv(histsize_env))) {
         if (virStrToLong_i(histsize_str, NULL, 10, &max_history) < 0) {
             vshError(ctl, _("Bad $%s value."), histsize_env);
             goto cleanup;
@@ -2977,20 +2847,9 @@ vshReadlineInit(vshControl *ctl)
      */
     userdir = virGetUserCacheDirectory();
 
-    if (userdir == NULL) {
-        vshError(ctl, "%s", _("Could not determine home directory"));
-        goto cleanup;
-    }
+    ctl->historydir = g_strdup_printf("%s/%s", userdir, ctl->name);
 
-    if (virAsprintf(&ctl->historydir, "%s/%s", userdir, ctl->name) < 0) {
-        vshError(ctl, "%s", _("Out of memory"));
-        goto cleanup;
-    }
-
-    if (virAsprintf(&ctl->historyfile, "%s/history", ctl->historydir) < 0) {
-        vshError(ctl, "%s", _("Out of memory"));
-        goto cleanup;
-    }
+    ctl->historyfile = g_strdup_printf("%s/history", ctl->historydir);
 
     read_history(ctl->historyfile);
     ret = 0;
@@ -3005,11 +2864,10 @@ static void
 vshReadlineDeinit(vshControl *ctl)
 {
     if (ctl->historyfile != NULL) {
-        if (virFileMakePathWithMode(ctl->historydir, 0755) < 0 &&
+        if (g_mkdir_with_parents(ctl->historydir, 0755) < 0 &&
             errno != EEXIST) {
-            char ebuf[1024];
             vshError(ctl, _("Failed to create '%s': %s"),
-                     ctl->historydir, virStrerror(errno, ebuf, sizeof(ebuf)));
+                     ctl->historydir, g_strerror(errno));
         } else {
             write_history(ctl->historyfile);
         }
@@ -3020,28 +2878,35 @@ vshReadlineDeinit(vshControl *ctl)
 }
 
 char *
-vshReadline(vshControl *ctl ATTRIBUTE_UNUSED, const char *prompt)
+vshReadline(vshControl *ctl G_GNUC_UNUSED, const char *prompt)
 {
     return readline(prompt);
+}
+
+void
+vshReadlineHistoryAdd(const char *cmd)
+{
+    return add_history(cmd);
 }
 
 #else /* !WITH_READLINE */
 
 static int
-vshReadlineInit(vshControl *ctl ATTRIBUTE_UNUSED)
+vshReadlineInit(vshControl *ctl G_GNUC_UNUSED)
 {
     /* empty */
     return 0;
 }
 
 static void
-vshReadlineDeinit(vshControl *ctl ATTRIBUTE_UNUSED)
+vshReadlineDeinit(vshControl *ctl G_GNUC_UNUSED)
 {
     /* empty */
 }
 
 char *
-vshReadline(vshControl *ctl, const char *prompt)
+vshReadline(vshControl *ctl G_GNUC_UNUSED,
+            const char *prompt)
 {
     char line[1024];
     char *r;
@@ -3056,7 +2921,13 @@ vshReadline(vshControl *ctl, const char *prompt)
     if (len > 0 && r[len-1] == '\n')
         r[len-1] = '\0';
 
-    return vshStrdup(ctl, r);
+    return g_strdup(r);
+}
+
+void
+vshReadlineHistoryAdd(const char *cmd G_GNUC_UNUSED)
+{
+    /* empty */
 }
 
 #endif /* !WITH_READLINE */
@@ -3071,11 +2942,10 @@ vshInitDebug(vshControl *ctl)
     char *env = NULL;
 
     if (ctl->debug == VSH_DEBUG_DEFAULT) {
-        if (virAsprintf(&env, "%s_DEBUG", ctl->env_prefix) < 0)
-            return -1;
+        env = g_strdup_printf("%s_DEBUG", ctl->env_prefix);
 
         /* log level not set from commandline, check env variable */
-        debugEnv = virGetEnvAllowSUID(env);
+        debugEnv = getenv(env);
         if (debugEnv) {
             int debug;
             if (virStrToLong_i(debugEnv, NULL, 10, &debug) < 0 ||
@@ -3090,13 +2960,12 @@ vshInitDebug(vshControl *ctl)
     }
 
     if (ctl->logfile == NULL) {
-        if (virAsprintf(&env, "%s_LOG_FILE", ctl->env_prefix) < 0)
-            return -1;
+        env = g_strdup_printf("%s_LOG_FILE", ctl->env_prefix);
 
         /* log file not set from cmdline */
-        debugEnv = virGetEnvBlockSUID(env);
+        debugEnv = getenv(env);
         if (debugEnv && *debugEnv) {
-            ctl->logfile = vshStrdup(ctl, debugEnv);
+            ctl->logfile = g_strdup(debugEnv);
             vshOpenLogFile(ctl);
         }
         VIR_FREE(env);
@@ -3215,7 +3084,7 @@ cmdHelp(vshControl *ctl, const vshCmd *cmd)
     if ((def = vshCmddefSearch(name))) {
         if (def->flags & VSH_CMD_FLAG_ALIAS)
             def = vshCmddefSearch(def->alias);
-        return vshCmddefHelp(ctl, def);
+        return vshCmddefHelp(def);
     } else if ((grp = vshCmdGrpSearch(name))) {
         return vshCmdGrpHelp(ctl, grp);
     } else {
@@ -3246,9 +3115,7 @@ bool
 cmdCd(vshControl *ctl, const vshCmd *cmd)
 {
     const char *dir = NULL;
-    char *dir_malloced = NULL;
-    bool ret = true;
-    char ebuf[1024];
+    g_autofree char *dir_malloced = NULL;
 
     if (!ctl->imode) {
         vshError(ctl, "%s", _("cd: command valid only in interactive mode"));
@@ -3262,12 +3129,11 @@ cmdCd(vshControl *ctl, const vshCmd *cmd)
 
     if (chdir(dir) == -1) {
         vshError(ctl, _("cd: %s: %s"),
-                 virStrerror(errno, ebuf, sizeof(ebuf)), dir);
-        ret = false;
+                 g_strerror(errno), dir);
+        return false;
     }
 
-    VIR_FREE(dir_malloced);
-    return ret;
+    return true;
 }
 
 const vshCmdOptDef opts_echo[] = {
@@ -3320,7 +3186,7 @@ cmdEcho(vshControl *ctl, const vshCmd *cmd)
     int count = 0;
     const vshCmdOpt *opt = NULL;
     char *arg;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
     if (vshCommandOptBool(cmd, "shell"))
         shell = true;
@@ -3331,7 +3197,7 @@ cmdEcho(vshControl *ctl, const vshCmd *cmd)
 
     while ((opt = vshCommandOptArgv(ctl, cmd, opt))) {
         char *str;
-        virBuffer xmlbuf = VIR_BUFFER_INITIALIZER;
+        g_auto(virBuffer) xmlbuf = VIR_BUFFER_INITIALIZER;
 
         arg = opt->data;
 
@@ -3340,13 +3206,9 @@ cmdEcho(vshControl *ctl, const vshCmd *cmd)
 
         if (xml) {
             virBufferEscapeString(&xmlbuf, "%s", arg);
-            if (virBufferError(&xmlbuf)) {
-                vshError(ctl, "%s", _("Failed to allocate XML buffer"));
-                return false;
-            }
             str = virBufferContentAndReset(&xmlbuf);
         } else {
-            str = vshStrdup(ctl, arg);
+            str = g_strdup(arg);
         }
 
         if (shell)
@@ -3357,10 +3219,6 @@ cmdEcho(vshControl *ctl, const vshCmd *cmd)
         VIR_FREE(str);
     }
 
-    if (virBufferError(&buf)) {
-        vshError(ctl, "%s", _("Failed to allocate XML buffer"));
-        return false;
-    }
     arg = virBufferContentAndReset(&buf);
     if (arg) {
         if (err)
@@ -3383,23 +3241,13 @@ const vshCmdInfo info_pwd[] = {
 };
 
 bool
-cmdPwd(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
+cmdPwd(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
 {
-    char *cwd;
-    bool ret = true;
-    char ebuf[1024];
+    g_autofree char *cwd = g_get_current_dir();
 
-    cwd = getcwd(NULL, 0);
-    if (!cwd) {
-        vshError(ctl, _("pwd: cannot get current directory: %s"),
-                 virStrerror(errno, ebuf, sizeof(ebuf)));
-        ret = false;
-    } else {
-        vshPrint(ctl, _("%s\n"), cwd);
-        VIR_FREE(cwd);
-    }
+    vshPrint(ctl, _("%s\n"), cwd);
 
-    return ret;
+    return true;
 }
 
 const vshCmdInfo info_quit[] = {
@@ -3413,7 +3261,7 @@ const vshCmdInfo info_quit[] = {
 };
 
 bool
-cmdQuit(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
+cmdQuit(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
 {
     ctl->imode = false;
     return true;
@@ -3433,12 +3281,9 @@ const vshCmdInfo info_selftest[] = {
     {.name = NULL}
 };
 
-/* Prints help for every command.
- * That runs vshCmddefOptParse which validates
- * the per-command options structure. */
 bool
 cmdSelfTest(vshControl *ctl,
-            const vshCmd *cmd ATTRIBUTE_UNUSED)
+            const vshCmd *cmd G_GNUC_UNUSED)
 {
     const vshCmdGrp *grp;
     const vshCmdDef *def;
@@ -3487,7 +3332,7 @@ cmdComplete(vshControl *ctl, const vshCmd *cmd)
     const char *arg = "";
     const vshCmdOpt *opt = NULL;
     char **matches = NULL, **iter;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
     if (vshCommandOptStringQuiet(ctl, cmd, "string", &arg) <= 0)
         goto cleanup;
@@ -3507,14 +3352,10 @@ cmdComplete(vshControl *ctl, const vshCmd *cmd)
         arg = opt->data;
     }
 
-    if (virBufferCheckError(&buf) < 0)
-        goto cleanup;
-
     vshReadlineInit(ctl);
 
-    if (!(rl_line_buffer = virBufferContentAndReset(&buf)) &&
-        VIR_STRDUP(rl_line_buffer, "") < 0)
-        goto cleanup;
+    if (!(rl_line_buffer = virBufferContentAndReset(&buf)))
+        rl_line_buffer = g_strdup("");
 
     /* rl_point is current cursor position in rl_line_buffer.
      * In our case it's at the end of the whole line. */
@@ -3531,8 +3372,7 @@ cmdComplete(vshControl *ctl, const vshCmd *cmd)
 
     ret = true;
  cleanup:
-    virBufferFreeAndReset(&buf);
-    virStringListFree(matches);
+    g_strfreev(matches);
     return ret;
 }
 
@@ -3541,8 +3381,8 @@ cmdComplete(vshControl *ctl, const vshCmd *cmd)
 
 
 bool
-cmdComplete(vshControl *ctl ATTRIBUTE_UNUSED,
-            const vshCmd *cmd ATTRIBUTE_UNUSED)
+cmdComplete(vshControl *ctl G_GNUC_UNUSED,
+            const vshCmd *cmd G_GNUC_UNUSED)
 {
     return false;
 }

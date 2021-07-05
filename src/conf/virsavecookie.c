@@ -34,8 +34,8 @@ VIR_LOG_INIT("conf.savecookie");
 
 static int
 virSaveCookieParseNode(xmlXPathContextPtr ctxt,
-                       virObjectPtr *obj,
-                       virSaveCookieCallbacksPtr saveCookie)
+                       virObject **obj,
+                       virSaveCookieCallbacks *saveCookie)
 {
     *obj = NULL;
 
@@ -54,10 +54,10 @@ virSaveCookieParseNode(xmlXPathContextPtr ctxt,
 
 int
 virSaveCookieParse(xmlXPathContextPtr ctxt,
-                   virObjectPtr *obj,
-                   virSaveCookieCallbacksPtr saveCookie)
+                   virObject **obj,
+                   virSaveCookieCallbacks *saveCookie)
 {
-    xmlNodePtr node = ctxt->node;
+    VIR_XPATH_NODE_AUTORESTORE(ctxt)
     int ret = -1;
 
     *obj = NULL;
@@ -70,15 +70,14 @@ virSaveCookieParse(xmlXPathContextPtr ctxt,
     ret = virSaveCookieParseNode(ctxt, obj, saveCookie);
 
  cleanup:
-    ctxt->node = node;
     return ret;
 }
 
 
 int
 virSaveCookieParseString(const char *xml,
-                         virObjectPtr *obj,
-                         virSaveCookieCallbacksPtr saveCookie)
+                         virObject **obj,
+                         virSaveCookieCallbacks *saveCookie)
 {
     xmlDocPtr doc = NULL;
     xmlXPathContextPtr ctxt = NULL;
@@ -104,9 +103,9 @@ virSaveCookieParseString(const char *xml,
 
 
 int
-virSaveCookieFormatBuf(virBufferPtr buf,
-                       virObjectPtr obj,
-                       virSaveCookieCallbacksPtr saveCookie)
+virSaveCookieFormatBuf(virBuffer *buf,
+                       virObject *obj,
+                       virSaveCookieCallbacks *saveCookie)
 {
     if (!obj || !saveCookie || !saveCookie->format)
         return 0;
@@ -125,20 +124,13 @@ virSaveCookieFormatBuf(virBufferPtr buf,
 
 
 char *
-virSaveCookieFormat(virObjectPtr obj,
-                    virSaveCookieCallbacksPtr saveCookie)
+virSaveCookieFormat(virObject *obj,
+                    virSaveCookieCallbacks *saveCookie)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
     if (virSaveCookieFormatBuf(&buf, obj, saveCookie) < 0)
-        goto error;
-
-    if (virBufferCheckError(&buf) < 0)
-        goto error;
+        return NULL;
 
     return virBufferContentAndReset(&buf);
-
- error:
-    virBufferFreeAndReset(&buf);
-    return NULL;
 }

@@ -46,7 +46,7 @@ enum {
     LAST_BACKEND
 };
 
-static virStorageDriverPtr backends[] = {
+static virStorageDriver *backends[] = {
     &esxStorageBackendVMFS,
     &esxStorageBackendISCSI
 };
@@ -117,7 +117,7 @@ esxConnectListStoragePools(virConnectPtr conn, char **const names, int maxnames)
 
 
 static int
-esxConnectNumOfDefinedStoragePools(virConnectPtr conn ATTRIBUTE_UNUSED)
+esxConnectNumOfDefinedStoragePools(virConnectPtr conn G_GNUC_UNUSED)
 {
     /* ESX storage pools are always active */
     return 0;
@@ -126,9 +126,9 @@ esxConnectNumOfDefinedStoragePools(virConnectPtr conn ATTRIBUTE_UNUSED)
 
 
 static int
-esxConnectListDefinedStoragePools(virConnectPtr conn ATTRIBUTE_UNUSED,
-                                  char **const names ATTRIBUTE_UNUSED,
-                                  int maxnames ATTRIBUTE_UNUSED)
+esxConnectListDefinedStoragePools(virConnectPtr conn G_GNUC_UNUSED,
+                                  char **const names G_GNUC_UNUSED,
+                                  int maxnames G_GNUC_UNUSED)
 {
     /* ESX storage pools are always active */
     return 0;
@@ -204,7 +204,7 @@ static int
 esxStoragePoolRefresh(virStoragePoolPtr pool, unsigned int flags)
 {
     esxPrivate *priv = pool->conn->privateData;
-    virStorageDriverPtr backend = pool->privateData;
+    virStorageDriver *backend = pool->privateData;
 
     virCheckNonNullArgReturn(pool->privateData, -1);
 
@@ -220,7 +220,7 @@ static int
 esxStoragePoolGetInfo(virStoragePoolPtr pool, virStoragePoolInfoPtr info)
 {
     esxPrivate *priv = pool->conn->privateData;
-    virStorageDriverPtr backend = pool->privateData;
+    virStorageDriver *backend = pool->privateData;
 
     virCheckNonNullArgReturn(pool->privateData, -1);
 
@@ -238,7 +238,7 @@ static char *
 esxStoragePoolGetXMLDesc(virStoragePoolPtr pool, unsigned int flags)
 {
     esxPrivate *priv = pool->conn->privateData;
-    virStorageDriverPtr backend = pool->privateData;
+    virStorageDriver *backend = pool->privateData;
 
     virCheckNonNullArgReturn(pool->privateData, NULL);
 
@@ -251,7 +251,7 @@ esxStoragePoolGetXMLDesc(virStoragePoolPtr pool, unsigned int flags)
 
 
 static int
-esxStoragePoolGetAutostart(virStoragePoolPtr pool ATTRIBUTE_UNUSED,
+esxStoragePoolGetAutostart(virStoragePoolPtr pool G_GNUC_UNUSED,
                            int *autostart)
 {
     /* ESX storage pools are always active */
@@ -263,7 +263,7 @@ esxStoragePoolGetAutostart(virStoragePoolPtr pool ATTRIBUTE_UNUSED,
 
 
 static int
-esxStoragePoolSetAutostart(virStoragePoolPtr pool ATTRIBUTE_UNUSED,
+esxStoragePoolSetAutostart(virStoragePoolPtr pool G_GNUC_UNUSED,
                            int autostart)
 {
     /* Just accept autostart activation, but fail on autostart deactivation */
@@ -284,7 +284,7 @@ static int
 esxStoragePoolNumOfVolumes(virStoragePoolPtr pool)
 {
     esxPrivate *priv = pool->conn->privateData;
-    virStorageDriverPtr backend = pool->privateData;
+    virStorageDriver *backend = pool->privateData;
 
     virCheckNonNullArgReturn(pool->privateData, -1);
 
@@ -301,7 +301,7 @@ esxStoragePoolListVolumes(virStoragePoolPtr pool, char **const names,
                           int maxnames)
 {
     esxPrivate *priv = pool->conn->privateData;
-    virStorageDriverPtr backend = pool->privateData;
+    virStorageDriver *backend = pool->privateData;
 
     virCheckNonNullArgReturn(pool->privateData, -1);
 
@@ -317,7 +317,7 @@ static virStorageVolPtr
 esxStorageVolLookupByName(virStoragePoolPtr pool, const char *name)
 {
     esxPrivate *priv = pool->conn->privateData;
-    virStorageDriverPtr backend = pool->privateData;
+    virStorageDriver *backend = pool->privateData;
 
     virCheckNonNullArgReturn(pool->privateData, NULL);
 
@@ -390,7 +390,7 @@ esxStorageVolCreateXML(virStoragePoolPtr pool, const char *xmldesc,
                        unsigned int flags)
 {
     esxPrivate *priv = pool->conn->privateData;
-    virStorageDriverPtr backend = pool->privateData;
+    virStorageDriver *backend = pool->privateData;
 
     virCheckNonNullArgReturn(pool->privateData, NULL);
 
@@ -407,7 +407,7 @@ esxStorageVolCreateXMLFrom(virStoragePoolPtr pool, const char *xmldesc,
                            virStorageVolPtr sourceVolume, unsigned int flags)
 {
     esxPrivate *priv = pool->conn->privateData;
-    virStorageDriverPtr backend = pool->privateData;
+    virStorageDriver *backend = pool->privateData;
 
     virCheckNonNullArgReturn(pool->privateData, NULL);
 
@@ -423,7 +423,7 @@ static int
 esxStorageVolDelete(virStorageVolPtr volume, unsigned int flags)
 {
     esxPrivate *priv = volume->conn->privateData;
-    virStorageDriverPtr backend = volume->privateData;
+    virStorageDriver *backend = volume->privateData;
 
     virCheckNonNullArgReturn(volume->privateData, -1);
 
@@ -439,7 +439,7 @@ static int
 esxStorageVolWipe(virStorageVolPtr volume, unsigned int flags)
 {
     esxPrivate *priv = volume->conn->privateData;
-    virStorageDriverPtr backend = volume->privateData;
+    virStorageDriver *backend = volume->privateData;
 
     virCheckNonNullArgReturn(volume->privateData, -1);
 
@@ -455,7 +455,7 @@ static int
 esxStorageVolGetInfo(virStorageVolPtr volume, virStorageVolInfoPtr info)
 {
     esxPrivate *priv = volume->conn->privateData;
-    virStorageDriverPtr backend = volume->privateData;
+    virStorageDriver *backend = volume->privateData;
 
     virCheckNonNullArgReturn(volume->privateData, -1);
 
@@ -471,7 +471,7 @@ static char *
 esxStorageVolGetXMLDesc(virStorageVolPtr volume, unsigned int flags)
 {
     esxPrivate *priv = volume->conn->privateData;
-    virStorageDriverPtr backend = volume->privateData;
+    virStorageDriver *backend = volume->privateData;
 
     virCheckNonNullArgReturn(volume->privateData, NULL);
 
@@ -487,7 +487,7 @@ static char *
 esxStorageVolGetPath(virStorageVolPtr volume)
 {
     esxPrivate *priv = volume->conn->privateData;
-    virStorageDriverPtr backend = volume->privateData;
+    virStorageDriver *backend = volume->privateData;
 
     virCheckNonNullArgReturn(volume->privateData, NULL);
 
@@ -500,7 +500,7 @@ esxStorageVolGetPath(virStorageVolPtr volume)
 
 
 static int
-esxStoragePoolIsActive(virStoragePoolPtr pool ATTRIBUTE_UNUSED)
+esxStoragePoolIsActive(virStoragePoolPtr pool G_GNUC_UNUSED)
 {
     /* ESX storage pools are always active */
     return 1;
@@ -509,7 +509,7 @@ esxStoragePoolIsActive(virStoragePoolPtr pool ATTRIBUTE_UNUSED)
 
 
 static int
-esxStoragePoolIsPersistent(virStoragePoolPtr pool ATTRIBUTE_UNUSED)
+esxStoragePoolIsPersistent(virStoragePoolPtr pool G_GNUC_UNUSED)
 {
     /* ESX has no concept of transient pools, so all of them are persistent */
     return 1;

@@ -36,9 +36,8 @@
 #include "datatypes.h"
 #include "virlog.h"
 #include "vbox_driver.h"
-#include "vbox_glue.h"
+#include "vbox_XPCOMCGlue.h"
 #include "virerror.h"
-#include "virutil.h"
 #include "domain_event.h"
 #include "domain_conf.h"
 
@@ -50,28 +49,16 @@ VIR_LOG_INIT("vbox.vbox_driver");
 
 #if defined(VBOX_DRIVER)
 static virDrvOpenStatus dummyConnectOpen(virConnectPtr conn,
-                                         virConnectAuthPtr auth ATTRIBUTE_UNUSED,
-                                         virConfPtr conf ATTRIBUTE_UNUSED,
+                                         virConnectAuthPtr auth G_GNUC_UNUSED,
+                                         virConf *conf G_GNUC_UNUSED,
                                          unsigned int flags)
 {
     uid_t uid = geteuid();
 
     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
 
-    if (uid != 0) {
-        if (STRNEQ(conn->uri->path, "/session")) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("unknown driver path '%s' specified (try vbox:///session)"), conn->uri->path);
-            return VIR_DRV_OPEN_ERROR;
-        }
-    } else { /* root */
-        if (STRNEQ(conn->uri->path, "/system") &&
-            STRNEQ(conn->uri->path, "/session")) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("unknown driver path '%s' specified (try vbox:///system)"), conn->uri->path);
-            return VIR_DRV_OPEN_ERROR;
-        }
-    }
+    if (!virConnectValidateURIPath(conn->uri->path, "vbox", uid == 0))
+        return VIR_DRV_OPEN_ERROR;
 
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                    _("unable to initialize VirtualBox driver API"));

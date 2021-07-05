@@ -39,7 +39,8 @@ VIR_ENUM_IMPL(virAccessPermDomain,
               "getattr", "read", "write", "read_secure",
               "start", "stop", "reset",
               "save", "delete",
-              "migrate", "snapshot", "suspend", "hibernate", "core_dump", "pm_control",
+              "migrate", "checkpoint", "snapshot", "suspend", "hibernate",
+              "core_dump", "pm_control",
               "init_control", "inject_nmi", "send_input", "send_signal",
               "fs_trim", "fs_freeze",
               "block_read", "block_write", "mem_read",
@@ -57,13 +58,19 @@ VIR_ENUM_IMPL(virAccessPermNetwork,
               VIR_ACCESS_PERM_NETWORK_LAST,
               "getattr", "read", "write",
               "save", "delete", "start", "stop",
+              "search_ports",
+);
+
+VIR_ENUM_IMPL(virAccessPermNetworkPort,
+              VIR_ACCESS_PERM_NETWORK_PORT_LAST,
+              "getattr", "read", "write", "create", "delete",
 );
 
 VIR_ENUM_IMPL(virAccessPermNodeDevice,
               VIR_ACCESS_PERM_NODE_DEVICE_LAST,
               "getattr", "read", "write",
               "start", "stop",
-              "detach",
+              "detach", "delete",
 );
 
 VIR_ENUM_IMPL(virAccessPermNWFilter,

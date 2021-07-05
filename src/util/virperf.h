@@ -16,12 +16,9 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRPERF_H
-# define LIBVIRT_VIRPERF_H
+#pragma once
 
-# include "virutil.h"
-# include "virautoclean.h"
-# include "virenum.h"
+#include "virenum.h"
 
 /* Some Intel processor families introduced some RDT (Resource Director
  * Technology) features to monitor or control shared resource based on
@@ -38,7 +35,7 @@ typedef enum {
     VIR_PERF_EVENT_BRANCH_INSTRUCTIONS, /* Count of branch instructions
                                            for applications */
     VIR_PERF_EVENT_BRANCH_MISSES,  /* Count of branch misses for applications */
-    VIR_PERF_EVENT_BUS_CYCLES,       /* Count of bus cycles for applications*/
+    VIR_PERF_EVENT_BUS_CYCLES,       /* Count of bus cycles for applications */
     VIR_PERF_EVENT_STALLED_CYCLES_FRONTEND, /* Count of stalled cpu cycles in
                                                the frontend of the instruction
                                                processor pipeline */
@@ -46,8 +43,8 @@ typedef enum {
                                               the backend of the instruction
                                               processor pipeline */
     VIR_PERF_EVENT_REF_CPU_CYCLES,   /* Count of ref cpu cycles */
-    VIR_PERF_EVENT_CPU_CLOCK,   /* Count of cpu clock time*/
-    VIR_PERF_EVENT_TASK_CLOCK,   /* Count of task clock time*/
+    VIR_PERF_EVENT_CPU_CLOCK,   /* Count of cpu clock time */
+    VIR_PERF_EVENT_TASK_CLOCK,   /* Count of task clock time */
     VIR_PERF_EVENT_PAGE_FAULTS,   /* Count of total page faults */
     VIR_PERF_EVENT_CONTEXT_SWITCHES,   /* Count of context switches */
     VIR_PERF_EVENT_CPU_MIGRATIONS,   /* Count of cpu migrations */
@@ -63,26 +60,23 @@ VIR_ENUM_DECL(virPerfEvent);
 
 struct _virPerf;
 typedef struct _virPerf virPerf;
-typedef virPerf *virPerfPtr;
 
-virPerfPtr virPerfNew(void);
+virPerf *virPerfNew(void);
 
-void virPerfFree(virPerfPtr perf);
+void virPerfFree(virPerf *perf);
 
-int virPerfEventEnable(virPerfPtr perf,
+int virPerfEventEnable(virPerf *perf,
                        virPerfEventType type,
                        pid_t pid);
 
-int virPerfEventDisable(virPerfPtr perf,
+int virPerfEventDisable(virPerf *perf,
                         virPerfEventType type);
 
-bool virPerfEventIsEnabled(virPerfPtr perf,
+bool virPerfEventIsEnabled(virPerf *perf,
                            virPerfEventType type);
 
-int virPerfReadEvent(virPerfPtr perf,
+int virPerfReadEvent(virPerf *perf,
                      virPerfEventType type,
                      uint64_t *value);
 
-VIR_DEFINE_AUTOPTR_FUNC(virPerf, virPerfFree);
-
-#endif /* LIBVIRT_VIRPERF_H */
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virPerf, virPerfFree);

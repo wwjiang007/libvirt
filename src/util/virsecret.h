@@ -19,14 +19,12 @@
  *
  */
 
-#ifndef LIBVIRT_VIRSECRET_H
-# define LIBVIRT_VIRSECRET_H
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
-# include "virutil.h"
-# include "virxml.h"
-# include "virenum.h"
+#include "virxml.h"
+#include "virenum.h"
 
 VIR_ENUM_DECL(virSecretUsage);
 
@@ -39,7 +37,6 @@ typedef enum {
 } virSecretLookupType;
 
 typedef struct _virSecretLookupTypeDef virSecretLookupTypeDef;
-typedef virSecretLookupTypeDef *virSecretLookupTypeDefPtr;
 struct _virSecretLookupTypeDef {
     int type;   /* virSecretLookupType */
     union {
@@ -49,12 +46,19 @@ struct _virSecretLookupTypeDef {
 
 };
 
-void virSecretLookupDefClear(virSecretLookupTypeDefPtr def);
-int virSecretLookupDefCopy(virSecretLookupTypeDefPtr dst,
-                           const virSecretLookupTypeDef *src);
+void virSecretLookupDefClear(virSecretLookupTypeDef *def);
+void virSecretLookupDefCopy(virSecretLookupTypeDef *dst,
+                            const virSecretLookupTypeDef *src);
 int virSecretLookupParseSecret(xmlNodePtr secretnode,
-                               virSecretLookupTypeDefPtr def);
-void virSecretLookupFormatSecret(virBufferPtr buf,
+                               virSecretLookupTypeDef *def);
+void virSecretLookupFormatSecret(virBuffer *buf,
                                  const char *secrettype,
-                                 virSecretLookupTypeDefPtr def);
-#endif /* LIBVIRT_VIRSECRET_H */
+                                 virSecretLookupTypeDef *def);
+
+int virSecretGetSecretString(virConnectPtr conn,
+                             virSecretLookupTypeDef *seclookupdef,
+                             virSecretUsageType secretUsageType,
+                             uint8_t **ret_secret,
+                             size_t *ret_secret_size)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(4)
+    ATTRIBUTE_NONNULL(5) G_GNUC_WARN_UNUSED_RESULT;

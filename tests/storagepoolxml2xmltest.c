@@ -18,8 +18,8 @@
 static int
 testCompareXMLToXMLFiles(const char *inxml, const char *outxml)
 {
-    VIR_AUTOFREE(char *) actual = NULL;
-    VIR_AUTOPTR(virStoragePoolDef) dev = NULL;
+    g_autofree char *actual = NULL;
+    g_autoptr(virStoragePoolDef) dev = NULL;
 
     if (!(dev = virStoragePoolDefParseFile(inxml)))
         return -1;
@@ -36,14 +36,13 @@ testCompareXMLToXMLFiles(const char *inxml, const char *outxml)
 static int
 testCompareXMLToXMLHelper(const void *data)
 {
-    VIR_AUTOFREE(char *) inxml = NULL;
-    VIR_AUTOFREE(char *) outxml = NULL;
+    g_autofree char *inxml = NULL;
+    g_autofree char *outxml = NULL;
 
-    if (virAsprintf(&inxml, "%s/storagepoolxml2xmlin/%s.xml",
-                    abs_srcdir, (const char*)data) < 0 ||
-        virAsprintf(&outxml, "%s/storagepoolxml2xmlout/%s.xml",
-                    abs_srcdir, (const char*)data) < 0)
-        return -1;
+    inxml = g_strdup_printf("%s/storagepoolxml2xmlin/%s.xml",
+                            abs_srcdir, (const char*)data);
+    outxml = g_strdup_printf("%s/storagepoolxml2xmlout/%s.xml",
+                             abs_srcdir, (const char*)data);
 
     return testCompareXMLToXMLFiles(inxml, outxml);
 }
@@ -63,6 +62,7 @@ mymain(void)
 
     DO_TEST("pool-dir");
     DO_TEST("pool-dir-naming");
+    DO_TEST("pool-dir-cow");
     DO_TEST("pool-fs");
     DO_TEST("pool-logical");
     DO_TEST("pool-logical-nopath");
@@ -73,6 +73,7 @@ mymain(void)
     DO_TEST("pool-iscsi");
     DO_TEST("pool-iscsi-auth");
     DO_TEST("pool-netfs");
+    DO_TEST("pool-netfs-slash");
     DO_TEST("pool-netfs-auto");
     DO_TEST("pool-netfs-protocol-ver");
     DO_TEST("pool-netfs-gluster");
@@ -95,6 +96,7 @@ mymain(void)
     DO_TEST("pool-zfs-sourcedev");
     DO_TEST("pool-rbd");
 #ifdef WITH_STORAGE_RBD
+    DO_TEST("pool-rbd-ipv6");
     DO_TEST("pool-rbd-refresh-volume-allocation");
     DO_TEST("pool-rbd-ns-configopts");
 #endif

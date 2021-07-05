@@ -12,7 +12,7 @@
       <li>The virtual network driver
           <br /><br />
           This provides an isolated bridge device (ie no physical NICs
-          enslaved). Guest TAP devices are attached to this bridge.
+          attached). Guest TAP devices are attached to this bridge.
           Guests can talk to each other and the host, and optionally the
           wider world.
           <br /><br />
@@ -46,7 +46,7 @@
     </p>
     <p>Thus the virtual network driver in libvirt was invented. This takes
        the form of an isolated bridge device (ie one with no physical NICs
-       enslaved). The TAP devices associated with the guest NICs are attached
+       attached). The TAP devices associated with the guest NICs are attached
        to the bridge device. This immediately allows guests on a single host
        to talk to each other and to the host OS (modulo host IPtables rules).
     </p>
@@ -175,7 +175,7 @@ MASQUERADE all  --  *      *       192.168.122.0/24    !192.168.122.0/24</pre>
        the conceptual model is closely aligned with the DMTF CIM schema for
        network filtering:
     </p>
-    <p><a href="http://www.dmtf.org/standards/cim/cim_schema_v2230/CIM_Network.pdf">http://www.dmtf.org/standards/cim/cim_schema_v2230/CIM_Network.pdf</a></p>
+    <p><a href="https://www.dmtf.org/standards/cim/cim_schema_v2230/CIM_Network.pdf">https://www.dmtf.org/standards/cim/cim_schema_v2230/CIM_Network.pdf</a></p>
     <p>The filters are managed in libvirt as a top level, standalone object.
        This allows the filters to then be referenced by any libvirt object
        that requires their functionality, instead tying them only to use
@@ -283,12 +283,21 @@ UUID                                  Name
 15b1ab2b-b1ac-1be2-ed49-2042caba4abb  allow-arp
 6c51a466-8d14-6d11-46b0-68b1a883d00f  allow-dhcp
 7517ad6c-bd90-37c8-26c9-4eabcb69848d  allow-dhcp-server
+7680776c-77aa-496f-90d6-13097664b925  allow-dhcpv6
+9cdaad60-7631-4172-8ccb-ef774be7485b  allow-dhcpv6-server
 3d38b406-7cf0-8335-f5ff-4b9add35f288  allow-incoming-ipv4
+908543c1-902e-45f6-a6ca-1a0ad35e7599  allow-incoming-ipv6
 5ff06320-9228-2899-3db0-e32554933415  allow-ipv4
+ce8904cc-ad3a-4454-896c-53452882f817  allow-ipv6
 db0b1767-d62b-269b-ea96-0cc8b451144e  clean-traffic
+6d6ddcc8-1242-4c43-ac63-63af80493132  clean-traffic-gateway
+4cf38077-c7d5-4e25-99bb-6c4c9efad294  no-arp-ip-spoofing
+0b11a636-ce58-497f-be90-17f63c92487a  no-arp-mac-spoofing
 f88f1932-debf-4aa1-9fbe-f10d3aa4bc95  no-arp-spoofing
 772f112d-52e4-700c-0250-e178a3d91a7a  no-ip-multicast
 7ee20370-8106-765d-f7ff-8a60d5aaf30b  no-ip-spoofing
+f8a51c43-a08f-49b3-b9e2-393d54522dc0  no-ipv6-multicast
+a7f0afe9-a428-44b8-8566-c8ee2a669271  no-ipv6-spoofing
 d5d3c490-c2eb-68b1-24fc-3ee362fc8af3  no-mac-broadcast
 fb57c546-76dc-a372-513f-e8179011b48a  no-mac-spoofing
 dba10ea7-446d-76de-346f-335bd99c1d05  no-other-l2-traffic
@@ -311,7 +320,7 @@ f5c78134-9da4-0c60-a9f0-fb37bc21ac1f  no-other-rarp-traffic
     <p>To associate the clean-traffic filter with a guest, edit the
        guest XML config and change the <code>&lt;interface&gt;</code> element
        to include a <code>&lt;filterref&gt;</code> and also specify the
-       whitelisted <code>&lt;ip address/&gt;</code> the guest is allowed to
+       <code>&lt;ip address/&gt;</code> that the guest is allowed to
        use:
     </p>
     <pre>

@@ -18,30 +18,25 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRNETCLIENTPROGRAM_H
-# define LIBVIRT_VIRNETCLIENTPROGRAM_H
+#pragma once
 
-# include <rpc/types.h>
-# include <rpc/xdr.h>
+#include <rpc/types.h>
+#include <rpc/xdr.h>
 
-# include "virnetmessage.h"
-# include "virobject.h"
+#include "virnetmessage.h"
+#include "virobject.h"
 
 typedef struct _virNetClient virNetClient;
-typedef virNetClient *virNetClientPtr;
 
 typedef struct _virNetClientProgram virNetClientProgram;
-typedef virNetClientProgram *virNetClientProgramPtr;
 
 typedef struct _virNetClientProgramEvent virNetClientProgramEvent;
-typedef virNetClientProgramEvent *virNetClientProgramEventPtr;
 
 typedef struct _virNetClientProgramErrorHandler virNetClientProgramErrorHander;
-typedef virNetClientProgramErrorHander *virNetClientProgramErrorHanderPtr;
 
 
-typedef void (*virNetClientProgramDispatchFunc)(virNetClientProgramPtr prog,
-                                                virNetClientPtr client,
+typedef void (*virNetClientProgramDispatchFunc)(virNetClientProgram *prog,
+                                                virNetClient *client,
                                                 void *msg,
                                                 void *opaque);
 
@@ -52,24 +47,24 @@ struct _virNetClientProgramEvent {
     xdrproc_t msg_filter;
 };
 
-virNetClientProgramPtr virNetClientProgramNew(unsigned program,
+virNetClientProgram *virNetClientProgramNew(unsigned program,
                                               unsigned version,
-                                              virNetClientProgramEventPtr events,
+                                              virNetClientProgramEvent *events,
                                               size_t nevents,
                                               void *eventOpaque);
 
-unsigned virNetClientProgramGetProgram(virNetClientProgramPtr prog);
-unsigned virNetClientProgramGetVersion(virNetClientProgramPtr prog);
+unsigned virNetClientProgramGetProgram(virNetClientProgram *prog);
+unsigned virNetClientProgramGetVersion(virNetClientProgram *prog);
 
-int virNetClientProgramMatches(virNetClientProgramPtr prog,
-                               virNetMessagePtr msg);
+int virNetClientProgramMatches(virNetClientProgram *prog,
+                               virNetMessage *msg);
 
-int virNetClientProgramDispatch(virNetClientProgramPtr prog,
-                                virNetClientPtr client,
-                                virNetMessagePtr msg);
+int virNetClientProgramDispatch(virNetClientProgram *prog,
+                                virNetClient *client,
+                                virNetMessage *msg);
 
-int virNetClientProgramCall(virNetClientProgramPtr prog,
-                            virNetClientPtr client,
+int virNetClientProgramCall(virNetClientProgram *prog,
+                            virNetClient *client,
                             unsigned serial,
                             int proc,
                             size_t noutfds,
@@ -78,7 +73,3 @@ int virNetClientProgramCall(virNetClientProgramPtr prog,
                             int **infds,
                             xdrproc_t args_filter, void *args,
                             xdrproc_t ret_filter, void *ret);
-
-
-
-#endif /* LIBVIRT_VIRNETCLIENTPROGRAM_H */

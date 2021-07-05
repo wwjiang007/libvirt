@@ -34,69 +34,92 @@
  * too.
  *
  * On 64-bit hosts the stat & stat64 functions are identical, always
- * refering to the 64-bit ABI.
+ * referring to the 64-bit ABI.
  *
  * On 32-bit hosts they refer to the 32-bit & 64-bit ABIs respectively.
  *
- * Libvirt uses _FILE_OFFSET_BITS=64 on 32-bit hosts, which causes the
- * C library to transparently rewrite stat() calls to be stat64() calls.
- * Libvirt will never see the 32-bit ABI from the traditional stat()
- * call. We cannot assume this rewriting is done using a macro. It might
- * be, but on GLibC it is done with a magic __asm__ statement to apply
- * the rewrite at link time instead of at preprocessing.
+ * With meson libvirt will have _FILE_OFFSET_BITS=64 always defined.
+ * On 32-bit hosts it causes the C library to transparently rewrite
+ * stat() calls to be stat64() calls. Libvirt will never see the 32-bit
+ * ABI from the traditional stat() call. We cannot assume this rewriting
+ * is done using a macro. It might be, but on GLibC it is done with a
+ * magic __asm__ statement to apply the rewrite at link time instead of
+ * at preprocessing.
  *
  * In GLibC there may be two additional functions exposed by the headers,
  * __xstat() and __xstat64(). When these exist, stat() and stat64() are
  * transparently rewritten to call __xstat() and __xstat64() respectively.
- * The former symbols will not actally exist in the library at all, only
+ * The former symbols will not actually exist in the library at all, only
  * the header. The leading "__" indicates the symbols are a private impl
  * detail of the C library that applications should not care about.
  * Unfortunately, because we are trying to mock replace the C library,
  * we need to know about this internal impl detail.
  *
+ * On macOS stat() and lstat() are resolved to _stat$INODE64 and
+ * _lstat$INODE64, respectively. stat(2) man page also declares that
+ * stat64(), lstat64() and fstat64() are deprecated, and when
+ * building on Apple Silicon (aarch64) those functions are missing
+ * from the header altogether and should not be mocked.
+ *
  * With all this in mind the list of functions we have to mock will depend
  * on several factors
  *
- *  - If _FILE_OFFSET_BITS is set, then we are on a 32-bit host, and we
- *    only need to mock stat64 and __xstat64. The other stat / __xstat
- *    functions exist, but we'll never call them so they can be ignored
- *    for mocking.
- *
- *  - If _FILE_OFFSET_BITS is not set, then we are on a 64-bit host and
- *    we should mock stat, stat64, __xstat & __xstat64. Either may be
- *    called by app code.
+ *  - If the stat or __xstat but there is no 64-bit version.
  *
  *  - If __xstat & __xstat64 exist, then stat & stat64 will not exist
  *    as symbols in the library, so the latter should not be mocked.
  *
+ *  - If __xstat exists in the library, but not the header than it
+ *    it is just there for binary back compat and should not be
+ *    mocked
+ *
  * The same all applies to lstat()
  */
 
-
-
-#if defined(HAVE_STAT) && !defined(HAVE___XSTAT) && !defined(_FILE_OFFSET_BITS)
+#if !defined(__APPLE__)
+# if !defined(WITH___XSTAT_DECL)
+#  if defined(WITH_STAT)
+#   if !defined(WITH___XSTAT) && !defined(WITH_STAT64)
+#    define MOCK_STAT
+#   endif
+#  endif
+#  if defined(WITH_STAT64)
+#   define MOCK_STAT64
+#  endif
+# else /* WITH___XSTAT_DECL */
+#  if defined(WITH___XSTAT) && !defined(WITH___XSTAT64)
+#   define MOCK___XSTAT
+#  endif
+#  if defined(WITH___XSTAT64)
+#   define MOCK___XSTAT64
+#  endif
+# endif /* WITH___XSTAT_DECL */
+# if !defined(WITH___LXSTAT_DECL)
+#  if defined(WITH_LSTAT)
+#   if !defined(WITH___LXSTAT) && !defined(WITH_LSTAT64)
+#    define MOCK_LSTAT
+#   endif
+#  endif
+#  if defined(WITH_LSTAT64)
+#   define MOCK_LSTAT64
+#  endif
+# else /* WITH___LXSTAT_DECL */
+#  if defined(WITH___LXSTAT) && !defined(WITH___LXSTAT64)
+#   define MOCK___LXSTAT
+#  endif
+#  if defined(WITH___LXSTAT64)
+#   define MOCK___LXSTAT64
+#  endif
+# endif /* WITH___LXSTAT_DECL */
+#else /* __APPLE__ */
 # define MOCK_STAT
-#endif
-#if defined(HAVE_STAT64) && !defined(HAVE___XSTAT64)
-# define MOCK_STAT64
-#endif
-#if defined(HAVE___XSTAT) && !defined(_FILE_OFFSET_BITS)
-# define MOCK___XSTAT
-#endif
-#if defined(HAVE___XSTAT64)
-# define MOCK___XSTAT64
-#endif
-#if defined(HAVE_LSTAT) && !defined(HAVE___LXSTAT) && !defined(_FILE_OFFSET_BITS)
+# if defined(WITH_STAT64_DECL)
+#  define MOCK_STAT64
+# endif
 # define MOCK_LSTAT
-#endif
-#if defined(HAVE_LSTAT64) && !defined(HAVE___LXSTAT64)
-# define MOCK_LSTAT64
-#endif
-#if defined(HAVE___LXSTAT) && !defined(_FILE_OFFSET_BITS)
-# define MOCK___LXSTAT
-#endif
-#if defined(HAVE___LXSTAT64)
-# define MOCK___LXSTAT64
+# if defined(WITH_LSTAT64_DECL)
+#  define MOCK_LSTAT64
+# endif
 #endif
 
 #ifdef MOCK_STAT
@@ -138,7 +161,11 @@ static void virMockStatInit(void)
     debug = getenv("VIR_MOCK_STAT_DEBUG");
 
 #ifdef MOCK_STAT
+# if defined(__APPLE__) && defined(__x86_64__)
+    VIR_MOCK_REAL_INIT_ALIASED(stat, "stat$INODE64");
+# else
     VIR_MOCK_REAL_INIT(stat);
+# endif
     fdebug("real stat %p\n", real_stat);
 #endif
 #ifdef MOCK_STAT64
@@ -154,7 +181,11 @@ static void virMockStatInit(void)
     fdebug("real __xstat64 %p\n", real___xstat64);
 #endif
 #ifdef MOCK_LSTAT
+# if defined(__APPLE__) && defined(__x86_64__)
+    VIR_MOCK_REAL_INIT_ALIASED(lstat, "lstat$INODE64");
+# else
     VIR_MOCK_REAL_INIT(lstat);
+# endif
     fdebug("real lstat %p\n", real_lstat);
 #endif
 #ifdef MOCK_LSTAT64
@@ -186,7 +217,7 @@ static int virMockStatRedirect(const char *path, char **newpath);
 #ifdef MOCK_STAT
 int stat(const char *path, struct stat *sb)
 {
-    VIR_AUTOFREE(char *) newpath = NULL;
+    g_autofree char *newpath = NULL;
 
     virMockStatInit();
 
@@ -203,7 +234,7 @@ int stat(const char *path, struct stat *sb)
 #ifdef MOCK_STAT64
 int stat64(const char *path, struct stat64 *sb)
 {
-    VIR_AUTOFREE(char *) newpath = NULL;
+    g_autofree char *newpath = NULL;
 
     virMockStatInit();
 
@@ -221,7 +252,7 @@ int stat64(const char *path, struct stat64 *sb)
 int
 __xstat(int ver, const char *path, struct stat *sb)
 {
-    VIR_AUTOFREE(char *) newpath = NULL;
+    g_autofree char *newpath = NULL;
 
     virMockStatInit();
 
@@ -239,7 +270,7 @@ __xstat(int ver, const char *path, struct stat *sb)
 int
 __xstat64(int ver, const char *path, struct stat64 *sb)
 {
-    VIR_AUTOFREE(char *) newpath = NULL;
+    g_autofree char *newpath = NULL;
 
     virMockStatInit();
 
@@ -257,7 +288,7 @@ __xstat64(int ver, const char *path, struct stat64 *sb)
 int
 lstat(const char *path, struct stat *sb)
 {
-    VIR_AUTOFREE(char *) newpath = NULL;
+    g_autofree char *newpath = NULL;
 
     virMockStatInit();
 
@@ -275,7 +306,7 @@ lstat(const char *path, struct stat *sb)
 int
 lstat64(const char *path, struct stat64 *sb)
 {
-    VIR_AUTOFREE(char *) newpath = NULL;
+    g_autofree char *newpath = NULL;
 
     virMockStatInit();
 
@@ -293,7 +324,7 @@ lstat64(const char *path, struct stat64 *sb)
 int
 __lxstat(int ver, const char *path, struct stat *sb)
 {
-    VIR_AUTOFREE(char *) newpath = NULL;
+    g_autofree char *newpath = NULL;
 
     virMockStatInit();
 
@@ -311,7 +342,7 @@ __lxstat(int ver, const char *path, struct stat *sb)
 int
 __lxstat64(int ver, const char *path, struct stat64 *sb)
 {
-    VIR_AUTOFREE(char *) newpath = NULL;
+    g_autofree char *newpath = NULL;
 
     virMockStatInit();
 

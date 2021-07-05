@@ -93,6 +93,10 @@ virStoragePoolGetConnect(virStoragePoolPtr pool)
  * VIR_CONNECT_LIST_STORAGE_POOLS_MPATH
  * VIR_CONNECT_LIST_STORAGE_POOLS_RBD
  * VIR_CONNECT_LIST_STORAGE_POOLS_SHEEPDOG
+ * VIR_CONNECT_LIST_STORAGE_POOLS_GLUSTER
+ * VIR_CONNECT_LIST_STORAGE_POOLS_ZFS
+ * VIR_CONNECT_LIST_STORAGE_POOLS_VSTORAGE
+ * VIR_CONNECT_LIST_STORAGE_POOLS_ISCSI_DIRECT
  *
  * Returns the number of storage pools found or -1 and sets @pools to
  * NULL in case of error.  On success, the array stored into @pools is
@@ -193,7 +197,7 @@ virConnectListStoragePools(virConnectPtr conn,
     virResetLastError();
 
     virCheckConnectReturn(conn, -1);
-    virCheckNonNullArgGoto(names, error);
+    virCheckNonNullArrayArgGoto(names, maxnames, error);
     virCheckNonNegativeArgGoto(maxnames, error);
 
     if (conn->storageDriver && conn->storageDriver->connectListStoragePools) {
@@ -273,7 +277,7 @@ virConnectListDefinedStoragePools(virConnectPtr conn,
     virResetLastError();
 
     virCheckConnectReturn(conn, -1);
-    virCheckNonNullArgGoto(names, error);
+    virCheckNonNullArrayArgGoto(names, maxnames, error);
     virCheckNonNegativeArgGoto(maxnames, error);
 
     if (conn->storageDriver && conn->storageDriver->connectListDefinedStoragePools) {
@@ -868,7 +872,7 @@ virStoragePoolFree(virStoragePoolPtr pool)
 int
 virStoragePoolRef(virStoragePoolPtr pool)
 {
-    VIR_DEBUG("pool=%p refs=%d", pool, pool ? pool->parent.u.s.refs : 0);
+    VIR_DEBUG("pool=%p", pool);
 
     virResetLastError();
 
@@ -1264,7 +1268,7 @@ virStoragePoolListVolumes(virStoragePoolPtr pool,
     virResetLastError();
 
     virCheckStoragePoolReturn(pool, -1);
-    virCheckNonNullArgGoto(names, error);
+    virCheckNonNullArrayArgGoto(names, maxnames, error);
     virCheckNonNegativeArgGoto(maxnames, error);
 
     if (pool->conn->storageDriver && pool->conn->storageDriver->storagePoolListVolumes) {
@@ -1586,7 +1590,10 @@ virStorageVolCreateXMLFrom(virStoragePoolPtr pool,
  *
  * Download the content of the volume as a stream. If @length
  * is zero, then the remaining contents of the volume after
- * @offset will be downloaded.
+ * @offset will be downloaded. Please note that the stream
+ * transports the volume itself as is, so the downloaded data may
+ * not correspond to guest OS visible state in cases when a
+ * complex storage format such as qcow2 or vmdk is used.
  *
  * If VIR_STORAGE_VOL_DOWNLOAD_SPARSE_STREAM is set in @flags
  * effective transmission of holes is enabled. This assumes using
@@ -1659,7 +1666,10 @@ virStorageVolDownload(virStorageVolPtr vol,
  * will fail if @offset + @length exceeds the size of the
  * volume. Otherwise, if @length is non-zero, an error
  * will be raised if an attempt is made to upload greater
- * than @length bytes of data.
+ * than @length bytes of data. Please note that the stream
+ * transports the volume itself as is, so the downloaded data may
+ * not correspond to guest OS visible state in cases when a
+ * complex storage format such as qcow2 or vmdk is used.
  *
  * If VIR_STORAGE_VOL_UPLOAD_SPARSE_STREAM is set in @flags
  * effective transmission of holes is enabled. This assumes using
@@ -1905,7 +1915,7 @@ virStorageVolFree(virStorageVolPtr vol)
 int
 virStorageVolRef(virStorageVolPtr vol)
 {
-    VIR_DEBUG("vol=%p refs=%d", vol, vol ? vol->parent.u.s.refs : 0);
+    VIR_DEBUG("vol=%p", vol);
 
     virResetLastError();
 

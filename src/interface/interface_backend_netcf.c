@@ -29,9 +29,14 @@
 #include "interface_conf.h"
 #include "viralloc.h"
 #include "virlog.h"
+#include "virfile.h"
+#include "virpidfile.h"
 #include "virstring.h"
 #include "viraccessapicheck.h"
 #include "virinterfaceobj.h"
+#include "virutil.h"
+
+#include "configmake.h"
 
 #define VIR_FROM_THIS VIR_FROM_INTERFACE
 
@@ -43,11 +48,15 @@ VIR_LOG_INIT("interface.interface_backend_netcf");
 typedef struct
 {
     virObjectLockable parent;
+    /* pid file FD, ensures two copies of the driver can't use the same root */
+    int lockFD;
+
+    char *stateDir;
     struct netcf *netcf;
     bool privileged;
 } virNetcfDriverState, *virNetcfDriverStatePtr;
 
-static virClassPtr virNetcfDriverStateClass;
+static virClass *virNetcfDriverStateClass;
 static void virNetcfDriverStateDispose(void *obj);
 
 static int
@@ -71,31 +80,65 @@ virNetcfDriverStateDispose(void *obj)
 
     if (_driver->netcf)
         ncf_close(_driver->netcf);
+
+    if (_driver->lockFD != -1)
+        virPidFileRelease(_driver->stateDir, "driver", _driver->lockFD);
+
+    g_free(_driver->stateDir);
 }
 
 
 static int
 netcfStateInitialize(bool privileged,
-                     virStateInhibitCallback callback ATTRIBUTE_UNUSED,
-                     void *opaque ATTRIBUTE_UNUSED)
+                     const char *root,
+                     virStateInhibitCallback callback G_GNUC_UNUSED,
+                     void *opaque G_GNUC_UNUSED)
 {
-    if (virNetcfDriverStateInitialize() < 0)
+    if (root != NULL) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("Driver does not support embedded mode"));
         return -1;
+    }
+
+    if (virNetcfDriverStateInitialize() < 0)
+        return VIR_DRV_STATE_INIT_ERROR;
 
     if (!(driver = virObjectLockableNew(virNetcfDriverStateClass)))
-        return -1;
+        return VIR_DRV_STATE_INIT_ERROR;
 
     driver->privileged = privileged;
+
+    if (privileged) {
+        driver->stateDir = g_strdup_printf("%s/libvirt/interface", RUNSTATEDIR);
+    } else {
+        g_autofree char *rundir = NULL;
+
+        rundir = virGetUserRuntimeDirectory();
+        driver->stateDir = g_strdup_printf("%s/interface/run", rundir);
+    }
+
+    if (g_mkdir_with_parents(driver->stateDir, S_IRWXU) < 0) {
+        virReportSystemError(errno, _("cannot create state directory '%s'"),
+                             driver->stateDir);
+        goto error;
+    }
+
+    if ((driver->lockFD =
+         virPidFileAcquire(driver->stateDir, "driver", false, getpid())) < 0)
+        goto error;
 
     /* open netcf */
     if (ncf_init(&driver->netcf, NULL) != 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("failed to initialize netcf"));
-        virObjectUnref(driver);
-        driver = NULL;
-        return -1;
+        goto error;
     }
-    return 0;
+    return VIR_DRV_STATE_INIT_COMPLETE;
+
+ error:
+    virObjectUnref(driver);
+    driver = NULL;
+    return VIR_DRV_STATE_INIT_ERROR;
 }
 
 
@@ -105,12 +148,7 @@ netcfStateCleanup(void)
     if (!driver)
         return -1;
 
-    if (virObjectUnref(driver)) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Attempt to close netcf state driver "
-                         "with open connections"));
-        return -1;
-    }
+    virObjectUnref(driver);
     driver = NULL;
     return 0;
 }
@@ -149,8 +187,8 @@ netcfStateReload(void)
 
 static virDrvOpenStatus
 netcfConnectOpen(virConnectPtr conn,
-                 virConnectAuthPtr auth ATTRIBUTE_UNUSED,
-                 virConfPtr conf ATTRIBUTE_UNUSED,
+                 virConnectAuthPtr auth G_GNUC_UNUSED,
+                 virConf *conf G_GNUC_UNUSED,
                  unsigned int flags)
 {
     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
@@ -161,21 +199,10 @@ netcfConnectOpen(virConnectPtr conn,
         return VIR_DRV_OPEN_ERROR;
     }
 
-    if (driver->privileged) {
-        if (STRNEQ(conn->uri->path, "/system")) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("unexpected interface URI path '%s', try interface:///system"),
-                           conn->uri->path);
-            return VIR_DRV_OPEN_ERROR;
-        }
-    } else {
-        if (STRNEQ(conn->uri->path, "/session")) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("unexpected interface URI path '%s', try interface:///session"),
-                           conn->uri->path);
-            return VIR_DRV_OPEN_ERROR;
-        }
-    }
+    if (!virConnectValidateURIPath(conn->uri->path,
+                                   "interface",
+                                   driver->privileged))
+        return VIR_DRV_OPEN_ERROR;
 
     if (virConnectOpenEnsureACL(conn) < 0)
         return VIR_DRV_OPEN_ERROR;
@@ -183,27 +210,27 @@ netcfConnectOpen(virConnectPtr conn,
     return VIR_DRV_OPEN_SUCCESS;
 }
 
-static int netcfConnectClose(virConnectPtr conn ATTRIBUTE_UNUSED)
+static int netcfConnectClose(virConnectPtr conn G_GNUC_UNUSED)
 {
     return 0;
 }
 
 
-static int netcfConnectIsSecure(virConnectPtr conn ATTRIBUTE_UNUSED)
+static int netcfConnectIsSecure(virConnectPtr conn G_GNUC_UNUSED)
 {
     /* Trivially secure, since always inside the daemon */
     return 1;
 }
 
 
-static int netcfConnectIsEncrypted(virConnectPtr conn ATTRIBUTE_UNUSED)
+static int netcfConnectIsEncrypted(virConnectPtr conn G_GNUC_UNUSED)
 {
     /* Not encrypted, but remote driver takes care of that */
     return 0;
 }
 
 
-static int netcfConnectIsAlive(virConnectPtr conn ATTRIBUTE_UNUSED)
+static int netcfConnectIsAlive(virConnectPtr conn G_GNUC_UNUSED)
 {
     return 1;
 }
@@ -220,20 +247,12 @@ netcfGetMinimalDefForDevice(struct netcf_if *iface)
     virInterfaceDef *def;
 
     /* Allocate our interface definition structure */
-    if (VIR_ALLOC(def) < 0)
-        return NULL;
+    def = g_new0(virInterfaceDef, 1);
 
-    if (VIR_STRDUP(def->name, ncf_if_name(iface)) < 0)
-        goto cleanup;
-
-    if (VIR_STRDUP(def->mac, ncf_if_mac_string(iface)) < 0)
-        goto cleanup;
+    def->name = g_strdup(ncf_if_name(iface));
+    def->mac = g_strdup(ncf_if_mac_string(iface));
 
     return def;
-
- cleanup:
-    virInterfaceDefFree(def);
-    return NULL;
 }
 
 
@@ -355,8 +374,7 @@ static int netcfConnectNumOfInterfacesImpl(virConnectPtr conn,
         goto cleanup;
     }
 
-    if (VIR_ALLOC_N(names, count) < 0)
-        goto cleanup;
+    names = g_new0(char *, count);
 
     if ((count = ncf_list_interfaces(driver->netcf, count, names, status)) < 0) {
         const char *errmsg, *details;
@@ -369,7 +387,7 @@ static int netcfConnectNumOfInterfacesImpl(virConnectPtr conn,
     }
 
     for (i = 0; i < count; i++) {
-        virInterfaceDefPtr def;
+        virInterfaceDef *def;
         struct netcf_if *iface;
 
         iface = ncf_lookup_by_name(driver->netcf, names[i]);
@@ -445,8 +463,7 @@ static int netcfConnectListInterfacesImpl(virConnectPtr conn,
         goto cleanup;
     }
 
-    if (VIR_ALLOC_N(allnames, count) < 0)
-        goto cleanup;
+    allnames = g_new0(char *, count);
 
     if ((count = ncf_list_interfaces(driver->netcf, count, allnames, status)) < 0) {
         const char *errmsg, *details;
@@ -464,7 +481,7 @@ static int netcfConnectListInterfacesImpl(virConnectPtr conn,
     }
 
     for (i = 0; i < count && want < nnames; i++) {
-        virInterfaceDefPtr def;
+        virInterfaceDef *def;
         struct netcf_if *iface;
 
         iface = ncf_lookup_by_name(driver->netcf, allnames[i]);
@@ -499,8 +516,7 @@ static int netcfConnectListInterfacesImpl(virConnectPtr conn,
         }
         virInterfaceDefFree(def);
 
-        names[want++] = allnames[i];
-        allnames[i] = NULL;
+        names[want++] = g_steal_pointer(&allnames[i]);
     }
 
     ret = want;
@@ -631,8 +647,7 @@ netcfConnectListAllInterfaces(virConnectPtr conn,
         goto cleanup;
     }
 
-    if (VIR_ALLOC_N(names, count) < 0)
-        goto cleanup;
+    names = g_new0(char *, count);
 
     if ((count = ncf_list_interfaces(driver->netcf, count,
                                      names, ncf_flags)) < 0) {
@@ -646,11 +661,11 @@ netcfConnectListAllInterfaces(virConnectPtr conn,
         goto cleanup;
     }
 
-    if (ifaces && VIR_ALLOC_N(tmp_iface_objs, count + 1) < 0)
-        goto cleanup;
+    if (ifaces)
+        tmp_iface_objs = g_new0(virInterfacePtr, count + 1);
 
     for (i = 0; i < count; i++) {
-        virInterfaceDefPtr def;
+        virInterfaceDef *def;
 
         iface = ncf_lookup_by_name(driver->netcf, names[i]);
         if (!iface) {
@@ -698,9 +713,8 @@ netcfConnectListAllInterfaces(virConnectPtr conn,
 
     if (tmp_iface_objs) {
         /* trim the array to the final size */
-        ignore_value(VIR_REALLOC_N(tmp_iface_objs, niface_objs + 1));
-        *ifaces = tmp_iface_objs;
-        tmp_iface_objs = NULL;
+        VIR_REALLOC_N(tmp_iface_objs, niface_objs + 1);
+        *ifaces = g_steal_pointer(&tmp_iface_objs);
     }
 
     ret = niface_objs;
@@ -729,7 +743,7 @@ static virInterfacePtr netcfInterfaceLookupByName(virConnectPtr conn,
 {
     struct netcf_if *iface;
     virInterfacePtr ret = NULL;
-    virInterfaceDefPtr def = NULL;
+    virInterfaceDef *def = NULL;
 
     virObjectLock(driver);
     iface = ncf_lookup_by_name(driver->netcf, name);
@@ -769,7 +783,7 @@ static virInterfacePtr netcfInterfaceLookupByMACString(virConnectPtr conn,
     struct netcf_if *iface;
     int niface;
     virInterfacePtr ret = NULL;
-    virInterfaceDefPtr def = NULL;
+    virInterfaceDef *def = NULL;
 
     virObjectLock(driver);
     niface = ncf_lookup_by_mac_string(driver->netcf, macstr, 1, &iface);
@@ -816,7 +830,7 @@ static char *netcfInterfaceGetXMLDesc(virInterfacePtr ifinfo,
 {
     struct netcf_if *iface = NULL;
     char *xmlstr = NULL;
-    virInterfaceDefPtr ifacedef = NULL;
+    virInterfaceDef *ifacedef = NULL;
     char *ret = NULL;
     bool active;
 
@@ -877,7 +891,7 @@ static virInterfacePtr netcfInterfaceDefineXML(virConnectPtr conn,
 {
     struct netcf_if *iface = NULL;
     char *xmlstr = NULL;
-    virInterfaceDefPtr ifacedef = NULL;
+    virInterfaceDef *ifacedef = NULL;
     virInterfacePtr ret = NULL;
 
     virCheckFlags(0, NULL);
@@ -923,7 +937,7 @@ static virInterfacePtr netcfInterfaceDefineXML(virConnectPtr conn,
 static int netcfInterfaceUndefine(virInterfacePtr ifinfo)
 {
     struct netcf_if *iface = NULL;
-    virInterfaceDefPtr def = NULL;
+    virInterfaceDef *def = NULL;
     int ret = -1;
 
     virObjectLock(driver);
@@ -963,7 +977,7 @@ static int netcfInterfaceCreate(virInterfacePtr ifinfo,
                                 unsigned int flags)
 {
     struct netcf_if *iface = NULL;
-    virInterfaceDefPtr def = NULL;
+    virInterfaceDef *def = NULL;
     int ret = -1;
     bool active;
 
@@ -1015,7 +1029,7 @@ static int netcfInterfaceDestroy(virInterfacePtr ifinfo,
                                  unsigned int flags)
 {
     struct netcf_if *iface = NULL;
-    virInterfaceDefPtr def = NULL;
+    virInterfaceDef *def = NULL;
     int ret = -1;
     bool active;
 
@@ -1066,7 +1080,7 @@ static int netcfInterfaceDestroy(virInterfacePtr ifinfo,
 static int netcfInterfaceIsActive(virInterfacePtr ifinfo)
 {
     struct netcf_if *iface = NULL;
-    virInterfaceDefPtr def = NULL;
+    virInterfaceDef *def = NULL;
     int ret = -1;
     bool active;
 
@@ -1096,7 +1110,6 @@ static int netcfInterfaceIsActive(virInterfacePtr ifinfo)
     return ret;
 }
 
-#ifdef HAVE_NETCF_TRANSACTIONS
 static int netcfInterfaceChangeBegin(virConnectPtr conn, unsigned int flags)
 {
     int ret;
@@ -1171,7 +1184,6 @@ static int netcfInterfaceChangeRollback(virConnectPtr conn, unsigned int flags)
     virObjectUnlock(driver);
     return ret;
 }
-#endif /* HAVE_NETCF_TRANSACTIONS */
 
 static virInterfaceDriver interfaceDriver = {
     .name = INTERFACE_DRIVER_NAME,
@@ -1188,11 +1200,9 @@ static virInterfaceDriver interfaceDriver = {
     .interfaceCreate = netcfInterfaceCreate, /* 0.7.0 */
     .interfaceDestroy = netcfInterfaceDestroy, /* 0.7.0 */
     .interfaceIsActive = netcfInterfaceIsActive, /* 0.7.3 */
-#ifdef HAVE_NETCF_TRANSACTIONS
     .interfaceChangeBegin = netcfInterfaceChangeBegin, /* 0.9.2 */
     .interfaceChangeCommit = netcfInterfaceChangeCommit, /* 0.9.2 */
     .interfaceChangeRollback = netcfInterfaceChangeRollback, /* 0.9.2 */
-#endif /* HAVE_NETCF_TRANSACTIONS */
 };
 
 

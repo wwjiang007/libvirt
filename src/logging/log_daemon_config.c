@@ -40,35 +40,25 @@ int
 virLogDaemonConfigFilePath(bool privileged, char **configfile)
 {
     if (privileged) {
-        if (VIR_STRDUP(*configfile, SYSCONFDIR "/libvirt/virtlogd.conf") < 0)
-            goto error;
+        *configfile = g_strdup(SYSCONFDIR "/libvirt/virtlogd.conf");
     } else {
-        char *configdir = NULL;
+        g_autofree char *configdir = NULL;
 
-        if (!(configdir = virGetUserConfigDirectory()))
-            goto error;
+        configdir = virGetUserConfigDirectory();
 
-        if (virAsprintf(configfile, "%s/virtlogd.conf", configdir) < 0) {
-            VIR_FREE(configdir);
-            goto error;
-        }
-        VIR_FREE(configdir);
+        *configfile = g_strdup_printf("%s/virtlogd.conf", configdir);
     }
 
     return 0;
-
- error:
-    return -1;
 }
 
 
-virLogDaemonConfigPtr
-virLogDaemonConfigNew(bool privileged ATTRIBUTE_UNUSED)
+virLogDaemonConfig *
+virLogDaemonConfigNew(bool privileged G_GNUC_UNUSED)
 {
-    virLogDaemonConfigPtr data;
+    virLogDaemonConfig *data;
 
-    if (VIR_ALLOC(data) < 0)
-        return NULL;
+    data = g_new0(virLogDaemonConfig, 1);
 
     data->max_clients = 1024;
     data->admin_max_clients = 5000;
@@ -79,20 +69,20 @@ virLogDaemonConfigNew(bool privileged ATTRIBUTE_UNUSED)
 }
 
 void
-virLogDaemonConfigFree(virLogDaemonConfigPtr data)
+virLogDaemonConfigFree(virLogDaemonConfig *data)
 {
     if (!data)
         return;
 
-    VIR_FREE(data->log_filters);
-    VIR_FREE(data->log_outputs);
+    g_free(data->log_filters);
+    g_free(data->log_outputs);
 
-    VIR_FREE(data);
+    g_free(data);
 }
 
 static int
-virLogDaemonConfigLoadOptions(virLogDaemonConfigPtr data,
-                              virConfPtr conf)
+virLogDaemonConfigLoadOptions(virLogDaemonConfig *data,
+                              virConf *conf)
 {
     if (virConfGetValueUInt(conf, "log_level", &data->log_level) < 0)
         return -1;
@@ -116,12 +106,11 @@ virLogDaemonConfigLoadOptions(virLogDaemonConfigPtr data,
 /* Read the config file if it exists.
  */
 int
-virLogDaemonConfigLoadFile(virLogDaemonConfigPtr data,
+virLogDaemonConfigLoadFile(virLogDaemonConfig *data,
                            const char *filename,
                            bool allow_missing)
 {
-    virConfPtr conf;
-    int ret;
+    g_autoptr(virConf) conf = NULL;
 
     if (allow_missing &&
         access(filename, R_OK) == -1 &&
@@ -132,7 +121,5 @@ virLogDaemonConfigLoadFile(virLogDaemonConfigPtr data,
     if (!conf)
         return -1;
 
-    ret = virLogDaemonConfigLoadOptions(data, conf);
-    virConfFree(conf);
-    return ret;
+    return virLogDaemonConfigLoadOptions(data, conf);
 }

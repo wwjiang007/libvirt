@@ -18,7 +18,7 @@
  * <http://www.gnu.org/licenses/>.
  *
  * The hash code generation is based on the public domain MurmurHash3 from Austin Appleby:
- * http://code.google.com/p/smhasher/source/browse/trunk/MurmurHash3.cpp
+ * https://code.google.com/p/smhasher/source/browse/trunk/MurmurHash3.cpp
  *
  * We use only the 32 bit variant because the 2 produce different results while
  * we need to produce the same result regardless of the architecture as
@@ -28,7 +28,11 @@
 #include <config.h>
 
 #include "virhashcode.h"
-#include "bitrotate.h"
+
+static uint32_t rotl32(uint32_t x, int8_t r)
+{
+    return (x << r) | (x >> (32 - r));
+}
 
 /* slower than original but handles platforms that do only aligned reads */
 static inline uint32_t getblock(const uint8_t *p, int i)
@@ -97,17 +101,17 @@ uint32_t virHashCodeGen(const void *key, size_t len, uint32_t seed)
     switch (len & 3) {
     case 3:
         k1 ^= tail[2] << 16;
-        ATTRIBUTE_FALLTHROUGH;
+        G_GNUC_FALLTHROUGH;
     case 2:
         k1 ^= tail[1] << 8;
-        ATTRIBUTE_FALLTHROUGH;
+        G_GNUC_FALLTHROUGH;
     case 1:
         k1 ^= tail[0];
         k1 *= c1;
         k1 = rotl32(k1, 15);
         k1 *= c2;
         h1 ^= k1;
-        ATTRIBUTE_FALLTHROUGH;
+        G_GNUC_FALLTHROUGH;
     default:
         break;
     }

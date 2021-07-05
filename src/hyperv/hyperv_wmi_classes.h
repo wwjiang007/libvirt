@@ -21,21 +21,18 @@
  *
  */
 
-#ifndef LIBVIRT_HYPERV_WMI_CLASSES_H
-# define LIBVIRT_HYPERV_WMI_CLASSES_H
+#pragma once
 
-# include "internal.h"
-# include "openwsman.h"
+#include <wsman-api.h>
 
-# include "hyperv_wmi_classes.generated.typedef"
+#include "internal.h"
 
-# define ROOT_CIMV2 \
+#include "hyperv_wmi_classes.generated.typedef"
+
+#define ROOT_CIMV2 \
     "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/*"
 
-# define ROOT_VIRTUALIZATION \
-    "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/*"
-
-# define ROOT_VIRTUALIZATION_V2 \
+#define ROOT_VIRTUALIZATION_V2 \
     "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/v2/*"
 
 
@@ -44,16 +41,16 @@
  * Msvm_ComputerSystem
  */
 
-# define MSVM_COMPUTERSYSTEM_WQL_VIRTUAL \
-    "Description = \"Microsoft Virtual Machine\" "
+#define MSVM_COMPUTERSYSTEM_WQL_VIRTUAL \
+    "Name != __SERVER "
 
-# define MSVM_COMPUTERSYSTEM_WQL_PHYSICAL \
-    "Description = \"Microsoft Hosting Computer System\" "
+#define MSVM_COMPUTERSYSTEM_WQL_PHYSICAL \
+    "Name = __SERVER "
 
-# define MSVM_COMPUTERSYSTEM_WQL_ACTIVE \
+#define MSVM_COMPUTERSYSTEM_WQL_ACTIVE \
     "(EnabledState != 0 and EnabledState != 3 and EnabledState != 32769) "
 
-# define MSVM_COMPUTERSYSTEM_WQL_INACTIVE \
+#define MSVM_COMPUTERSYSTEM_WQL_INACTIVE \
     "(EnabledState = 0 or EnabledState = 3 or EnabledState = 32769) "
 
 enum _Msvm_ComputerSystem_EnabledState {
@@ -73,7 +70,10 @@ enum _Msvm_ComputerSystem_EnabledState {
 enum _Msvm_ComputerSystem_RequestedState {
     MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_ENABLED = 2,
     MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_DISABLED = 3,
+    MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_OFFLINE = 6,
+    MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_QUIESCE = 9,
     MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_REBOOT = 10,
+    MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_RESET = 11,
     MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_PAUSED = 32768,
     MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_SUSPENDED = 32769,
 };
@@ -98,12 +98,67 @@ enum _Msvm_ConcreteJob_JobState {
 };
 
 
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ * Msvm_ResourceAllocationSettingData
+ */
+
+/* https://docs.microsoft.com/en-us/windows/win32/hyperv_v2/msvm-resourceallocationsettingdata */
+enum _Msvm_ResourceAllocationSettingData_ResourceType {
+    MSVM_RASD_RESOURCETYPE_OTHER = 1,
+    MSVM_RASD_RESOURCETYPE_IDE_CONTROLLER = 5,
+    MSVM_RASD_RESOURCETYPE_PARALLEL_SCSI_HBA = 6,
+    MSVM_RASD_RESOURCETYPE_ETHERNET_ADAPTER = 10,
+    MSVM_RASD_RESOURCETYPE_DISKETTE_DRIVE = 14,
+    MSVM_RASD_RESOURCETYPE_CD_DRIVE = 15,
+    MSVM_RASD_RESOURCETYPE_DVD_DRIVE = 16,
+    MSVM_RASD_RESOURCETYPE_DISK_DRIVE = 17,
+    MSVM_RASD_RESOURCETYPE_STORAGE_EXTENT = 19,
+    MSVM_RASD_RESOURCETYPE_SERIAL_PORT = 21,
+    MSVM_RASD_RESOURCETYPE_LOGICAL_DISK = 31,
+    MSVM_RASD_RESOURCETYPE_ETHERNET_CONNECTION = 33,
+};
+
+
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ * Msvm_EthernetPortAllocationSettingData
+ */
+
+/* https://docs.microsoft.com/en-us/windows/win32/hyperv_v2/msvm-ethernetportallocationsettingdata#enabled */
+enum _Msvm_EthernetPortAllocationSettingData_EnabledState {
+    MSVM_ETHERNETPORTALLOCATIONSETTINGDATA_ENABLEDSTATE_ENABLED = 2,
+    MSVM_ETHERNETPORTALLOCATIONSETTINGDATA_ENABLEDSTATE_DISABLED = 3,
+};
+
+
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ * CIM_EnabledLogicalElement
+ */
+
+/* https://docs.microsoft.com/en-us/windows/win32/hyperv_v2/cim-enabledlogicalelement#Unknown */
+enum _CIM_EnabledLogicalElement_EnabledState {
+    CIM_ENABLEDLOGICALELEMENT_ENABLEDSTATE_UNKNOWN = 0,
+    CIM_ENABLEDLOGICALELEMENT_ENABLEDSTATE_OTHER = 1,
+    CIM_ENABLEDLOGICALELEMENT_ENABLEDSTATE_ENABLED = 2,
+    CIM_ENABLEDLOGICALELEMENT_ENABLEDSTATE_DISABLED = 3,
+    CIM_ENABLEDLOGICALELEMENT_ENABLEDSTATE_SHUTTING_DOWN = 4,
+    CIM_ENABLEDLOGICALELEMENT_ENABLEDSTATE_NOT_APPLICABLE = 5,
+    CIM_ENABLEDLOGICALELEMENT_ENABLEDSTATE_ENABLED_BUT_OFFLINE = 6,
+    CIM_ENABLEDLOGICALELEMENT_ENABLEDSTATE_IN_TEST = 7,
+    CIM_ENABLEDLOGICALELEMENT_ENABLEDSTATE_DEFERRED = 8,
+    CIM_ENABLEDLOGICALELEMENT_ENABLEDSTATE_QUIESCE = 9,
+    CIM_ENABLEDLOGICALELEMENT_ENABLEDSTATE_STARTING = 10,
+};
+
+
+
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  * WMI
  */
 
 typedef struct _hypervCimType hypervCimType;
-typedef hypervCimType *hypervCimTypePtr;
 struct _hypervCimType {
     /* Parameter name */
     const char *name;
@@ -114,12 +169,9 @@ struct _hypervCimType {
 };
 
 typedef struct _hypervWmiClassInfo hypervWmiClassInfo;
-typedef hypervWmiClassInfo *hypervWmiClassInfoPtr;
 struct _hypervWmiClassInfo {
     /* The WMI class name */
     const char *name;
-    /* The version of the WMI class as in "v1" or "v2" */
-    const char *version;
     /* The URI for wsman enumerate request */
     const char *rootUri;
     /* The namespace URI for XML serialization */
@@ -127,17 +179,7 @@ struct _hypervWmiClassInfo {
     /* The wsman serializer info - one of the *_TypeInfo structs */
     XmlSerializerInfo *serializerInfo;
     /* Property type information */
-    hypervCimTypePtr propertyInfo;
+    hypervCimType *propertyInfo;
 };
 
-
-typedef struct _hypervWmiClassInfoList hypervWmiClassInfoList;
-typedef hypervWmiClassInfoList *hypervWmiClassInfoListPtr;
-struct _hypervWmiClassInfoList {
-    size_t count;
-    hypervWmiClassInfoPtr *objs;
-};
-
-# include "hyperv_wmi_classes.generated.h"
-
-#endif /* LIBVIRT_HYPERV_WMI_CLASSES_H */
+#include "hyperv_wmi_classes.generated.h"

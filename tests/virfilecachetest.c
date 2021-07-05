@@ -33,17 +33,16 @@ struct _testFileCacheObj {
     char *data;
 };
 typedef struct _testFileCacheObj testFileCacheObj;
-typedef testFileCacheObj *testFileCacheObjPtr;
 
 
-static virClassPtr testFileCacheObjClass;
+static virClass *testFileCacheObjClass;
 
 
 static void
 testFileCacheObjDispose(void *opaque)
 {
-    testFileCacheObjPtr obj = opaque;
-    VIR_FREE(obj->data);
+    testFileCacheObj *obj = opaque;
+    g_free(obj->data);
 }
 
 
@@ -60,10 +59,10 @@ testFileCacheObjOnceInit(void)
 VIR_ONCE_GLOBAL_INIT(testFileCacheObj);
 
 
-static testFileCacheObjPtr
+static testFileCacheObj *
 testFileCacheObjNew(const char *data)
 {
-    testFileCacheObjPtr obj;
+    testFileCacheObj *obj;
 
     if (testFileCacheObjInitialize() < 0)
         return NULL;
@@ -71,14 +70,9 @@ testFileCacheObjNew(const char *data)
     if (!(obj = virObjectNew(testFileCacheObjClass)))
         return NULL;
 
-    if (VIR_STRDUP(obj->data, data) < 0)
-        goto error;
+    obj->data = g_strdup(data);
 
     return obj;
-
- error:
-    virObjectUnref(obj);
-    return NULL;
 }
 
 
@@ -88,25 +82,24 @@ struct _testFileCachePriv {
     const char *expectData;
 };
 typedef struct _testFileCachePriv testFileCachePriv;
-typedef testFileCachePriv *testFileCachePrivPtr;
 
 
 static bool
 testFileCacheIsValid(void *data,
                      void *priv)
 {
-    testFileCachePrivPtr testPriv = priv;
-    testFileCacheObjPtr obj = data;
+    testFileCachePriv *testPriv = priv;
+    testFileCacheObj *obj = data;
 
     return STREQ(testPriv->expectData, obj->data);
 }
 
 
 static void *
-testFileCacheNewData(const char *name ATTRIBUTE_UNUSED,
+testFileCacheNewData(const char *name G_GNUC_UNUSED,
                      void *priv)
 {
-    testFileCachePrivPtr testPriv = priv;
+    testFileCachePriv *testPriv = priv;
 
     return testFileCacheObjNew(testPriv->newData);
 }
@@ -114,10 +107,11 @@ testFileCacheNewData(const char *name ATTRIBUTE_UNUSED,
 
 static void *
 testFileCacheLoadFile(const char *filename,
-                      const char *name ATTRIBUTE_UNUSED,
-                      void *priv ATTRIBUTE_UNUSED)
+                      const char *name G_GNUC_UNUSED,
+                      void *priv G_GNUC_UNUSED,
+                      bool *outdated G_GNUC_UNUSED)
 {
-    testFileCacheObjPtr obj;
+    testFileCacheObj *obj;
     char *data;
 
     if (virFileReadAll(filename, 20, &data) < 0)
@@ -131,11 +125,11 @@ testFileCacheLoadFile(const char *filename,
 
 
 static int
-testFileCacheSaveFile(void *data ATTRIBUTE_UNUSED,
-                      const char *filename ATTRIBUTE_UNUSED,
+testFileCacheSaveFile(void *data G_GNUC_UNUSED,
+                      const char *filename G_GNUC_UNUSED,
                       void *priv)
 {
-    testFileCachePrivPtr testPriv = priv;
+    testFileCachePriv *testPriv = priv;
 
     testPriv->dataSaved = true;
 
@@ -152,14 +146,13 @@ virFileCacheHandlers testFileCacheHandlers = {
 
 
 struct _testFileCacheData {
-    virFileCachePtr cache;
+    virFileCache *cache;
     const char *name;
     const char *newData;
     const char *expectData;
     bool expectSave;
 };
 typedef struct _testFileCacheData testFileCacheData;
-typedef testFileCacheData *testFileCacheDataPtr;
 
 
 static int
@@ -167,8 +160,8 @@ testFileCache(const void *opaque)
 {
     int ret = -1;
     const testFileCacheData *data = opaque;
-    testFileCacheObjPtr obj = NULL;
-    testFileCachePrivPtr testPriv = virFileCacheGetPriv(data->cache);
+    testFileCacheObj *obj = NULL;
+    testFileCachePriv *testPriv = virFileCacheGetPriv(data->cache);
 
     testPriv->dataSaved = false;
     testPriv->newData = data->newData;
@@ -205,7 +198,7 @@ mymain(void)
 {
     int ret = 0;
     testFileCachePriv testPriv = {0};
-    virFileCachePtr cache = NULL;
+    virFileCache *cache = NULL;
 
     if (!(cache = virFileCacheNew(abs_srcdir "/virfilecachedata",
                                   "cache", &testFileCacheHandlers)))
@@ -233,4 +226,4 @@ mymain(void)
     return ret != 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
-VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/virfilecachemock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("virfilecache"))

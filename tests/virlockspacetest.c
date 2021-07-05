@@ -19,14 +19,15 @@
 #include <config.h>
 
 #include <signal.h>
+#include <unistd.h>
 #include <sys/stat.h>
 
 #include "testutils.h"
-#include "virutil.h"
 #include "virerror.h"
 #include "viralloc.h"
 #include "virfile.h"
 #include "virlog.h"
+#include "virutil.h"
 
 #include "virlockspace.h"
 
@@ -36,9 +37,9 @@ VIR_LOG_INIT("tests.lockspacetest");
 
 #define LOCKSPACE_DIR abs_builddir "/virlockspacedata"
 
-static int testLockSpaceCreate(const void *args ATTRIBUTE_UNUSED)
+static int testLockSpaceCreate(const void *args G_GNUC_UNUSED)
 {
-    virLockSpacePtr lockspace;
+    virLockSpace *lockspace;
     int ret = -1;
 
     rmdir(LOCKSPACE_DIR);
@@ -58,9 +59,9 @@ static int testLockSpaceCreate(const void *args ATTRIBUTE_UNUSED)
 }
 
 
-static int testLockSpaceResourceLifecycle(const void *args ATTRIBUTE_UNUSED)
+static int testLockSpaceResourceLifecycle(const void *args G_GNUC_UNUSED)
 {
-    virLockSpacePtr lockspace;
+    virLockSpace *lockspace;
     int ret = -1;
 
     rmdir(LOCKSPACE_DIR);
@@ -92,9 +93,9 @@ static int testLockSpaceResourceLifecycle(const void *args ATTRIBUTE_UNUSED)
 }
 
 
-static int testLockSpaceResourceLockExcl(const void *args ATTRIBUTE_UNUSED)
+static int testLockSpaceResourceLockExcl(const void *args G_GNUC_UNUSED)
 {
-    virLockSpacePtr lockspace;
+    virLockSpace *lockspace;
     int ret = -1;
 
     rmdir(LOCKSPACE_DIR);
@@ -138,9 +139,9 @@ static int testLockSpaceResourceLockExcl(const void *args ATTRIBUTE_UNUSED)
 }
 
 
-static int testLockSpaceResourceLockExclAuto(const void *args ATTRIBUTE_UNUSED)
+static int testLockSpaceResourceLockExclAuto(const void *args G_GNUC_UNUSED)
 {
-    virLockSpacePtr lockspace;
+    virLockSpace *lockspace;
     int ret = -1;
 
     rmdir(LOCKSPACE_DIR);
@@ -176,9 +177,9 @@ static int testLockSpaceResourceLockExclAuto(const void *args ATTRIBUTE_UNUSED)
 }
 
 
-static int testLockSpaceResourceLockShr(const void *args ATTRIBUTE_UNUSED)
+static int testLockSpaceResourceLockShr(const void *args G_GNUC_UNUSED)
 {
-    virLockSpacePtr lockspace;
+    virLockSpace *lockspace;
     int ret = -1;
 
     rmdir(LOCKSPACE_DIR);
@@ -230,9 +231,9 @@ static int testLockSpaceResourceLockShr(const void *args ATTRIBUTE_UNUSED)
 }
 
 
-static int testLockSpaceResourceLockShrAuto(const void *args ATTRIBUTE_UNUSED)
+static int testLockSpaceResourceLockShrAuto(const void *args G_GNUC_UNUSED)
 {
-    virLockSpacePtr lockspace;
+    virLockSpace *lockspace;
     int ret = -1;
 
     rmdir(LOCKSPACE_DIR);
@@ -290,9 +291,9 @@ static int testLockSpaceResourceLockShrAuto(const void *args ATTRIBUTE_UNUSED)
 }
 
 
-static int testLockSpaceResourceLockPath(const void *args ATTRIBUTE_UNUSED)
+static int testLockSpaceResourceLockPath(const void *args G_GNUC_UNUSED)
 {
-    virLockSpacePtr lockspace;
+    virLockSpace *lockspace;
     int ret = -1;
 
     rmdir(LOCKSPACE_DIR);
@@ -300,7 +301,7 @@ static int testLockSpaceResourceLockPath(const void *args ATTRIBUTE_UNUSED)
     if (!(lockspace = virLockSpaceNew(NULL)))
         goto cleanup;
 
-    if (mkdir(LOCKSPACE_DIR, 0700) < 0)
+    if (g_mkdir(LOCKSPACE_DIR, 0700) < 0)
         goto cleanup;
 
     if (virLockSpaceCreateResource(lockspace, LOCKSPACE_DIR "/foo") < 0)
@@ -342,7 +343,9 @@ mymain(void)
 {
     int ret = 0;
 
+#ifndef WIN32
     signal(SIGPIPE, SIG_IGN);
+#endif /* WIN32 */
 
     if (virTestRun("Lockspace creation", testLockSpaceCreate, NULL) < 0)
         ret = -1;

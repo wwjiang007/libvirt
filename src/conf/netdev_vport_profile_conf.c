@@ -26,7 +26,7 @@
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 
-virNetDevVPortProfilePtr
+virNetDevVPortProfile *
 virNetDevVPortProfileParse(xmlNodePtr node, unsigned int flags)
 {
     char *virtPortType;
@@ -36,11 +36,10 @@ virNetDevVPortProfileParse(xmlNodePtr node, unsigned int flags)
     char *virtPortInstanceID = NULL;
     char *virtPortProfileID = NULL;
     char *virtPortInterfaceID = NULL;
-    virNetDevVPortProfilePtr virtPort = NULL;
+    virNetDevVPortProfile *virtPort = NULL;
     xmlNodePtr cur = node->children;
 
-    if (VIR_ALLOC(virtPort) < 0)
-        return NULL;
+    virtPort = g_new0(virNetDevVPortProfile, 1);
 
     if ((virtPortType = virXMLPropString(node, "type")) &&
         (virtPort->virtPortType = virNetDevVPortTypeFromString(virtPortType)) <= 0) {
@@ -197,8 +196,8 @@ virNetDevVPortProfileParse(xmlNodePtr node, unsigned int flags)
 
 
 int
-virNetDevVPortProfileFormat(virNetDevVPortProfilePtr virtPort,
-                            virBufferPtr buf)
+virNetDevVPortProfileFormat(const virNetDevVPortProfile *virtPort,
+                            virBuffer *buf)
 {
     enum virNetDevVPortProfile type;
     bool noParameters;

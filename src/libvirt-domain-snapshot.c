@@ -115,6 +115,9 @@ virDomainSnapshotGetConnect(virDomainSnapshotPtr snapshot)
  * becomes current (see virDomainSnapshotCurrent()), and is a child
  * of any previous current snapshot.
  *
+ * If @flags includes VIR_DOMAIN_SNAPSHOT_CREATE_VALIDATE, then @xmlDesc
+ * is validated against the <domainsnapshot> XML schema.
+ *
  * If @flags includes VIR_DOMAIN_SNAPSHOT_CREATE_REDEFINE, then this
  * is a request to reinstate snapshot metadata that was previously
  * captured from virDomainSnapshotGetXMLDesc() before removing that
@@ -171,6 +174,9 @@ virDomainSnapshotGetConnect(virDomainSnapshotPtr snapshot)
  * file systems in use within domain OS. However, if the guest agent
  * is not present, an error is thrown. Moreover, this flag requires
  * VIR_DOMAIN_SNAPSHOT_CREATE_DISK_ONLY to be passed as well.
+ * For better control and error recovery users should invoke virDomainFSFreeze
+ * manually before taking the snapshot and then virDomainFSThaw to restore the
+ * VM rather than using VIR_DOMAIN_SNAPSHOT_CREATE_QUIESCE.
  *
  * By default, if the snapshot involves external files, and any of the
  * destination files already exist as a non-empty regular file, the
@@ -395,7 +401,7 @@ virDomainSnapshotListNames(virDomainPtr domain, char **names, int nameslen,
     virCheckDomainReturn(domain, -1);
     conn = domain->conn;
 
-    virCheckNonNullArgGoto(names, error);
+    virCheckNonNullArrayArgGoto(names, nameslen, error);
     virCheckNonNegativeArgGoto(nameslen, error);
 
     if (conn->driver->domainSnapshotListNames) {
@@ -597,7 +603,7 @@ virDomainSnapshotListChildrenNames(virDomainSnapshotPtr snapshot,
     virCheckDomainSnapshotReturn(snapshot, -1);
     conn = snapshot->domain->conn;
 
-    virCheckNonNullArgGoto(names, error);
+    virCheckNonNullArrayArgGoto(names, nameslen, error);
     virCheckNonNegativeArgGoto(nameslen, error);
 
     if (conn->driver->domainSnapshotListChildrenNames) {
@@ -1077,8 +1083,7 @@ virDomainSnapshotDelete(virDomainSnapshotPtr snapshot,
 int
 virDomainSnapshotRef(virDomainSnapshotPtr snapshot)
 {
-    VIR_DEBUG("snapshot=%p, refs=%d", snapshot,
-              snapshot ? snapshot->parent.u.s.refs : 0);
+    VIR_DEBUG("snapshot=%p", snapshot);
 
     virResetLastError();
 

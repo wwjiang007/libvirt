@@ -19,16 +19,14 @@
  *
  */
 
-#ifndef LIBVIRT_VIRFILECACHE_H
-# define LIBVIRT_VIRFILECACHE_H
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
-# include "virobject.h"
-# include "virhash.h"
+#include "virobject.h"
+#include "virhash.h"
 
 typedef struct _virFileCache virFileCache;
-typedef virFileCache *virFileCachePtr;
 
 /**
  * virFileCacheIsValidPtr:
@@ -63,15 +61,20 @@ typedef void *
  * @filename: name of a file with cached data
  * @name: name of the cached data
  * @priv: private data created together with cache
+ * @outdated: set to true if data was outdated
  *
- * Loads the cached data from a file @filename.
+ * Loads the cached data from a file @filename. If
+ * NULL is returned, then @oudated indicates whether
+ * this was due to the data being outdated, or an
+ * error loading the cache.
  *
- * Returns cached data object or NULL on error.
+ * Returns cached data object or NULL on outdated data or error.
  */
 typedef void *
 (*virFileCacheLoadFilePtr)(const char *filename,
                            const char *name,
-                           void *priv);
+                           void *priv,
+                           bool *outdated);
 
 /**
  * virFileCacheSaveFilePtr:
@@ -99,7 +102,6 @@ typedef void
 (*virFileCachePrivFreePtr)(void *priv);
 
 typedef struct _virFileCacheHandlers virFileCacheHandlers;
-typedef virFileCacheHandlers *virFileCacheHandlersPtr;
 struct _virFileCacheHandlers {
     virFileCacheIsValidPtr isValid;
     virFileCacheNewDataPtr newData;
@@ -108,30 +110,28 @@ struct _virFileCacheHandlers {
     virFileCachePrivFreePtr privFree;
 };
 
-virFileCachePtr
+virFileCache *
 virFileCacheNew(const char *dir,
                 const char *suffix,
                 virFileCacheHandlers *handlers);
 
 void *
-virFileCacheLookup(virFileCachePtr cache,
+virFileCacheLookup(virFileCache *cache,
                    const char *name);
 
 void *
-virFileCacheLookupByFunc(virFileCachePtr cache,
+virFileCacheLookupByFunc(virFileCache *cache,
                          virHashSearcher iter,
                          const void *iterData);
 
 void *
-virFileCacheGetPriv(virFileCachePtr cache);
+virFileCacheGetPriv(virFileCache *cache);
 
 void
-virFileCacheSetPriv(virFileCachePtr cache,
+virFileCacheSetPriv(virFileCache *cache,
                     void *priv);
 
 int
-virFileCacheInsertData(virFileCachePtr cache,
+virFileCacheInsertData(virFileCache *cache,
                        const char *name,
                        void *data);
-
-#endif /* LIBVIRT_VIRFILECACHE_H */

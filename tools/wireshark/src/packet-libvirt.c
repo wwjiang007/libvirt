@@ -18,13 +18,10 @@
  */
 #include <config.h>
 
-#include <wireshark/config.h>
 #include <wireshark/epan/proto.h>
 #include <wireshark/epan/packet.h>
 #include <wireshark/epan/dissectors/packet-tcp.h>
-#ifdef HAVE_RPC_TYPES_H
-# include <rpc/types.h>
-#endif
+#include <rpc/types.h>
 #include <rpc/xdr.h>
 #include "packet-libvirt.h"
 #include "internal.h"
@@ -75,6 +72,8 @@ static gint ett_libvirt_stream_hole = -1;
         } \
     }
 
+VIR_WARNINGS_NO_UNUSED_FUNCTION
+
 XDR_PRIMITIVE_DISSECTOR(int,     gint32,  int)
 XDR_PRIMITIVE_DISSECTOR(u_int,   guint32, uint)
 XDR_PRIMITIVE_DISSECTOR(short,   gint16,  int)
@@ -86,6 +85,8 @@ XDR_PRIMITIVE_DISSECTOR(u_hyper, guint64, uint64)
 XDR_PRIMITIVE_DISSECTOR(float,   gfloat,  float)
 XDR_PRIMITIVE_DISSECTOR(double,  gdouble, double)
 XDR_PRIMITIVE_DISSECTOR(bool,    bool_t,  boolean)
+
+VIR_WARNINGS_RESET
 
 typedef gboolean (*vir_xdr_dissector_t)(tvbuff_t *tvb, proto_tree *tree, XDR *xdrs, int hf);
 
@@ -169,7 +170,7 @@ format_xdr_bytes(guint8 *bytes, guint32 length)
     for (i = 0; i < length; i++) {
         /* We know that buf has enough size to contain
            2 * length + '\0' characters. */
-        snprintf(buf, 2*(length - i) + 1, "%02x", bytes[i]);
+        g_snprintf(buf, 2*(length - i) + 1, "%02x", bytes[i]);
         buf += 2;
     }
     return buf - length*2;
@@ -345,7 +346,9 @@ dissect_libvirt_num_of_fds(tvbuff_t *tvb, proto_tree *tree)
 }
 
 static void
-dissect_libvirt_fds(tvbuff_t *tvb, gint start, gint32 nfds)
+dissect_libvirt_fds(tvbuff_t *tvb G_GNUC_UNUSED,
+                    gint start G_GNUC_UNUSED,
+                    gint32 nfds G_GNUC_UNUSED)
 {
     /* TODO: NOP for now */
 }
@@ -420,8 +423,14 @@ dissect_libvirt_payload(tvbuff_t *tvb, proto_tree *tree,
         return; /* No payload */
 
     if (status == VIR_NET_OK) {
-        vir_xdr_dissector_t xd = find_payload_dissector(proc, type, get_program_data(prog, VIR_PROGRAM_DISSECTORS),
-                                                        *(gsize *)get_program_data(prog, VIR_PROGRAM_DISSECTORS_LEN));
+        const vir_dissector_index_t *pds = get_program_data(prog, VIR_PROGRAM_DISSECTORS);
+        const gsize *len = get_program_data(prog, VIR_PROGRAM_DISSECTORS_LEN);
+        vir_xdr_dissector_t xd;
+
+        if (!len)
+            goto unknown;
+
+        xd = find_payload_dissector(proc, type, pds, *len);
         if (xd == NULL)
             goto unknown;
         dissect_libvirt_payload_xdr_data(tvb, tree, payload_length, status, xd);
@@ -443,7 +452,7 @@ dissect_libvirt_payload(tvbuff_t *tvb, proto_tree *tree,
 
 static int
 dissect_libvirt_message(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
-                        void *opaque ATTRIBUTE_UNUSED)
+                        void *opaque G_GNUC_UNUSED)
 {
     goffset offset;
     guint32 prog, proc, type, serial, status;
@@ -508,14 +517,14 @@ dissect_libvirt_message(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
 }
 
 static guint
-get_message_len(packet_info *pinfo ATTRIBUTE_UNUSED, tvbuff_t *tvb, int offset, void *data ATTRIBUTE_UNUSED)
+get_message_len(packet_info *pinfo G_GNUC_UNUSED, tvbuff_t *tvb, int offset, void *data G_GNUC_UNUSED)
 {
     return tvb_get_ntohl(tvb, offset);
 }
 
 static int
 dissect_libvirt(tvbuff_t *tvb, packet_info *pinfo,
-                proto_tree *tree, void *data ATTRIBUTE_UNUSED)
+                proto_tree *tree, void *data G_GNUC_UNUSED)
 {
     /* Another magic const - 4; simply, how much bytes
      * is needed to tell the length of libvirt packet. */

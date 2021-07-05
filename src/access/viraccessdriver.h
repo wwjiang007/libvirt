@@ -18,59 +18,61 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRACCESSDRIVER_H
-# define LIBVIRT_VIRACCESSDRIVER_H
+#pragma once
 
-# include "conf/domain_conf.h"
-# include "access/viraccessmanager.h"
+#include "conf/domain_conf.h"
+#include "access/viraccessmanager.h"
 
-typedef int (*virAccessDriverCheckConnectDrv)(virAccessManagerPtr manager,
+typedef int (*virAccessDriverCheckConnectDrv)(virAccessManager *manager,
                                               const char *driverName,
                                               virAccessPermConnect av);
-typedef int (*virAccessDriverCheckDomainDrv)(virAccessManagerPtr manager,
+typedef int (*virAccessDriverCheckDomainDrv)(virAccessManager *manager,
                                              const char *driverName,
-                                             virDomainDefPtr domain,
+                                             virDomainDef *domain,
                                              virAccessPermDomain av);
-typedef int (*virAccessDriverCheckInterfaceDrv)(virAccessManagerPtr manager,
+typedef int (*virAccessDriverCheckInterfaceDrv)(virAccessManager *manager,
                                                 const char *driverName,
-                                                virInterfaceDefPtr iface,
+                                                virInterfaceDef *iface,
                                                 virAccessPermInterface av);
-typedef int (*virAccessDriverCheckNetworkDrv)(virAccessManagerPtr manager,
+typedef int (*virAccessDriverCheckNetworkDrv)(virAccessManager *manager,
                                               const char *driverName,
-                                              virNetworkDefPtr network,
+                                              virNetworkDef *network,
                                               virAccessPermNetwork av);
-typedef int (*virAccessDriverCheckNodeDeviceDrv)(virAccessManagerPtr manager,
-                                                 const char *driverName,
-                                                 virNodeDeviceDefPtr nodedev,
-                                                 virAccessPermNodeDevice av);
-typedef int (*virAccessDriverCheckNWFilterDrv)(virAccessManagerPtr manager,
-                                               const char *driverName,
-                                               virNWFilterDefPtr nwfilter,
-                                               virAccessPermNWFilter av);
-typedef int (*virAccessDriverCheckNWFilterBindingDrv)(virAccessManagerPtr manager,
-                                                      const char *driverName,
-                                                      virNWFilterBindingDefPtr binding,
-                                                      virAccessPermNWFilterBinding av);
-typedef int (*virAccessDriverCheckSecretDrv)(virAccessManagerPtr manager,
-                                             const char *driverName,
-                                             virSecretDefPtr secret,
-                                             virAccessPermSecret av);
-typedef int (*virAccessDriverCheckStoragePoolDrv)(virAccessManagerPtr manager,
+typedef int (*virAccessDriverCheckNetworkPortDrv)(virAccessManager *manager,
                                                   const char *driverName,
-                                                  virStoragePoolDefPtr pool,
-                                                  virAccessPermStoragePool av);
-typedef int (*virAccessDriverCheckStorageVolDrv)(virAccessManagerPtr manager,
+                                                  virNetworkDef *network,
+                                                  virNetworkPortDef *port,
+                                                  virAccessPermNetworkPort av);
+typedef int (*virAccessDriverCheckNodeDeviceDrv)(virAccessManager *manager,
                                                  const char *driverName,
-                                                 virStoragePoolDefPtr pool,
-                                                 virStorageVolDefPtr vol,
+                                                 virNodeDeviceDef *nodedev,
+                                                 virAccessPermNodeDevice av);
+typedef int (*virAccessDriverCheckNWFilterDrv)(virAccessManager *manager,
+                                               const char *driverName,
+                                               virNWFilterDef *nwfilter,
+                                               virAccessPermNWFilter av);
+typedef int (*virAccessDriverCheckNWFilterBindingDrv)(virAccessManager *manager,
+                                                      const char *driverName,
+                                                      virNWFilterBindingDef *binding,
+                                                      virAccessPermNWFilterBinding av);
+typedef int (*virAccessDriverCheckSecretDrv)(virAccessManager *manager,
+                                             const char *driverName,
+                                             virSecretDef *secret,
+                                             virAccessPermSecret av);
+typedef int (*virAccessDriverCheckStoragePoolDrv)(virAccessManager *manager,
+                                                  const char *driverName,
+                                                  virStoragePoolDef *pool,
+                                                  virAccessPermStoragePool av);
+typedef int (*virAccessDriverCheckStorageVolDrv)(virAccessManager *manager,
+                                                 const char *driverName,
+                                                 virStoragePoolDef *pool,
+                                                 virStorageVolDef *vol,
                                                  virAccessPermStorageVol av);
 
-typedef int (*virAccessDriverSetupDrv)(virAccessManagerPtr manager);
-typedef void (*virAccessDriverCleanupDrv)(virAccessManagerPtr manager);
+typedef int (*virAccessDriverSetupDrv)(virAccessManager *manager);
+typedef void (*virAccessDriverCleanupDrv)(virAccessManager *manager);
 
 typedef struct _virAccessDriver virAccessDriver;
-typedef virAccessDriver *virAccessDriverPtr;
-
 struct _virAccessDriver {
     size_t privateDataLen;
     const char *name;
@@ -82,6 +84,7 @@ struct _virAccessDriver {
     virAccessDriverCheckDomainDrv checkDomain;
     virAccessDriverCheckInterfaceDrv checkInterface;
     virAccessDriverCheckNetworkDrv checkNetwork;
+    virAccessDriverCheckNetworkPortDrv checkNetworkPort;
     virAccessDriverCheckNodeDeviceDrv checkNodeDevice;
     virAccessDriverCheckNWFilterDrv checkNWFilter;
     virAccessDriverCheckNWFilterBindingDrv checkNWFilterBinding;
@@ -89,6 +92,3 @@ struct _virAccessDriver {
     virAccessDriverCheckStoragePoolDrv checkStoragePool;
     virAccessDriverCheckStorageVolDrv checkStorageVol;
 };
-
-
-#endif /* LIBVIRT_VIRACCESSDRIVER_H */

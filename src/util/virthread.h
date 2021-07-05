@@ -19,98 +19,84 @@
  *
  */
 
-#ifndef LIBVIRT_VIRTHREAD_H
-# define LIBVIRT_VIRTHREAD_H
+#pragma once
 
-# include "internal.h"
-# include "virerror.h"
+#include "internal.h"
+#include "virerror.h"
 
-# include <pthread.h>
+#include <pthread.h>
 
 typedef struct virMutex virMutex;
-typedef virMutex *virMutexPtr;
-
 struct virMutex {
     pthread_mutex_t lock;
 };
 
 typedef struct virRWLock virRWLock;
-typedef virRWLock *virRWLockPtr;
-
 struct virRWLock {
     pthread_rwlock_t lock;
 };
 
 
 typedef struct virCond virCond;
-typedef virCond *virCondPtr;
-
 struct virCond {
     pthread_cond_t cond;
 };
 
 typedef struct virThreadLocal virThreadLocal;
-typedef virThreadLocal *virThreadLocalPtr;
-
 struct virThreadLocal {
     pthread_key_t key;
 };
 
 typedef struct virThread virThread;
-typedef virThread *virThreadPtr;
-
 struct virThread {
     pthread_t thread;
 };
 
 typedef struct virOnceControl virOnceControl;
-typedef virOnceControl *virOnceControlPtr;
-
 struct virOnceControl {
     pthread_once_t once;
 };
 
 
-# define VIR_MUTEX_INITIALIZER \
+#define VIR_MUTEX_INITIALIZER \
     { \
         .lock = PTHREAD_MUTEX_INITIALIZER \
     }
 
-# define VIR_ONCE_CONTROL_INITIALIZER \
+#define VIR_ONCE_CONTROL_INITIALIZER \
     { \
         .once = PTHREAD_ONCE_INIT \
     }
 
 typedef void (*virOnceFunc)(void);
 
-int virThreadInitialize(void) ATTRIBUTE_RETURN_CHECK;
-void virThreadOnExit(void);
-
 typedef void (*virThreadFunc)(void *opaque);
 
-# define virThreadCreate(thread, joinable, func, opaque) \
+#define virThreadCreate(thread, joinable, func, opaque) \
     virThreadCreateFull(thread, joinable, func, #func, false, opaque)
 
-int virThreadCreateFull(virThreadPtr thread,
+int virThreadCreateFull(virThread *thread,
                         bool joinable,
                         virThreadFunc func,
-                        const char *funcName,
+                        const char *name,
                         bool worker,
-                        void *opaque) ATTRIBUTE_RETURN_CHECK;
-void virThreadSelf(virThreadPtr thread);
-bool virThreadIsSelf(virThreadPtr thread);
-void virThreadJoin(virThreadPtr thread);
+                        void *opaque) G_GNUC_WARN_UNUSED_RESULT;
+void virThreadSelf(virThread *thread);
+bool virThreadIsSelf(virThread *thread);
+void virThreadJoin(virThread *thread);
+
+size_t virThreadMaxName(void);
 
 /* This API is *NOT* for general use. It exists solely as a stub
  * for integration with libselinux AVC callbacks */
-void virThreadCancel(virThreadPtr thread);
+void virThreadCancel(virThread *thread);
 
 /* These next two functions are for debugging only, since they are not
  * guaranteed to give unique values for distinct threads on all
  * architectures, nor are the two functions guaranteed to give the same
  * value for the same thread. */
 unsigned long long virThreadSelfID(void);
-unsigned long long virThreadID(virThreadPtr thread);
+unsigned long long virThreadID(virThread *thread);
 
 /* Static initialization of mutexes is not possible, so we instead
  * provide for guaranteed one-time initialization via a callback
@@ -124,45 +110,45 @@ unsigned long long virThreadID(virThreadPtr thread);
  *     ...now guaranteed that initializer has completed exactly once
  * }
  */
-int virOnce(virOnceControlPtr once, virOnceFunc init)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
+int virOnce(virOnceControl *once, virOnceFunc init)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
 
-int virMutexInit(virMutexPtr m) ATTRIBUTE_RETURN_CHECK;
-int virMutexInitRecursive(virMutexPtr m) ATTRIBUTE_RETURN_CHECK;
-void virMutexDestroy(virMutexPtr m);
+int virMutexInit(virMutex *m) G_GNUC_WARN_UNUSED_RESULT;
+int virMutexInitRecursive(virMutex *m) G_GNUC_WARN_UNUSED_RESULT;
+void virMutexDestroy(virMutex *m);
 
-void virMutexLock(virMutexPtr m);
-void virMutexUnlock(virMutexPtr m);
-
-
-int virRWLockInit(virRWLockPtr m) ATTRIBUTE_RETURN_CHECK;
-void virRWLockDestroy(virRWLockPtr m);
-
-void virRWLockRead(virRWLockPtr m);
-void virRWLockWrite(virRWLockPtr m);
-void virRWLockUnlock(virRWLockPtr m);
+void virMutexLock(virMutex *m);
+void virMutexUnlock(virMutex *m);
 
 
-int virCondInit(virCondPtr c) ATTRIBUTE_RETURN_CHECK;
-int virCondDestroy(virCondPtr c);
+int virRWLockInit(virRWLock *m) G_GNUC_WARN_UNUSED_RESULT;
+void virRWLockDestroy(virRWLock *m);
+
+void virRWLockRead(virRWLock *m);
+void virRWLockWrite(virRWLock *m);
+void virRWLockUnlock(virRWLock *m);
+
+
+int virCondInit(virCond *c) G_GNUC_WARN_UNUSED_RESULT;
+int virCondDestroy(virCond *c);
 
 /* virCondWait, virCondWaitUntil:
  * These functions can return without the associated predicate
  * changing value. Therefore in nearly all cases they
  * should be enclosed in a while loop that checks the predicate.
  */
-int virCondWait(virCondPtr c, virMutexPtr m) ATTRIBUTE_RETURN_CHECK;
-int virCondWaitUntil(virCondPtr c, virMutexPtr m, unsigned long long whenms) ATTRIBUTE_RETURN_CHECK;
+int virCondWait(virCond *c, virMutex *m) G_GNUC_WARN_UNUSED_RESULT;
+int virCondWaitUntil(virCond *c, virMutex *m, unsigned long long whenms) G_GNUC_WARN_UNUSED_RESULT;
 
-void virCondSignal(virCondPtr c);
-void virCondBroadcast(virCondPtr c);
+void virCondSignal(virCond *c);
+void virCondBroadcast(virCond *c);
 
 
 typedef void (*virThreadLocalCleanup)(void *);
-int virThreadLocalInit(virThreadLocalPtr l,
-                       virThreadLocalCleanup c) ATTRIBUTE_RETURN_CHECK;
-void *virThreadLocalGet(virThreadLocalPtr l);
-int virThreadLocalSet(virThreadLocalPtr l, void*) ATTRIBUTE_RETURN_CHECK;
+int virThreadLocalInit(virThreadLocal *l,
+                       virThreadLocalCleanup c) G_GNUC_WARN_UNUSED_RESULT;
+void *virThreadLocalGet(virThreadLocal *l);
+int virThreadLocalSet(virThreadLocal *l, void*) G_GNUC_WARN_UNUSED_RESULT;
 
 
 /**
@@ -190,7 +176,7 @@ int virThreadLocalSet(virThreadLocalPtr l, void*) ATTRIBUTE_RETURN_CHECK;
  * Which will ensure that 'virMyObjectOnceInit' is
  * guaranteed to be invoked exactly once.
  */
-# define VIR_ONCE_GLOBAL_INIT(classname) \
+#define VIR_ONCE_GLOBAL_INIT(classname) \
     static virOnceControl classname ## OnceControl = VIR_ONCE_CONTROL_INITIALIZER; \
     static virErrorPtr classname ## OnceError; \
  \
@@ -213,5 +199,3 @@ int virThreadLocalSet(virThreadLocalPtr l, void*) ATTRIBUTE_RETURN_CHECK;
         return 0; \
     } \
     struct classname ## EatSemicolon
-
-#endif /* LIBVIRT_VIRTHREAD_H */

@@ -13,7 +13,7 @@
   <on_reboot>restart</on_reboot>
   <on_crash>destroy</on_crash>
   <devices>
-    <emulator>/usr/bin/qemu-system-i686</emulator>
+    <emulator>/usr/bin/qemu-system-i386</emulator>
     <disk type='block' device='disk'>
       <source dev='/dev/HostVG/QEMUGuest1'/>
       <backingStore/>
@@ -53,6 +53,20 @@
         </backingStore>
       </mirror>
       <target dev='vdb' bus='virtio'/>
+    </disk>
+    <disk type='file' device='disk'>
+      <source file='/tmp/data2.img'/>
+      <backingStore/>
+      <mirror type='file' file='/tmp/copy2.img' format='qcow2' job='copy'>
+        <format type='qcow2'>
+          <metadata_cache>
+            <max_size unit='bytes'>1234</max_size>
+          </metadata_cache>
+        </format>
+        <source file='/tmp/copy2.img'/>
+        <backingStore/>
+      </mirror>
+      <target dev='vdc' bus='virtio'/>
     </disk>
     <controller type='usb' index='0'/>
     <controller type='ide' index='0'/>

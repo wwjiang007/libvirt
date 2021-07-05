@@ -29,6 +29,7 @@
 #include "virlog.h"
 #include "virrotatingfile.h"
 #include "viruuid.h"
+#include "virutil.h"
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -43,10 +44,8 @@ VIR_LOG_INIT("logging.log_handler");
 #define DEFAULT_MODE 0600
 
 typedef struct _virLogHandlerLogFile virLogHandlerLogFile;
-typedef virLogHandlerLogFile *virLogHandlerLogFilePtr;
-
 struct _virLogHandlerLogFile {
-    virRotatingFileWriterPtr file;
+    virRotatingFileWriter *file;
     int watch;
     int pipefd; /* Read from QEMU via this */
     bool drained;
@@ -63,14 +62,14 @@ struct _virLogHandler {
     size_t max_size;
     size_t max_backups;
 
-    virLogHandlerLogFilePtr *files;
+    virLogHandlerLogFile **files;
     size_t nfiles;
 
     virLogHandlerShutdownInhibitor inhibitor;
     void *opaque;
 };
 
-static virClassPtr virLogHandlerClass;
+static virClass *virLogHandlerClass;
 static void virLogHandlerDispose(void *obj);
 
 static int
@@ -86,7 +85,7 @@ VIR_ONCE_GLOBAL_INIT(virLogHandler);
 
 
 static void
-virLogHandlerLogFileFree(virLogHandlerLogFilePtr file)
+virLogHandlerLogFileFree(virLogHandlerLogFile *file)
 {
     if (!file)
         return;
@@ -97,15 +96,15 @@ virLogHandlerLogFileFree(virLogHandlerLogFilePtr file)
     if (file->watch != -1)
         virEventRemoveHandle(file->watch);
 
-    VIR_FREE(file->driver);
-    VIR_FREE(file->domname);
-    VIR_FREE(file);
+    g_free(file->driver);
+    g_free(file->domname);
+    g_free(file);
 }
 
 
 static void
-virLogHandlerLogFileClose(virLogHandlerPtr handler,
-                          virLogHandlerLogFilePtr file)
+virLogHandlerLogFileClose(virLogHandler *handler,
+                          virLogHandlerLogFile *file)
 {
     size_t i;
 
@@ -119,8 +118,8 @@ virLogHandlerLogFileClose(virLogHandlerPtr handler,
 }
 
 
-static virLogHandlerLogFilePtr
-virLogHandlerGetLogFileFromWatch(virLogHandlerPtr handler,
+static virLogHandlerLogFile *
+virLogHandlerGetLogFileFromWatch(virLogHandler *handler,
                                  int watch)
 {
     size_t i;
@@ -137,11 +136,11 @@ virLogHandlerGetLogFileFromWatch(virLogHandlerPtr handler,
 static void
 virLogHandlerDomainLogFileEvent(int watch,
                                 int fd,
-                                int events,
+                                int events G_GNUC_UNUSED,
                                 void *opaque)
 {
-    virLogHandlerPtr handler = opaque;
-    virLogHandlerLogFilePtr logfile;
+    virLogHandler *handler = opaque;
+    virLogHandlerLogFile *logfile;
     char buf[1024];
     ssize_t len;
 
@@ -167,12 +166,11 @@ virLogHandlerDomainLogFileEvent(int watch,
         virReportSystemError(errno, "%s",
                              _("Unable to read from log pipe"));
         goto error;
+    } else if (len == 0) {
+        goto error;
     }
 
     if (virRotatingFileWriterAppend(logfile->file, buf, len) != len)
-        goto error;
-
-    if (events & VIR_EVENT_HANDLE_HANGUP)
         goto error;
 
  cleanup:
@@ -186,20 +184,20 @@ virLogHandlerDomainLogFileEvent(int watch,
 }
 
 
-virLogHandlerPtr
+virLogHandler *
 virLogHandlerNew(bool privileged,
                  size_t max_size,
                  size_t max_backups,
                  virLogHandlerShutdownInhibitor inhibitor,
                  void *opaque)
 {
-    virLogHandlerPtr handler;
+    virLogHandler *handler;
 
     if (virLogHandlerInitialize() < 0)
-        goto error;
+        return NULL;
 
     if (!(handler = virObjectLockableNew(virLogHandlerClass)))
-        goto error;
+        return NULL;
 
     handler->privileged = privileged;
     handler->max_size = max_size;
@@ -208,23 +206,19 @@ virLogHandlerNew(bool privileged,
     handler->opaque = opaque;
 
     return handler;
-
- error:
-    return NULL;
 }
 
 
-static virLogHandlerLogFilePtr
-virLogHandlerLogFilePostExecRestart(virLogHandlerPtr handler,
-                                    virJSONValuePtr object)
+static virLogHandlerLogFile *
+virLogHandlerLogFilePostExecRestart(virLogHandler *handler,
+                                    virJSONValue *object)
 {
-    virLogHandlerLogFilePtr file;
+    virLogHandlerLogFile *file;
     const char *path;
     const char *domuuid;
     const char *tmp;
 
-    if (VIR_ALLOC(file) < 0)
-        return NULL;
+    file = g_new0(virLogHandlerLogFile, 1);
 
     handler->inhibitor(true, handler->opaque);
 
@@ -239,16 +233,14 @@ virLogHandlerLogFilePostExecRestart(virLogHandlerPtr handler,
                        _("Missing 'driver' in JSON document"));
         goto error;
     }
-    if (VIR_STRDUP(file->driver, tmp) < 0)
-        goto error;
+    file->driver = g_strdup(tmp);
 
     if ((tmp = virJSONValueObjectGetString(object, "domname")) == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Missing 'domname' in JSON document"));
         goto error;
     }
-    if (VIR_STRDUP(file->domname, tmp) < 0)
-        goto error;
+    file->domname = g_strdup(tmp);
 
     if ((domuuid = virJSONValueObjectGetString(object, "domuuid")) == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -288,16 +280,16 @@ virLogHandlerLogFilePostExecRestart(virLogHandlerPtr handler,
 }
 
 
-virLogHandlerPtr
-virLogHandlerNewPostExecRestart(virJSONValuePtr object,
+virLogHandler *
+virLogHandlerNewPostExecRestart(virJSONValue *object,
                                 bool privileged,
                                 size_t max_size,
                                 size_t max_backups,
                                 virLogHandlerShutdownInhibitor inhibitor,
                                 void *opaque)
 {
-    virLogHandlerPtr handler;
-    virJSONValuePtr files;
+    virLogHandler *handler;
+    virJSONValue *files;
     size_t i;
 
     if (!(handler = virLogHandlerNew(privileged,
@@ -320,8 +312,8 @@ virLogHandlerNewPostExecRestart(virJSONValuePtr object,
     }
 
     for (i = 0; i < virJSONValueArraySize(files); i++) {
-        virLogHandlerLogFilePtr file;
-        virJSONValuePtr child = virJSONValueArrayGet(files, i);
+        virLogHandlerLogFile *file;
+        virJSONValue *child = virJSONValueArrayGet(files, i);
 
         if (!(file = virLogHandlerLogFilePostExecRestart(handler, child)))
             goto error;
@@ -351,19 +343,19 @@ virLogHandlerNewPostExecRestart(virJSONValuePtr object,
 static void
 virLogHandlerDispose(void *obj)
 {
-    virLogHandlerPtr handler = obj;
+    virLogHandler *handler = obj;
     size_t i;
 
     for (i = 0; i < handler->nfiles; i++) {
         handler->inhibitor(false, handler->opaque);
         virLogHandlerLogFileFree(handler->files[i]);
     }
-    VIR_FREE(handler->files);
+    g_free(handler->files);
 }
 
 
 int
-virLogHandlerDomainOpenLogFile(virLogHandlerPtr handler,
+virLogHandlerDomainOpenLogFile(virLogHandler *handler,
                                const char *driver,
                                const unsigned char *domuuid,
                                const char *domname,
@@ -373,7 +365,7 @@ virLogHandlerDomainOpenLogFile(virLogHandlerPtr handler,
                                off_t *offset)
 {
     size_t i;
-    virLogHandlerLogFilePtr file = NULL;
+    virLogHandlerLogFile *file = NULL;
     int pipefd[2] = { -1, -1 };
 
     virObjectLock(handler);
@@ -390,21 +382,17 @@ virLogHandlerDomainOpenLogFile(virLogHandlerPtr handler,
         }
     }
 
-    if (pipe(pipefd) < 0) {
-        virReportSystemError(errno, "%s",
-                             _("Cannot open fifo pipe"));
+    if (virPipe(pipefd) < 0)
         goto error;
-    }
-    if (VIR_ALLOC(file) < 0)
-        goto error;
+
+    file = g_new0(virLogHandlerLogFile, 1);
 
     file->watch = -1;
     file->pipefd = pipefd[0];
     pipefd[0] = -1;
     memcpy(file->domuuid, domuuid, VIR_UUID_BUFLEN);
-    if (VIR_STRDUP(file->driver, driver) < 0 ||
-        VIR_STRDUP(file->domname, domname) < 0)
-        goto error;
+    file->driver = g_strdup(driver);
+    file->domname = g_strdup(domname);
 
     if ((file->file = virRotatingFileWriterNew(path,
                                                handler->max_size,
@@ -442,7 +430,7 @@ virLogHandlerDomainOpenLogFile(virLogHandlerPtr handler,
 
 
 static void
-virLogHandlerDomainLogFileDrain(virLogHandlerLogFilePtr file)
+virLogHandlerDomainLogFileDrain(virLogHandlerLogFile *file)
 {
     char buf[1024];
     ssize_t len;
@@ -471,6 +459,8 @@ virLogHandlerDomainLogFileDrain(virLogHandlerLogFilePtr file)
             if (errno == EINTR)
                 continue;
             return;
+        } else if (len == 0) {
+            return;
         }
 
         if (virRotatingFileWriterAppend(file->file, buf, len) != len)
@@ -480,13 +470,13 @@ virLogHandlerDomainLogFileDrain(virLogHandlerLogFilePtr file)
 
 
 int
-virLogHandlerDomainGetLogFilePosition(virLogHandlerPtr handler,
+virLogHandlerDomainGetLogFilePosition(virLogHandler *handler,
                                       const char *path,
                                       unsigned int flags,
                                       ino_t *inode,
                                       off_t *offset)
 {
-    virLogHandlerLogFilePtr file = NULL;
+    virLogHandlerLogFile *file = NULL;
     int ret = -1;
     size_t i;
 
@@ -523,14 +513,14 @@ virLogHandlerDomainGetLogFilePosition(virLogHandlerPtr handler,
 
 
 char *
-virLogHandlerDomainReadLogFile(virLogHandlerPtr handler,
+virLogHandlerDomainReadLogFile(virLogHandler *handler,
                                const char *path,
                                ino_t inode,
                                off_t offset,
                                size_t maxlen,
                                unsigned int flags)
 {
-    virRotatingFileReaderPtr file = NULL;
+    virRotatingFileReader *file = NULL;
     char *data = NULL;
     ssize_t got;
 
@@ -544,8 +534,7 @@ virLogHandlerDomainReadLogFile(virLogHandlerPtr handler,
     if (virRotatingFileReaderSeek(file, inode, offset) < 0)
         goto error;
 
-    if (VIR_ALLOC_N(data, maxlen + 1) < 0)
-        goto error;
+    data = g_new0(char, maxlen + 1);
 
     got = virRotatingFileReaderConsume(file, data, maxlen);
     if (got < 0)
@@ -565,17 +554,17 @@ virLogHandlerDomainReadLogFile(virLogHandlerPtr handler,
 
 
 int
-virLogHandlerDomainAppendLogFile(virLogHandlerPtr handler,
-                                 const char *driver ATTRIBUTE_UNUSED,
-                                 const unsigned char *domuuid ATTRIBUTE_UNUSED,
-                                 const char *domname ATTRIBUTE_UNUSED,
+virLogHandlerDomainAppendLogFile(virLogHandler *handler,
+                                 const char *driver G_GNUC_UNUSED,
+                                 const unsigned char *domuuid G_GNUC_UNUSED,
+                                 const char *domname G_GNUC_UNUSED,
                                  const char *path,
                                  const char *message,
                                  unsigned int flags)
 {
     size_t i;
-    virRotatingFileWriterPtr writer = NULL;
-    virRotatingFileWriterPtr newwriter = NULL;
+    virRotatingFileWriter *writer = NULL;
+    virRotatingFileWriter *newwriter = NULL;
     int ret = -1;
 
     virCheckFlags(0, -1);
@@ -614,65 +603,49 @@ virLogHandlerDomainAppendLogFile(virLogHandlerPtr handler,
 }
 
 
-virJSONValuePtr
-virLogHandlerPreExecRestart(virLogHandlerPtr handler)
+virJSONValue *
+virLogHandlerPreExecRestart(virLogHandler *handler)
 {
-    virJSONValuePtr ret = virJSONValueNewObject();
-    virJSONValuePtr files;
+    g_autoptr(virJSONValue) ret = virJSONValueNewObject();
+    g_autoptr(virJSONValue) files = virJSONValueNewArray();
     size_t i;
     char domuuid[VIR_UUID_STRING_BUFLEN];
 
-    if (!ret)
-        return NULL;
-
-    if (!(files = virJSONValueNewArray()))
-        goto error;
-
-    if (virJSONValueObjectAppend(ret, "files", files) < 0) {
-        virJSONValueFree(files);
-        goto error;
-    }
-
     for (i = 0; i < handler->nfiles; i++) {
-        virJSONValuePtr file = virJSONValueNewObject();
-        if (!file)
-            goto error;
-
-        if (virJSONValueArrayAppend(files, file) < 0) {
-            virJSONValueFree(file);
-            goto error;
-        }
+        g_autoptr(virJSONValue) file = virJSONValueNewObject();
 
         if (virJSONValueObjectAppendNumberInt(file, "pipefd",
                                               handler->files[i]->pipefd) < 0)
-            goto error;
+            return NULL;
 
         if (virJSONValueObjectAppendString(file, "path",
                                            virRotatingFileWriterGetPath(handler->files[i]->file)) < 0)
-            goto error;
+            return NULL;
 
         if (virJSONValueObjectAppendString(file, "driver",
                                            handler->files[i]->driver) < 0)
-            goto error;
+            return NULL;
 
         if (virJSONValueObjectAppendString(file, "domname",
                                            handler->files[i]->domname) < 0)
-            goto error;
+            return NULL;
 
         virUUIDFormat(handler->files[i]->domuuid, domuuid);
         if (virJSONValueObjectAppendString(file, "domuuid", domuuid) < 0)
-            goto error;
+            return NULL;
 
         if (virSetInherit(handler->files[i]->pipefd, true) < 0) {
             virReportSystemError(errno, "%s",
                                  _("Cannot disable close-on-exec flag"));
-            goto error;
+            return NULL;
         }
+
+        if (virJSONValueArrayAppend(files, &file) < 0)
+            return NULL;
     }
 
-    return ret;
+    if (virJSONValueObjectAppend(ret, "files", &files) < 0)
+        return NULL;
 
- error:
-    virJSONValueFree(ret);
-    return NULL;
+    return g_steal_pointer(&ret);
 }

@@ -12,7 +12,7 @@ testCompareXMLToXMLFiles(const char *inxml, const char *outxml)
 {
     char *actual = NULL;
     int ret = -1;
-    virSecretDefPtr secret = NULL;
+    virSecretDef *secret = NULL;
 
     if (!(secret = virSecretDefParseFile(inxml)))
         goto fail;
@@ -44,18 +44,14 @@ testCompareXMLToXMLHelper(const void *data)
     char *outxml = NULL;
     const struct testInfo *info = data;
 
-    if (virAsprintf(&inxml, "%s/secretxml2xmlin/%s.xml",
-                    abs_srcdir, info->name) < 0 ||
-        virAsprintf(&outxml, "%s/secretxml2xml%s/%s.xml",
-                    abs_srcdir,
-                    info->different ? "out" : "in",
-                    info->name) < 0) {
-        goto cleanup;
-    }
+    inxml = g_strdup_printf("%s/secretxml2xmlin/%s.xml", abs_srcdir, info->name);
+    outxml = g_strdup_printf("%s/secretxml2xml%s/%s.xml",
+                             abs_srcdir,
+                             info->different ? "out" : "in",
+                             info->name);
 
     result = testCompareXMLToXMLFiles(inxml, outxml);
 
- cleanup:
     VIR_FREE(inxml);
     VIR_FREE(outxml);
 
@@ -78,8 +74,10 @@ mymain(void)
     DO_TEST("ephemeral-usage-volume");
     DO_TEST("usage-volume");
     DO_TEST("usage-ceph");
+    DO_TEST("usage-ceph-space");
     DO_TEST("usage-iscsi");
     DO_TEST("usage-tls");
+    DO_TEST("usage-vtpm");
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

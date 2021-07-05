@@ -18,10 +18,9 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRSH_DOMAIN_H
-# define LIBVIRT_VIRSH_DOMAIN_H
+#pragma once
 
-# include "virsh.h"
+#include "virsh.h"
 
 struct virshDomainEventCallback {
     const char *name;
@@ -31,6 +30,17 @@ typedef struct virshDomainEventCallback virshDomainEventCallback;
 
 extern virshDomainEventCallback virshDomainEventCallbacks[];
 
+typedef enum {
+    VIRSH_DOMAIN_HOSTNAME_SOURCE_AGENT,
+    VIRSH_DOMAIN_HOSTNAME_SOURCE_LEASE,
+    VIRSH_DOMAIN_HOSTNAME_SOURCE_LAST
+} virshDomainHostnameSource;
+
+VIR_ENUM_DECL(virshDomainHostnameSource);
+
 extern const vshCmdDef domManagementCmds[];
 
-#endif /* LIBVIRT_VIRSH_DOMAIN_H */
+VIR_ENUM_DECL(virDomainProcessSignal);
+VIR_ENUM_DECL(virDomainLifecycle);
+VIR_ENUM_DECL(virDomainLifecycleAction);
+VIR_ENUM_DECL(virDomainCoreDumpFormat);

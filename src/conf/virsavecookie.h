@@ -18,23 +18,21 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRSAVECOOKIE_H
-# define LIBVIRT_VIRSAVECOOKIE_H
+#pragma once
 
-# include <libxml/xpath.h>
+#include <libxml/xpath.h>
 
-# include "internal.h"
-# include "virobject.h"
-# include "virbuffer.h"
+#include "internal.h"
+#include "virobject.h"
+#include "virbuffer.h"
 
 
 typedef int (*virSaveCookieParseFunc)(xmlXPathContextPtr ctxt,
-                                      virObjectPtr *obj);
-typedef int (*virSaveCookieFormatFunc)(virBufferPtr buf,
-                                       virObjectPtr obj);
+                                      virObject **obj);
+typedef int (*virSaveCookieFormatFunc)(virBuffer *buf,
+                                       virObject *obj);
 
 typedef struct _virSaveCookieCallbacks virSaveCookieCallbacks;
-typedef virSaveCookieCallbacks *virSaveCookieCallbacksPtr;
 struct _virSaveCookieCallbacks {
     virSaveCookieParseFunc parse;
     virSaveCookieFormatFunc format;
@@ -43,21 +41,19 @@ struct _virSaveCookieCallbacks {
 
 int
 virSaveCookieParse(xmlXPathContextPtr ctxt,
-                   virObjectPtr *obj,
-                   virSaveCookieCallbacksPtr saveCookie);
+                   virObject **obj,
+                   virSaveCookieCallbacks *saveCookie);
 
 int
 virSaveCookieParseString(const char *xml,
-                         virObjectPtr *obj,
-                         virSaveCookieCallbacksPtr saveCookie);
+                         virObject **obj,
+                         virSaveCookieCallbacks *saveCookie);
 
 int
-virSaveCookieFormatBuf(virBufferPtr buf,
-                       virObjectPtr obj,
-                       virSaveCookieCallbacksPtr saveCookie);
+virSaveCookieFormatBuf(virBuffer *buf,
+                       virObject *obj,
+                       virSaveCookieCallbacks *saveCookie);
 
 char *
-virSaveCookieFormat(virObjectPtr obj,
-                    virSaveCookieCallbacksPtr saveCookie);
-
-#endif /* LIBVIRT_VIRSAVECOOKIE_H */
+virSaveCookieFormat(virObject *obj,
+                    virSaveCookieCallbacks *saveCookie);

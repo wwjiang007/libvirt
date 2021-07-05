@@ -19,42 +19,28 @@
  *
  */
 
-#ifndef LIBVIRT_VIROBJECT_H
-# define LIBVIRT_VIROBJECT_H
+#pragma once
 
-# include "internal.h"
-# include "virthread.h"
+#include "internal.h"
+#include "virthread.h"
+
+#include <glib-object.h>
 
 typedef struct _virClass virClass;
-typedef virClass *virClassPtr;
 
 typedef struct _virObject virObject;
-typedef virObject *virObjectPtr;
 
 typedef struct _virObjectLockable virObjectLockable;
-typedef virObjectLockable *virObjectLockablePtr;
 
 typedef struct _virObjectRWLockable virObjectRWLockable;
-typedef virObjectRWLockable *virObjectRWLockablePtr;
 
 typedef void (*virObjectDisposeCallback)(void *obj);
 
-/* Most code should not play with the contents of this struct; however,
- * the struct itself is public so that it can be embedded as the first
- * field of a subclassed object.  */
-struct _virObject {
-    /* Ensure correct alignment of this and all subclasses, even on
-     * platforms where 'long long' or function pointers have stricter
-     * requirements than 'void *'.  */
-    union {
-        long long dummy_align1;
-        void (*dummy_align2) (void);
-        struct {
-            unsigned int magic;
-            int refs;
-        } s;
-    } u;
-    virClassPtr klass;
+#define VIR_TYPE_OBJECT vir_object_get_type()
+G_DECLARE_DERIVABLE_TYPE(virObject, vir_object, VIR, OBJECT, GObject);
+
+struct _virObjectClass {
+    GObjectClass parent;
 };
 
 struct _virObjectLockable {
@@ -67,27 +53,27 @@ struct _virObjectRWLockable {
     virRWLock lock;
 };
 
-virClassPtr virClassForObject(void);
-virClassPtr virClassForObjectLockable(void);
-virClassPtr virClassForObjectRWLockable(void);
+virClass *virClassForObject(void);
+virClass *virClassForObjectLockable(void);
+virClass *virClassForObjectRWLockable(void);
 
-# ifndef VIR_PARENT_REQUIRED
-#  define VIR_PARENT_REQUIRED ATTRIBUTE_NONNULL(1)
-# endif
+#ifndef VIR_PARENT_REQUIRED
+# define VIR_PARENT_REQUIRED ATTRIBUTE_NONNULL(1)
+#endif
 
 /* Assign the class description nameClass to represent struct @name
  * (which must have an object-based 'parent' member at offset 0), and
  * with parent class @prnt. nameDispose must exist as either a
  * function or as a macro defined to NULL.
  */
-# define VIR_CLASS_NEW(name, prnt) \
-    verify_expr(offsetof(name, parent) == 0, \
-      (name##Class = virClassNew(prnt, #name, sizeof(name), \
-                                 sizeof(((name *)NULL)->parent), \
-                                 name##Dispose)))
+#define VIR_CLASS_NEW(name, prnt) \
+    (G_STATIC_ASSERT_EXPR(offsetof(name, parent) == 0), \
+     (name##Class = virClassNew(prnt, #name, sizeof(name),\
+                                sizeof(((name *)NULL)->parent), \
+                                name##Dispose)))
 
-virClassPtr
-virClassNew(virClassPtr parent,
+virClass *
+virClassNew(virClass *parent,
             const char *name,
             size_t objectSize,
             size_t parentSize,
@@ -95,55 +81,41 @@ virClassNew(virClassPtr parent,
     VIR_PARENT_REQUIRED ATTRIBUTE_NONNULL(2);
 
 const char *
-virClassName(virClassPtr klass)
+virClassName(virClass *klass)
     ATTRIBUTE_NONNULL(1);
 
 bool
-virClassIsDerivedFrom(virClassPtr klass,
-                      virClassPtr parent)
+virClassIsDerivedFrom(virClass *klass,
+                      virClass *parent)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
 void *
-virObjectNew(virClassPtr klass)
+virObjectNew(virClass *klass)
     ATTRIBUTE_NONNULL(1);
 
-bool
-virObjectUnref(void *obj);
-
 void
-virObjectAutoUnref(void *objptr);
-
-/**
- * VIR_AUTOUNREF:
- * @type: type of an virObject subclass to be unref'd automatically
- *
- * Declares a variable of @type which will be automatically unref'd when
- * control goes out of the scope.
- */
-# define VIR_AUTOUNREF(type) \
-    __attribute__((cleanup(virObjectAutoUnref))) type
+virObjectUnref(void *obj);
 
 void *
 virObjectRef(void *obj);
 
 bool
 virObjectIsClass(void *obj,
-                 virClassPtr klass)
+                 virClass *klass)
     ATTRIBUTE_NONNULL(2);
 
 void
 virObjectFreeCallback(void *opaque);
 
 void
-virObjectFreeHashData(void *opaque,
-                      const void *name);
+virObjectFreeHashData(void *opaque);
 
 void *
-virObjectLockableNew(virClassPtr klass)
+virObjectLockableNew(virClass *klass)
     ATTRIBUTE_NONNULL(1);
 
 void *
-virObjectRWLockableNew(virClassPtr klass)
+virObjectRWLockableNew(virClass *klass)
     ATTRIBUTE_NONNULL(1);
 
 void
@@ -172,5 +144,3 @@ virObjectListFree(void *list);
 void
 virObjectListFreeCount(void *list,
                        size_t count);
-
-#endif /* LIBVIRT_VIROBJECT_H */

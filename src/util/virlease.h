@@ -20,26 +20,23 @@
  *
  */
 
-#ifndef LIBVIRT_VIRLEASE_H
-# define LIBVIRT_VIRLEASE_H
+#pragma once
 
-# include "virjson.h"
+#include "virjson.h"
 
-int virLeaseReadCustomLeaseFile(virJSONValuePtr leases_array_new,
+int virLeaseReadCustomLeaseFile(virJSONValue *leases_array_new,
                                 const char *custom_lease_file,
                                 const char *ip_to_delete,
                                 char **server_duid);
 
-int virLeasePrintLeases(virJSONValuePtr leases_array_new,
+int virLeasePrintLeases(virJSONValue *leases_array_new,
                         const char *server_duid);
 
 
-int virLeaseNew(virJSONValuePtr *lease_ret,
+int virLeaseNew(virJSONValue **lease_ret,
                 const char *mac,
                 const char *clientid,
                 const char *ip,
                 const char *hostname,
                 const char *iaid,
                 const char *server_duid);
-
-#endif /* LIBVIRT_VIRLEASE_H */

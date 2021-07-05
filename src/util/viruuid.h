@@ -18,10 +18,9 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRUUID_H
-# define LIBVIRT_VIRUUID_H
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 
 /**
@@ -29,7 +28,7 @@
  * @conn: connection
  * @uuid: possibly null UUID array
  */
-# define VIR_UUID_DEBUG(conn, uuid) \
+#define VIR_UUID_DEBUG(conn, uuid) \
     do { \
         if (uuid) { \
             char _uuidstr[VIR_UUID_STRING_BUFLEN]; \
@@ -42,17 +41,15 @@
 
 
 int virSetHostUUIDStr(const char *host_uuid);
-int virGetHostUUID(unsigned char *host_uuid) ATTRIBUTE_NONNULL(1);
+int virGetHostUUID(unsigned char *host_uuid) ATTRIBUTE_NONNULL(1) G_GNUC_NO_INLINE;
 
-int virUUIDIsValid(unsigned char *uuid);
+bool virUUIDIsValid(const unsigned char *uuid);
 
-int virUUIDGenerate(unsigned char *uuid) ATTRIBUTE_NOINLINE;
+int virUUIDGenerate(unsigned char *uuid) G_GNUC_NO_INLINE;
 
 int virUUIDParse(const char *uuidstr,
                  unsigned char *uuid)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
 
 const char *virUUIDFormat(const unsigned char *uuid,
                           char *uuidstr) ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
-
-#endif /* LIBVIRT_VIRUUID_H */

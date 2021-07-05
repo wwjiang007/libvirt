@@ -18,19 +18,16 @@
  * <http://www.gnu.org/licenses/>.
  *
  * The hash code generation is based on the public domain MurmurHash3 from Austin Appleby:
- * http://code.google.com/p/smhasher/source/browse/trunk/MurmurHash3.cpp
+ * https://code.google.com/p/smhasher/source/browse/trunk/MurmurHash3.cpp
  *
  * We use only the 32 bit variant because the 2 produce different result while
  * we need to produce the same result regardless of the architecture as
  * clients can be both 64 or 32 bit at the same time.
  */
 
-#ifndef LIBVIRT_VIRHASHCODE_H
-# define LIBVIRT_VIRHASHCODE_H
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 uint32_t virHashCodeGen(const void *key, size_t len, uint32_t seed)
-    ATTRIBUTE_NOINLINE;
-
-#endif /* LIBVIRT_VIRHASHCODE_H */
+    G_GNUC_NO_INLINE;

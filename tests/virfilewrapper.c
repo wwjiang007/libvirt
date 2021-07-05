@@ -44,6 +44,8 @@ static FILE *(*real_fopen)(const char *path, const char *mode);
 static int (*real_access)(const char *path, int mode);
 static int (*real_mkdir)(const char *path, mode_t mode);
 static DIR *(*real_opendir)(const char *path);
+static int (*real_execv)(const char *path, char *const argv[]);
+static int (*real_execve)(const char *path, char *const argv[], char *const envp[]);
 
 static void init_syms(void)
 {
@@ -54,7 +56,13 @@ static void init_syms(void)
     VIR_MOCK_REAL_INIT(access);
     VIR_MOCK_REAL_INIT(mkdir);
     VIR_MOCK_REAL_INIT(open);
+# if defined(__APPLE__) && defined(__x86_64__)
+    VIR_MOCK_REAL_INIT_ALIASED(opendir, "opendir$INODE64");
+# else
     VIR_MOCK_REAL_INIT(opendir);
+# endif
+    VIR_MOCK_REAL_INIT(execv);
+    VIR_MOCK_REAL_INIT(execve);
 }
 
 
@@ -120,9 +128,7 @@ virMockStatRedirect(const char *path, char **newpath)
         if (!tmp)
             continue;
 
-        if (virAsprintfQuiet(newpath, "%s%s", overrides[i], tmp) < 0)
-            return -1;
-
+        *newpath = g_strdup_printf("%s%s", overrides[i], tmp);
         break;
     }
 
@@ -141,7 +147,7 @@ virMockStatRedirect(const char *path, char **newpath)
 
 FILE *fopen(const char *path, const char *mode)
 {
-    VIR_AUTOFREE(char *) newpath = NULL;
+    g_autofree char *newpath = NULL;
 
     PATH_OVERRIDE(newpath, path);
 
@@ -150,7 +156,7 @@ FILE *fopen(const char *path, const char *mode)
 
 int access(const char *path, int mode)
 {
-    VIR_AUTOFREE(char *) newpath = NULL;
+    g_autofree char *newpath = NULL;
 
     PATH_OVERRIDE(newpath, path);
 
@@ -159,7 +165,7 @@ int access(const char *path, int mode)
 
 int open(const char *path, int flags, ...)
 {
-    VIR_AUTOFREE(char *) newpath = NULL;
+    g_autofree char *newpath = NULL;
     va_list ap;
     mode_t mode = 0;
 
@@ -179,11 +185,29 @@ int open(const char *path, int flags, ...)
 
 DIR *opendir(const char *path)
 {
-    VIR_AUTOFREE(char *) newpath = NULL;
+    g_autofree char *newpath = NULL;
 
     PATH_OVERRIDE(newpath, path);
 
     return real_opendir(newpath ? newpath : path);
+}
+
+int execv(const char *path, char *const argv[])
+{
+    g_autofree char *newpath = NULL;
+
+    PATH_OVERRIDE(newpath, path);
+
+    return real_execv(newpath ? newpath : path, argv);
+}
+
+int execve(const char *path, char *const argv[], char *const envp[])
+{
+    g_autofree char *newpath = NULL;
+
+    PATH_OVERRIDE(newpath, path);
+
+    return real_execve(newpath ? newpath : path, argv, envp);
 }
 
 #endif

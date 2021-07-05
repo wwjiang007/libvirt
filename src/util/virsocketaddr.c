@@ -24,24 +24,19 @@
 #include "virbuffer.h"
 #include "viralloc.h"
 
-#include <netdb.h>
-
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 /*
- * Helpers to extract the IP arrays from the virSocketAddrPtr
+ * Helpers to extract the IP arrays from the virSocketAddr *
  * That part is the less portable of the module
  */
 typedef unsigned char virSocketAddrIPv4[4];
-typedef virSocketAddrIPv4 *virSocketAddrIPv4Ptr;
 typedef unsigned short virSocketAddrIPv6[8];
-typedef virSocketAddrIPv6 *virSocketAddrIPv6Ptr;
 typedef unsigned char virSocketAddrIPv6Nibbles[32];
-typedef virSocketAddrIPv6Nibbles *virSocketAddrIPv6NibblesPtr;
 
 static int
 virSocketAddrGetIPv4Addr(const virSocketAddr *addr,
-                         virSocketAddrIPv4Ptr tab)
+                         virSocketAddrIPv4 *tab)
 {
     unsigned long val;
     size_t i;
@@ -60,7 +55,7 @@ virSocketAddrGetIPv4Addr(const virSocketAddr *addr,
 }
 
 static int
-virSocketAddrGetIPv6Addr(const virSocketAddr *addr, virSocketAddrIPv6Ptr tab)
+virSocketAddrGetIPv6Addr(const virSocketAddr *addr, virSocketAddrIPv6 *tab)
 {
     size_t i;
 
@@ -77,7 +72,7 @@ virSocketAddrGetIPv6Addr(const virSocketAddr *addr, virSocketAddrIPv6Ptr tab)
 
 static int
 virSocketAddrGetIPv6Nibbles(const virSocketAddr *addr,
-                            virSocketAddrIPv6NibblesPtr tab)
+                            virSocketAddrIPv6Nibbles *tab)
 {
     size_t i;
 
@@ -134,7 +129,7 @@ virSocketAddrParseInternal(struct addrinfo **res,
  *
  * Returns the length of the network address or -1 in case of error.
  */
-int virSocketAddrParse(virSocketAddrPtr addr, const char *val, int family)
+int virSocketAddrParse(virSocketAddr *addr, const char *val, int family)
 {
     int len;
     struct addrinfo *res;
@@ -175,7 +170,7 @@ int virSocketAddrParse(virSocketAddrPtr addr, const char *val, int family)
  *
  * Returns the length of the network address or -1 in case of error.
  */
-int virSocketAddrParseAny(virSocketAddrPtr addr,
+int virSocketAddrParseAny(virSocketAddr *addr,
                           const char *val,
                           int family,
                           bool reportError)
@@ -215,7 +210,7 @@ int virSocketAddrParseAny(virSocketAddrPtr addr,
  * Returns the length of the network address or -1 in case of error.
  */
 int
-virSocketAddrParseIPv4(virSocketAddrPtr addr, const char *val)
+virSocketAddrParseIPv4(virSocketAddr *addr, const char *val)
 {
     return virSocketAddrParse(addr, val, AF_INET);
 }
@@ -230,9 +225,60 @@ virSocketAddrParseIPv4(virSocketAddrPtr addr, const char *val)
  * Returns the length of the network address or -1 in case of error.
  */
 int
-virSocketAddrParseIPv6(virSocketAddrPtr addr, const char *val)
+virSocketAddrParseIPv6(virSocketAddr *addr, const char *val)
 {
     return virSocketAddrParse(addr, val, AF_INET6);
+}
+
+/**
+ * virSocketAddrResolveService:
+ * @service: a service name or port number
+ *
+ * Resolve a service, which might be a plain port or service name,
+ * into a port number for IPv4/IPv6 usage
+ *
+ * Returns a numeric port number, or -1 on error
+ */
+int virSocketAddrResolveService(const char *service)
+{
+    struct addrinfo *res, *tmp;
+    struct addrinfo hints;
+    int err;
+    int port = -1;
+
+    memset(&hints, 0, sizeof(hints));
+
+    if ((err = getaddrinfo(NULL, service, &hints, &res)) != 0) {
+        virReportError(VIR_ERR_SYSTEM_ERROR,
+                       _("Cannot parse socket service '%s': %s"),
+                       service, gai_strerror(err));
+        return -1;
+    }
+
+    tmp = res;
+    while (tmp) {
+        if (tmp->ai_family == AF_INET) {
+            struct sockaddr_in in;
+            memcpy(&in, tmp->ai_addr, sizeof(in));
+            port = ntohs(in.sin_port);
+            goto cleanup;
+        } else if (tmp->ai_family == AF_INET6) {
+            struct sockaddr_in6 in;
+            memcpy(&in, tmp->ai_addr, sizeof(in));
+            port = ntohs(in.sin6_port);
+            goto cleanup;
+        }
+        tmp = tmp->ai_next;
+    }
+
+    virReportError(VIR_ERR_SYSTEM_ERROR,
+                   _("No matches for socket service '%s': %s"),
+                   service, gai_strerror(err));
+
+ cleanup:
+    freeaddrinfo(res);
+
+    return port;
 }
 
 /*
@@ -244,7 +290,7 @@ virSocketAddrParseIPv6(virSocketAddrPtr addr, const char *val)
  * touch any previously set port.
  */
 void
-virSocketAddrSetIPv4AddrNetOrder(virSocketAddrPtr addr, uint32_t val)
+virSocketAddrSetIPv4AddrNetOrder(virSocketAddr *addr, uint32_t val)
 {
     addr->data.stor.ss_family = AF_INET;
     addr->data.inet4.sin_addr.s_addr = val;
@@ -260,7 +306,7 @@ virSocketAddrSetIPv4AddrNetOrder(virSocketAddrPtr addr, uint32_t val)
  * touch any previously set port.
  */
 void
-virSocketAddrSetIPv4Addr(virSocketAddrPtr addr, uint32_t val)
+virSocketAddrSetIPv4Addr(virSocketAddr *addr, uint32_t val)
 {
     virSocketAddrSetIPv4AddrNetOrder(addr, htonl(val));
 }
@@ -273,7 +319,7 @@ virSocketAddrSetIPv4Addr(virSocketAddrPtr addr, uint32_t val)
  * Set the IPv6 address given an integer in network order. This function does not
  * touch any previously set port.
  */
-void virSocketAddrSetIPv6AddrNetOrder(virSocketAddrPtr addr, uint32_t val[4])
+void virSocketAddrSetIPv6AddrNetOrder(virSocketAddr *addr, uint32_t val[4])
 {
     addr->data.stor.ss_family = AF_INET6;
     memcpy(addr->data.inet6.sin6_addr.s6_addr, val, 4 * sizeof(*val));
@@ -288,7 +334,7 @@ void virSocketAddrSetIPv6AddrNetOrder(virSocketAddrPtr addr, uint32_t val[4])
  * Set the IPv6 address given an integer in host order. This function does not
  * touch any previously set port.
  */
-void virSocketAddrSetIPv6Addr(virSocketAddrPtr addr, uint32_t val[4])
+void virSocketAddrSetIPv6Addr(virSocketAddr *addr, uint32_t val[4])
 {
     size_t i = 0;
     uint32_t host_val[4];
@@ -383,7 +429,7 @@ virSocketAddrIsWildcard(const virSocketAddr *addr)
 
 /*
  * virSocketAddrFormat:
- * @addr: an initialized virSocketAddrPtr
+ * @addr: an initialized virSocketAddr *
  *
  * Returns a string representation of the given address
  * Returns NULL on any error
@@ -398,7 +444,7 @@ virSocketAddrFormat(const virSocketAddr *addr)
 
 /*
  * virSocketAddrFormatFull:
- * @addr: an initialized virSocketAddrPtr
+ * @addr: an initialized virSocketAddr *
  * @withService: if true, then service info is appended
  * @separator: separator between hostname & service.
  *
@@ -426,12 +472,10 @@ virSocketAddrFormatFull(const virSocketAddr *addr,
      * nicely for UNIX sockets */
     if (addr->data.sa.sa_family == AF_UNIX) {
         if (withService) {
-            if (virAsprintf(&addrstr, VIR_LOOPBACK_IPV4_ADDR"%s0",
-                            separator ? separator : ":") < 0)
-                return NULL;
+            addrstr = g_strdup_printf(VIR_LOOPBACK_IPV4_ADDR "%s0",
+                                      separator ? separator : ":");
         } else {
-            if (VIR_STRDUP(addrstr, VIR_LOOPBACK_IPV4_ADDR) < 0)
-                return NULL;
+            addrstr = g_strdup(VIR_LOOPBACK_IPV4_ADDR);
         }
         return addrstr;
     }
@@ -448,24 +492,19 @@ virSocketAddrFormatFull(const virSocketAddr *addr,
     }
 
     if (withService) {
-        VIR_AUTOFREE(char *) ipv6_host = NULL;
+        g_autofree char *ipv6_host = NULL;
         /* sasl_new_client demands the socket address to be in an odd format:
          * a.b.c.d;port or e:f:g:h:i:j:k:l;port, so use square brackets for
          * IPv6 only if no separator is passed to the function
          */
-        if (!separator && VIR_SOCKET_ADDR_FAMILY(addr) == AF_INET6) {
-            if (virAsprintf(&ipv6_host, "[%s]", host) < 0)
-                return NULL;
-        }
+        if (!separator && VIR_SOCKET_ADDR_FAMILY(addr) == AF_INET6)
+            ipv6_host = g_strdup_printf("[%s]", host);
 
-        if (virAsprintf(&addrstr, "%s%s%s",
-                        ipv6_host ? ipv6_host : host,
-                        separator ? separator : ":", port) == -1) {
-            return NULL;
-        }
+        addrstr = g_strdup_printf("%s%s%s",
+                                  ipv6_host ? ipv6_host : host,
+                                  separator ? separator : ":", port);
     } else {
-        if (VIR_STRDUP(addrstr, host) < 0)
-            return NULL;
+        addrstr = g_strdup(host);
     }
 
     return addrstr;
@@ -474,7 +513,7 @@ virSocketAddrFormatFull(const virSocketAddr *addr,
 
 /*
  * virSocketAddrSetPort:
- * @addr: an initialized virSocketAddrPtr
+ * @addr: an initialized virSocketAddr *
  * @port: the port number to set
  *
  * Set the transport layer port of the given virtSocketAddr
@@ -482,7 +521,7 @@ virSocketAddrFormatFull(const virSocketAddr *addr,
  * Returns 0 on success, -1 on failure
  */
 int
-virSocketAddrSetPort(virSocketAddrPtr addr, int port)
+virSocketAddrSetPort(virSocketAddr *addr, int port)
 {
     if (addr == NULL)
         return -1;
@@ -502,13 +541,13 @@ virSocketAddrSetPort(virSocketAddrPtr addr, int port)
 
 /*
  * virSocketGetPort:
- * @addr: an initialized virSocketAddrPtr
+ * @addr: an initialized virSocketAddr *
  *
  * Returns the transport layer port of the given virtSocketAddr
  * Returns -1 if @addr is invalid
  */
 int
-virSocketAddrGetPort(virSocketAddrPtr addr)
+virSocketAddrGetPort(virSocketAddr *addr)
 {
     if (addr == NULL)
         return -1;
@@ -522,6 +561,41 @@ virSocketAddrGetPort(virSocketAddrPtr addr)
     return -1;
 }
 
+
+/*
+ * virSocketGetPath:
+ * @addr: an initialized virSocketAddr *
+ *
+ * Returns the UNIX socket path of the given virtSocketAddr
+ *
+ * Returns -1 if @addr is invalid or does not refer to an
+ * address of type AF_UNIX;
+ */
+char *
+virSocketAddrGetPath(virSocketAddr *addr G_GNUC_UNUSED)
+{
+#ifndef WIN32
+    if (addr == NULL) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("No socket address provided"));
+        return NULL;
+    }
+
+    if (addr->data.sa.sa_family != AF_UNIX) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("UNIX socket address is required"));
+        return NULL;
+    }
+
+    return g_strndup(addr->data.un.sun_path, sizeof(addr->data.un.sun_path));
+#else
+    virReportError(VIR_ERR_NO_SUPPORT, "%s",
+                   _("UNIX sockets not supported on this platform"));
+    return NULL;
+#endif
+}
+
+
 /**
  * virSocketAddrIsNetmask:
  * @netmask: the netmask address
@@ -530,7 +604,7 @@ virSocketAddrGetPort(virSocketAddrPtr addr)
  *
  * Returns 0 in case of success and -1 in case of error
  */
-int virSocketAddrIsNetmask(virSocketAddrPtr netmask)
+int virSocketAddrIsNetmask(virSocketAddr *netmask)
 {
     int n = virSocketAddrGetNumNetmaskBits(netmask);
     if (n < 0)
@@ -552,7 +626,7 @@ int virSocketAddrIsNetmask(virSocketAddrPtr netmask)
 int
 virSocketAddrMask(const virSocketAddr *addr,
                   const virSocketAddr *netmask,
-                  virSocketAddrPtr network)
+                  virSocketAddr *network)
 {
     memset(network, 0, sizeof(*network));
     if (addr->data.stor.ss_family != netmask->data.stor.ss_family) {
@@ -599,7 +673,7 @@ virSocketAddrMask(const virSocketAddr *addr,
 int
 virSocketAddrMaskByPrefix(const virSocketAddr *addr,
                           unsigned int prefix,
-                          virSocketAddrPtr network)
+                          virSocketAddr *network)
 {
     virSocketAddr netmask;
 
@@ -626,7 +700,7 @@ virSocketAddrMaskByPrefix(const virSocketAddr *addr,
 int
 virSocketAddrBroadcast(const virSocketAddr *addr,
                        const virSocketAddr *netmask,
-                       virSocketAddrPtr broadcast)
+                       virSocketAddr *broadcast)
 {
     memset(broadcast, 0, sizeof(*broadcast));
 
@@ -658,7 +732,7 @@ virSocketAddrBroadcast(const virSocketAddr *addr,
 int
 virSocketAddrBroadcastByPrefix(const virSocketAddr *addr,
                                unsigned int prefix,
-                               virSocketAddrPtr broadcast)
+                               virSocketAddr *broadcast)
 {
     virSocketAddr netmask;
 
@@ -681,8 +755,8 @@ virSocketAddrBroadcastByPrefix(const virSocketAddr *addr,
  * Returns 1 in case of success and 0 in case of failure and
  *         -1 in case of error
  */
-int virSocketAddrCheckNetmask(virSocketAddrPtr addr1, virSocketAddrPtr addr2,
-                              virSocketAddrPtr netmask)
+int virSocketAddrCheckNetmask(virSocketAddr *addr1, virSocketAddr *addr2,
+                              virSocketAddr *netmask)
 {
     size_t i;
 
@@ -743,15 +817,15 @@ int virSocketAddrCheckNetmask(virSocketAddrPtr addr1, virSocketAddrPtr addr2,
  * Returns the size of the range or -1 in case of failure
  */
 int
-virSocketAddrGetRange(virSocketAddrPtr start, virSocketAddrPtr end,
-                      virSocketAddrPtr network, int prefix)
+virSocketAddrGetRange(virSocketAddr *start, virSocketAddr *end,
+                      virSocketAddr *network, int prefix)
 {
     int ret = 0;
     size_t i;
     virSocketAddr netmask;
-    VIR_AUTOFREE(char *) startStr = NULL;
-    VIR_AUTOFREE(char *) endStr = NULL;
-    VIR_AUTOFREE(char *) netStr = NULL;
+    g_autofree char *startStr = NULL;
+    g_autofree char *endStr = NULL;
+    g_autofree char *netStr = NULL;
 
     if (start == NULL || end == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -1017,10 +1091,10 @@ int virSocketAddrGetNumNetmaskBits(const virSocketAddr *netmask)
 
 int
 virSocketAddrPrefixToNetmask(unsigned int prefix,
-                             virSocketAddrPtr netmask,
+                             virSocketAddr *netmask,
                              int family)
 {
-    int result = -1;
+    memset(netmask, 0, sizeof(*netmask));
 
     netmask->data.stor.ss_family = AF_UNSPEC; /* assume failure */
 
@@ -1028,19 +1102,18 @@ virSocketAddrPrefixToNetmask(unsigned int prefix,
         int ip;
 
         if (prefix > 32)
-            goto error;
+            return -1;
 
         ip = prefix ? ~((1 << (32 - prefix)) - 1) : 0;
         netmask->data.inet4.sin_addr.s_addr = htonl(ip);
         netmask->data.stor.ss_family = AF_INET;
         netmask->len = sizeof(struct sockaddr_in);
-        result = 0;
 
     } else if (family == AF_INET6) {
         size_t i = 0;
 
         if (prefix > 128)
-            goto error;
+            return -1;
 
         while (prefix >= 8) {
             /* do as much as possible an entire byte at a time */
@@ -1058,12 +1131,10 @@ virSocketAddrPrefixToNetmask(unsigned int prefix,
         }
         netmask->data.stor.ss_family = AF_INET6;
         netmask->len = sizeof(struct sockaddr_in6);
-        result = 0;
     }
 
- error:
-    return result;
- }
+    return 0;
+}
 
 /**
  * virSocketAddrGetIPPrefix:
@@ -1191,18 +1262,17 @@ virSocketAddrPTRDomain(const virSocketAddr *addr,
                        unsigned int prefix,
                        char **ptr)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     size_t i;
-    int ret = -1;
 
     if (VIR_SOCKET_ADDR_IS_FAMILY(addr, AF_INET)) {
         virSocketAddrIPv4 ip;
 
         if (prefix == 0 || prefix >= 32 || prefix % 8 != 0)
-            goto unsupported;
+            return -2;
 
         if (virSocketAddrGetIPv4Addr(addr, &ip) < 0)
-            goto cleanup;
+            return -1;
 
         for (i = prefix / 8; i > 0; i--)
             virBufferAsprintf(&buf, "%u.", ip[i - 1]);
@@ -1212,35 +1282,27 @@ virSocketAddrPTRDomain(const virSocketAddr *addr,
         virSocketAddrIPv6Nibbles ip;
 
         if (prefix == 0 || prefix >= 128 || prefix % 4 != 0)
-            goto unsupported;
+            return -2;
 
         if (virSocketAddrGetIPv6Nibbles(addr, &ip) < 0)
-            goto cleanup;
+            return -1;
 
         for (i = prefix / 4; i > 0; i--)
             virBufferAsprintf(&buf, "%x.", ip[i - 1]);
 
         virBufferAddLit(&buf, VIR_SOCKET_ADDR_IPV6_ARPA);
     } else {
-        goto unsupported;
+        return -2;
     }
 
     if (!(*ptr = virBufferContentAndReset(&buf)))
-        goto cleanup;
+        return -1;
 
-    ret = 0;
-
- cleanup:
-    virBufferFreeAndReset(&buf);
-    return ret;
-
- unsupported:
-    ret = -2;
-    goto cleanup;
+    return 0;
 }
 
 void
-virSocketAddrFree(virSocketAddrPtr addr)
+virSocketAddrFree(virSocketAddr *addr)
 {
-    VIR_FREE(addr);
+    g_free(addr);
 }

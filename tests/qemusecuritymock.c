@@ -24,6 +24,11 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#ifdef WITH_SELINUX
+# include <selinux/selinux.h>
+# include <selinux/label.h>
+#endif
+
 #include "virmock.h"
 #include "virfile.h"
 #include "virthread.h"
@@ -32,6 +37,7 @@
 #include "viralloc.h"
 #include "qemusecuritytest.h"
 #include "security/security_manager.h"
+#include "virhostuptime.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -40,7 +46,8 @@
  * work as expected. Therefore there is a lot we have to mock
  * (chown, stat, XATTR APIs, etc.). Since the test won't run as
  * root chown() would fail, therefore we have to keep everything
- * in memory. By default, all files are owned by 1:2.
+ * in memory. By default, all files are owned by 1:2 and have a
+ * SELinux label.
  * By the way, since there are some cases where real stat needs
  * to be called, the mocked functions are effective only if
  * $ENVVAR is set.
@@ -48,11 +55,16 @@
 
 #define DEFAULT_UID 1
 #define DEFAULT_GID 2
+#define DEFAULT_SELINUX_LABEL "system_u:object_r:default_t:s0"
 
 
 static int (*real_chown)(const char *path, uid_t uid, gid_t gid);
 static int (*real_open)(const char *path, int flags, ...);
 static int (*real_close)(int fd);
+#ifdef WITH_SELINUX
+static int (*real_setfilecon_raw)(const char *path, const char *context);
+static int (*real_getfilecon_raw)(const char *path, char **context);
+#endif
 
 
 /* Global mutex to avoid races */
@@ -62,13 +74,17 @@ virMutex m = VIR_MUTEX_INITIALIZER;
  * "$path:$name" and value is just XATTR "$value". We don't need
  * to list XATTRs a path has, therefore we don't need something
  * more clever. */
-virHashTablePtr xattr_paths = NULL;
+GHashTable *xattr_paths = NULL;
 
 
 /* The UID:GID is stored in a hash table. Again, for simplicity,
  * the path is the key and the value is an uint32_t , where
  * the lower half is UID and the higher is GID. */
-virHashTablePtr chown_paths = NULL;
+GHashTable *chown_paths = NULL;
+
+/* The SELinux label is stored in a hash table. For simplicity,
+ * the path is the key and the value is the label. */
+GHashTable *selinux_paths = NULL;
 
 
 static void
@@ -84,13 +100,18 @@ init_hash(void)
     if (xattr_paths)
         return;
 
-    if (!(xattr_paths = virHashCreate(10, virHashValueFree))) {
+    if (!(xattr_paths = virHashNew(g_free))) {
         fprintf(stderr, "Unable to create hash table for XATTR paths\n");
         abort();
     }
 
-    if (!(chown_paths = virHashCreate(10, virHashValueFree))) {
+    if (!(chown_paths = virHashNew(g_free))) {
         fprintf(stderr, "Unable to create hash table for chowned paths\n");
+        abort();
+    }
+
+    if (!(selinux_paths = virHashNew(g_free))) {
+        fprintf(stderr, "Unable to create hash table for selinux labels\n");
         abort();
     }
 }
@@ -105,6 +126,10 @@ init_syms(void)
     VIR_MOCK_REAL_INIT(chown);
     VIR_MOCK_REAL_INIT(open);
     VIR_MOCK_REAL_INIT(close);
+#ifdef WITH_SELINUX
+    VIR_MOCK_REAL_INIT(setfilecon_raw);
+    VIR_MOCK_REAL_INIT(getfilecon_raw);
+#endif
 
     /* Intentionally not calling init_hash() here */
 }
@@ -116,22 +141,19 @@ get_key(const char *path,
 {
     char *ret;
 
-    if (virAsprintf(&ret, "%s:%s", path, name) < 0) {
-        fprintf(stderr, "Unable to create hash table key\n");
-        abort();
-    }
+    ret = g_strdup_printf("%s:%s", path, name);
 
     return ret;
 }
 
 
 int
-virFileGetXAttr(const char *path,
-                const char *name,
-                char **value)
+virFileGetXAttrQuiet(const char *path,
+                     const char *name,
+                     char **value)
 {
     int ret = -1;
-    char *key;
+    g_autofree char *key = NULL;
     char *val;
 
     key = get_key(path, name);
@@ -145,13 +167,39 @@ virFileGetXAttr(const char *path,
         goto cleanup;
     }
 
-    if (VIR_STRDUP(*value, val) < 0)
-        goto cleanup;
+    *value = g_strdup(val);
 
     ret = 0;
  cleanup:
     virMutexUnlock(&m);
-    VIR_FREE(key);
+    return ret;
+}
+
+
+/*
+ * This may look redundant but is needed to work around an
+ * compiler quirk. The call from the real virFileGetXAttr
+ * to the real virFileGetXAttrQuiet has a quirk where the
+ * return value from virFileGetXAttrQuiet gets scrambled
+ * if we mock virFileGetXAttrQuiet, returning -1 instead
+ * of 0 despite succeeding. This happens on FreeBSD 11/12
+ * hosts with Clang, and is suspected to be some kind of
+ * compiler optimization. By mocking this function too we
+ * can workaround it.
+ */
+int
+virFileGetXAttr(const char *path,
+                const char *name,
+                char **value)
+{
+    int ret;
+
+    if ((ret = virFileGetXAttrQuiet(path, name, value)) < 0) {
+        virReportSystemError(errno,
+                             "Unable to get XATTR %s on %s",
+                             name, path);
+    }
+
     return ret;
 }
 
@@ -161,12 +209,11 @@ int virFileSetXAttr(const char *path,
                     const char *value)
 {
     int ret = -1;
-    char *key;
-    char *val;
+    g_autofree char *key = NULL;
+    g_autofree char *val = NULL;
 
     key = get_key(path, name);
-    if (VIR_STRDUP(val, value) < 0)
-        return -1;
+    val = g_strdup(value);
 
     virMutexLock(&m);
     init_syms();
@@ -179,8 +226,6 @@ int virFileSetXAttr(const char *path,
     ret = 0;
  cleanup:
     virMutexUnlock(&m);
-    VIR_FREE(val);
-    VIR_FREE(key);
     return ret;
 }
 
@@ -189,7 +234,7 @@ int virFileRemoveXAttr(const char *path,
                        const char *name)
 {
     int ret = -1;
-    char *key;
+    g_autofree char *key = NULL;
 
     key = get_key(path, name);
 
@@ -201,7 +246,6 @@ int virFileRemoveXAttr(const char *path,
         errno = ENODATA;
 
     virMutexUnlock(&m);
-    VIR_FREE(key);
     return ret;
 }
 
@@ -226,7 +270,7 @@ int virFileRemoveXAttr(const char *path,
                 sb->st_gid = DEFAULT_GID; \
             } else { \
                 /* Known path. Set values passed to chown() earlier */ \
-                sb->st_uid = *val % 16; \
+                sb->st_uid = *val & 0xffff; \
                 sb->st_gid = *val >> 16; \
             } \
 \
@@ -245,13 +289,12 @@ mock_chown(const char *path,
     int ret = -1;
 
     if (gid >> 16 || uid >> 16) {
-        fprintf(stderr, "Attempt to set too high UID or GID: %lld %lld",
+        fprintf(stderr, "Attempt to set too high UID or GID: %llu %llu",
                (unsigned long long) uid, (unsigned long long) gid);
         abort();
     }
 
-    if (VIR_ALLOC(val) < 0)
-        return -1;
+    val = g_new0(uint32_t, 1);
 
     *val = (gid << 16) + uid;
 
@@ -273,7 +316,7 @@ mock_chown(const char *path,
 #include "virmockstathelpers.c"
 
 static int
-virMockStatRedirect(const char *path ATTRIBUTE_UNUSED, char **newpath ATTRIBUTE_UNUSED)
+virMockStatRedirect(const char *path G_GNUC_UNUSED, char **newpath G_GNUC_UNUSED)
 {
     return 0;
 }
@@ -335,38 +378,67 @@ close(int fd)
 }
 
 
-int virFileLock(int fd ATTRIBUTE_UNUSED,
-                bool shared ATTRIBUTE_UNUSED,
-                off_t start ATTRIBUTE_UNUSED,
-                off_t len ATTRIBUTE_UNUSED,
-                bool waitForLock ATTRIBUTE_UNUSED)
+int virFileLock(int fd G_GNUC_UNUSED,
+                bool shared G_GNUC_UNUSED,
+                off_t start G_GNUC_UNUSED,
+                off_t len G_GNUC_UNUSED,
+                bool waitForLock G_GNUC_UNUSED)
 {
     return 0;
 }
 
 
-int virFileUnlock(int fd ATTRIBUTE_UNUSED,
-                  off_t start ATTRIBUTE_UNUSED,
-                  off_t len ATTRIBUTE_UNUSED)
+int virFileUnlock(int fd G_GNUC_UNUSED,
+                  off_t start G_GNUC_UNUSED,
+                  off_t len G_GNUC_UNUSED)
 {
+    return 0;
+}
+
+
+typedef struct _checkOwnerData checkOwnerData;
+struct _checkOwnerData {
+    GHashTable *paths;
+    bool chown_fail;
+    bool selinux_fail;
+};
+
+
+static int
+checkSELinux(void *payload,
+             const char *name,
+             void *opaque)
+{
+    checkOwnerData *data = opaque;
+    char *label = payload;
+
+    if (STRNEQ(label, DEFAULT_SELINUX_LABEL) &&
+        !g_hash_table_contains(data->paths, name)) {
+        fprintf(stderr,
+                "Path %s wasn't restored back to its original SELinux label\n",
+                name);
+        data->selinux_fail = true;
+    }
+
     return 0;
 }
 
 
 static int
 checkOwner(void *payload,
-           const void *name,
-           void *data)
+           const char *name,
+           void *opaque)
 {
-    bool *chown_fail = data;
+    checkOwnerData *data = opaque;
     uint32_t owner = *((uint32_t*) payload);
 
-    if (owner % 16 != DEFAULT_UID ||
-        owner >> 16 != DEFAULT_GID) {
+    if ((owner % 16 != DEFAULT_UID ||
+         owner >> 16 != DEFAULT_GID) &&
+        !g_hash_table_contains(data->paths, name)) {
         fprintf(stderr,
                 "Path %s wasn't restored back to its original owner\n",
-                (const char *) name);
-        *chown_fail = false;
+                name);
+        data->chown_fail = true;
     }
 
     return 0;
@@ -375,44 +447,232 @@ checkOwner(void *payload,
 
 static int
 printXATTR(void *payload,
-           const void *name,
+           const char *name,
            void *data)
 {
     bool *xattr_fail = data;
 
     /* The fact that we are in this function means that there are
      * some XATTRs left behind. This is enough to claim an error. */
-    *xattr_fail = false;
+    *xattr_fail = true;
 
     /* Hash table key consists of "$path:$xattr_name", xattr
      * value is then the value stored in the hash table. */
-    printf("key=%s val=%s\n", (const char *) name, (const char *) payload);
+    printf("key=%s val=%s\n", name, (const char *) payload);
     return 0;
 }
 
 
-int checkPaths(void)
+/**
+ * checkPaths:
+ * @paths: a NULL terminated list of paths expected not to be restored
+ *
+ * Check if all paths were restored and if no XATTR was left
+ * behind. Since restore is not done on all domain's paths, some
+ * paths are expected to be not restored. A list of such paths
+ * can be passed in @paths argument. If a path is not restored
+ * but it's on the list no error is indicated.
+ */
+int checkPaths(GHashTable *paths)
 {
     int ret = -1;
-    bool chown_fail = false;
+    checkOwnerData data = { .paths = paths, .chown_fail = false, .selinux_fail = false };
     bool xattr_fail = false;
+    GHashTableIter htitr;
+    void *key;
 
     virMutexLock(&m);
     init_hash();
 
-    if ((virHashForEach(chown_paths, checkOwner, &chown_fail)) < 0)
+    g_hash_table_iter_init(&htitr, paths);
+
+    while (g_hash_table_iter_next(&htitr, &key, NULL)) {
+        if (!virHashLookup(chown_paths, key)) {
+            fprintf(stderr, "Unexpected path restored: %s\n", (const char *) key);
+            goto cleanup;
+        }
+    }
+
+    if (virHashForEach(selinux_paths, checkSELinux, &data) < 0)
         goto cleanup;
 
-    if ((virHashForEach(xattr_paths, printXATTR, &xattr_fail)) < 0)
+    if (virHashForEach(chown_paths, checkOwner, &data) < 0)
         goto cleanup;
 
-    if (chown_fail || xattr_fail)
+    if (virHashForEach(xattr_paths, printXATTR, &xattr_fail) < 0)
+        goto cleanup;
+
+    if (data.chown_fail || data.selinux_fail || xattr_fail)
         goto cleanup;
 
     ret = 0;
  cleanup:
-    virHashRemoveAll(chown_paths);
-    virHashRemoveAll(xattr_paths);
     virMutexUnlock(&m);
     return ret;
 }
+
+
+void freePaths(void)
+{
+    virMutexLock(&m);
+    init_hash();
+
+    virHashFree(selinux_paths);
+    virHashFree(chown_paths);
+    virHashFree(xattr_paths);
+    selinux_paths = chown_paths = xattr_paths = NULL;
+    virMutexUnlock(&m);
+}
+
+
+int
+virProcessRunInFork(virProcessForkCallback cb,
+                    void *opaque)
+{
+    return cb(-1, opaque);
+}
+
+
+/* We don't really need to mock this function. The qemusecuritytest doesn't
+ * care about the actual value. However, travis runs build and tests in a
+ * container where utmp is missing and thus this function fails. */
+int
+virHostGetBootTime(unsigned long long *when)
+{
+    *when = 1234567890;
+    return 0;
+}
+
+
+#ifdef WITH_SELINUX
+int
+is_selinux_enabled(void)
+{
+    return 1;
+}
+
+
+struct selabel_handle *
+selabel_open(unsigned int backend G_GNUC_UNUSED,
+             const struct selinux_opt *opts G_GNUC_UNUSED,
+             unsigned nopts G_GNUC_UNUSED)
+{
+    return (void*)((intptr_t) 0x1);
+}
+
+
+void
+selabel_close(struct selabel_handle *rec G_GNUC_UNUSED)
+{
+    /* nada */
+}
+
+
+const char *
+selinux_virtual_domain_context_path(void)
+{
+    return abs_srcdir "/qemusecuritydata/virtual_domain_context";
+}
+
+
+const char *
+selinux_virtual_image_context_path(void)
+{
+    return abs_srcdir "/qemusecuritydata/virtual_image_context";
+}
+
+
+int getcon_raw(char **context)
+{
+    *context = g_strdup("system_u:system_r:virtd_t:s0-s0:c0.c1023");
+    return 0;
+}
+
+
+static int
+mock_setfilecon_raw(const char *path,
+                    const char *context)
+{
+    g_autofree char *val = g_strdup(context);
+    int ret = -1;
+
+    virMutexLock(&m);
+    init_hash();
+
+    if (virHashUpdateEntry(selinux_paths, path, val) < 0)
+        goto cleanup;
+    val = NULL;
+
+    ret = 0;
+ cleanup:
+    virMutexUnlock(&m);
+    return ret;
+}
+
+
+static int
+mock_getfilecon_raw(const char *path,
+                    char **context)
+{
+    const char *val;
+
+    virMutexLock(&m);
+    init_hash();
+
+    val = virHashLookup(selinux_paths, path);
+    if (!val)
+        val = DEFAULT_SELINUX_LABEL;
+
+    *context = g_strdup(val);
+    virMutexUnlock(&m);
+    return 0;
+}
+
+
+int
+setfilecon_raw(const char *path,
+               const char *context)
+{
+    int ret;
+
+    init_syms();
+
+    if (getenv(ENVVAR))
+        ret = mock_setfilecon_raw(path, context);
+    else
+        ret = real_setfilecon_raw(path, context);
+
+    return ret;
+}
+
+
+int
+getfilecon_raw(const char *path,
+               char **context)
+{
+    int ret;
+
+    init_syms();
+
+    if (getenv(ENVVAR))
+        ret = mock_getfilecon_raw(path, context);
+    else
+        ret = real_getfilecon_raw(path, context);
+
+    return ret;
+}
+
+
+int
+selabel_lookup_raw(struct selabel_handle *hnd G_GNUC_UNUSED,
+                   char **context,
+                   const char *key G_GNUC_UNUSED,
+                   int type G_GNUC_UNUSED)
+{
+    /* This function will be called only if we haven't found original label in
+     * XATTRs. Return something else than DEFAULT_SELINUX_LABEL so that it is
+     * considered as error. */
+    *context = g_strdup("system_u:object_r:default_t:s1");
+    return 0;
+}
+#endif

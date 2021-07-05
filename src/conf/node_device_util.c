@@ -26,6 +26,7 @@
 #include "virstring.h"
 #include "virvhba.h"
 #include "viralloc.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_NODEDEV
 
@@ -54,7 +55,7 @@ virNodeDeviceGetParentName(virConnectPtr conn,
         return NULL;
     }
 
-    ignore_value(VIR_STRDUP(parent, virNodeDeviceGetParent(device)));
+    parent = g_strdup(virNodeDeviceGetParent(device));
     virObjectUnref(device);
 
     return parent;
@@ -74,7 +75,7 @@ virNodeDeviceGetParentName(virConnectPtr conn,
  * Returns vHBA name on success, NULL on failure with an error message set
  */
 char *
-virNodeDeviceCreateVport(virStorageAdapterFCHostPtr fchost)
+virNodeDeviceCreateVport(virStorageAdapterFCHost *fchost)
 {
     unsigned int parent_host;
     char *name = NULL;
@@ -85,8 +86,7 @@ virNodeDeviceCreateVport(virStorageAdapterFCHostPtr fchost)
               NULLSTR(fchost->parent), fchost->wwnn, fchost->wwpn);
 
     if (fchost->parent) {
-        if (VIR_STRDUP(parent_hoststr, fchost->parent) < 0)
-            goto cleanup;
+        parent_hoststr = g_strdup(fchost->parent);
     } else if (fchost->parent_wwnn && fchost->parent_wwpn) {
         if (!(parent_hoststr = virVHBAGetHostByWWN(NULL, fchost->parent_wwnn,
                                                    fchost->parent_wwpn))) {
@@ -159,7 +159,7 @@ virNodeDeviceCreateVport(virStorageAdapterFCHostPtr fchost)
  */
 int
 virNodeDeviceDeleteVport(virConnectPtr conn,
-                         virStorageAdapterFCHostPtr fchost)
+                         virStorageAdapterFCHost *fchost)
 {
     char *name = NULL;
     char *scsi_host_name = NULL;
@@ -183,8 +183,7 @@ virNodeDeviceDeleteVport(virConnectPtr conn,
         goto cleanup;
     }
 
-    if (virAsprintf(&scsi_host_name, "scsi_%s", name) < 0)
-        goto cleanup;
+    scsi_host_name = g_strdup_printf("scsi_%s", name);
 
     /* If at startup time we provided a parent, then use that to
      * get the parent_host value; otherwise, we have to determine

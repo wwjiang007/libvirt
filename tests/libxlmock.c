@@ -27,14 +27,23 @@
 # include <libxl.h>
 # include <xenstore.h>
 # include <xenctrl.h>
-# include <sys/socket.h>
 
 # include "virfile.h"
+# include "virsocket.h"
+# include "libxl/libxl_capabilities.h"
 
 VIR_MOCK_IMPL_RET_VOID(xs_daemon_open,
                        struct xs_handle *)
 {
     VIR_MOCK_REAL_INIT(xs_daemon_open);
+    return (void*)0x1;
+}
+
+VIR_MOCK_IMPL_RET_ARGS(xs_open,
+                       struct xs_handle *,
+                       unsigned long, flags)
+{
+    VIR_MOCK_REAL_INIT(xs_open);
     return (void*)0x1;
 }
 
@@ -66,7 +75,12 @@ VIR_MOCK_IMPL_RET_ARGS(libxl_get_version_info,
 VIR_MOCK_STUB_RET_ARGS(libxl_get_free_memory,
                        int, 0,
                        libxl_ctx *, ctx,
-                       uint32_t *, memkb);
+# if LIBXL_API_VERSION < 0x040800
+                       uint32_t *,
+# else
+                       uint64_t *,
+# endif
+                       memkb);
 
 VIR_MOCK_STUB_RET_ARGS(xc_interface_close,
                        int, 0,
@@ -88,22 +102,14 @@ VIR_MOCK_STUB_RET_ARGS(xc_sharing_used_frames,
 VIR_MOCK_STUB_VOID_ARGS(xs_daemon_close,
                         struct xs_handle *, handle)
 
+VIR_MOCK_STUB_VOID_ARGS(xs_close,
+                        struct xs_handle *, xsh)
+
 VIR_MOCK_STUB_RET_ARGS(bind,
                        int, 0,
                        int, sockfd,
                        const struct sockaddr *, addr,
                        socklen_t, addrlen)
-
-VIR_MOCK_IMPL_RET_ARGS(virFileMakePath, int,
-                       const char *, path)
-{
-    /* replace log path with a writable directory */
-    if (strstr(path, "/log/")) {
-        snprintf((char*)path, strlen(path), ".");
-        return 0;
-    }
-    return real_virFileMakePath(path);
-}
 
 VIR_MOCK_IMPL_RET_ARGS(__xstat, int,
                        int, ver,
@@ -132,6 +138,12 @@ VIR_MOCK_IMPL_RET_ARGS(stat, int,
     }
 
     return real_stat(path, sb);
+}
+
+int
+libxlDomainGetEmulatorType(const virDomainDef *def G_GNUC_UNUSED)
+{
+    return LIBXL_DEVICE_MODEL_VERSION_QEMU_XEN;
 }
 
 #endif /* WITH_LIBXL && WITH_YAJL */

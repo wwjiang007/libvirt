@@ -19,61 +19,60 @@
  *
  */
 
-#ifndef LIBVIRT_BHYVE_UTILS_H
-# define LIBVIRT_BHYVE_UTILS_H
+#pragma once
 
-# include "driver.h"
-# include "domain_event.h"
-# include "configmake.h"
-# include "virdomainobjlist.h"
-# include "virthread.h"
-# include "virclosecallbacks.h"
-# include "virportallocator.h"
+#include "driver.h"
+#include "domain_event.h"
+#include "configmake.h"
+#include "virdomainobjlist.h"
+#include "virthread.h"
+#include "hypervisor/virclosecallbacks.h"
+#include "virportallocator.h"
 
-# define BHYVE_AUTOSTART_DIR    SYSCONFDIR "/libvirt/bhyve/autostart"
-# define BHYVE_CONFIG_DIR       SYSCONFDIR "/libvirt/bhyve"
-# define BHYVE_STATE_DIR        LOCALSTATEDIR "/run/libvirt/bhyve"
-# define BHYVE_LOG_DIR          LOCALSTATEDIR "/log/libvirt/bhyve"
+#define BHYVE_AUTOSTART_DIR    SYSCONFDIR "/libvirt/bhyve/autostart"
+#define BHYVE_CONFIG_DIR       SYSCONFDIR "/libvirt/bhyve"
+#define BHYVE_STATE_DIR        RUNSTATEDIR "/libvirt/bhyve"
+#define BHYVE_LOG_DIR          LOCALSTATEDIR "/log/libvirt/bhyve"
 
 typedef struct _virBhyveDriverConfig virBhyveDriverConfig;
-typedef struct _virBhyveDriverConfig *virBhyveDriverConfigPtr;
-
 struct _virBhyveDriverConfig {
     virObject parent;
 
     char *firmwareDir;
 };
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virBhyveDriverConfig, virObjectUnref);
+
 struct _bhyveConn {
     virMutex lock;
 
-    virBhyveDriverConfigPtr config;
+    struct _virBhyveDriverConfig *config;
 
-    virDomainObjListPtr domains;
-    virCapsPtr caps;
-    virDomainXMLOptionPtr xmlopt;
+    /* pid file FD, ensures two copies of the driver can't use the same root */
+    int lockFD;
+
+    virDomainObjList *domains;
+    virCaps *caps;
+    virDomainXMLOption *xmlopt;
     char *pidfile;
-    virSysinfoDefPtr hostsysinfo;
+    virSysinfoDef *hostsysinfo;
 
-    virObjectEventStatePtr domainEventState;
+    virObjectEventState *domainEventState;
 
-    virCloseCallbacksPtr closeCallbacks;
+    virCloseCallbacks *closeCallbacks;
 
-    virPortAllocatorRangePtr remotePorts;
+    virPortAllocatorRange *remotePorts;
 
     unsigned bhyvecaps;
     unsigned grubcaps;
 };
 
 typedef struct _bhyveConn bhyveConn;
-typedef struct _bhyveConn *bhyveConnPtr;
 
 struct bhyveAutostartData {
-    bhyveConnPtr driver;
+    struct _bhyveConn *driver;
     virConnectPtr conn;
 };
 
-void bhyveDriverLock(bhyveConnPtr driver);
-void bhyveDriverUnlock(bhyveConnPtr driver);
-
-#endif /* LIBVIRT_BHYVE_UTILS_H */
+void bhyveDriverLock(struct _bhyveConn *driver);
+void bhyveDriverUnlock(struct _bhyveConn *driver);

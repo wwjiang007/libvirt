@@ -29,8 +29,8 @@
 
 VIR_LOG_INIT("tests.domainconftest");
 
-static virCapsPtr caps;
-static virDomainXMLOptionPtr xmlopt;
+static virCaps *caps;
+static virDomainXMLOption *xmlopt;
 
 struct testGetFilesystemData {
     const char *filename;
@@ -41,16 +41,15 @@ struct testGetFilesystemData {
 static int testGetFilesystem(const void *opaque)
 {
     int ret = -1;
-    virDomainDefPtr def = NULL;
+    virDomainDef *def = NULL;
     char *filename = NULL;
     const struct testGetFilesystemData *data = opaque;
-    virDomainFSDefPtr fsdef;
+    virDomainFSDef *fsdef;
 
-    if (virAsprintf(&filename, "%s/domainconfdata/%s.xml",
-                    abs_srcdir, data->filename) < 0)
-        goto cleanup;
+    filename = g_strdup_printf("%s/domainconfdata/%s.xml", abs_srcdir,
+                               data->filename);
 
-    if (!(def = virDomainDefParseFile(filename, caps, xmlopt, NULL, 0)))
+    if (!(def = virDomainDefParseFile(filename, xmlopt, NULL, 0)))
         goto cleanup;
 
     fsdef = virDomainGetFilesystemForTarget(def,

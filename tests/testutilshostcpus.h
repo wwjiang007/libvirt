@@ -14,12 +14,11 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_TESTUTILSHOSTCPUS_H
-# define LIBVIRT_TESTUTILSHOSTCPUS_H
+#pragma once
 
-# include "conf/cpu_conf.h"
-# include "internal.h"
-# include "util/virarch.h"
+#include "conf/cpu_conf.h"
+#include "internal.h"
+#include "util/virarch.h"
 
 static virCPUFeatureDef cpuDefaultFeatures[] = {
     { (char *) "ds",        -1 },
@@ -44,8 +43,8 @@ static virCPUDef cpuDefaultData = {
     .sockets = 1,
     .cores = 2,
     .threads = 1,
-    .nfeatures = ARRAY_CARDINALITY(cpuDefaultFeatures),
-    .nfeatures_max = ARRAY_CARDINALITY(cpuDefaultFeatures),
+    .nfeatures = G_N_ELEMENTS(cpuDefaultFeatures),
+    .nfeatures_max = G_N_ELEMENTS(cpuDefaultFeatures),
     .features = cpuDefaultFeatures,
 };
 
@@ -83,8 +82,8 @@ static virCPUDef cpuHaswellData = {
     .sockets = 1,
     .cores = 2,
     .threads = 2,
-    .nfeatures = ARRAY_CARDINALITY(cpuHaswellFeatures),
-    .nfeatures_max = ARRAY_CARDINALITY(cpuHaswellFeatures),
+    .nfeatures = G_N_ELEMENTS(cpuHaswellFeatures),
+    .nfeatures_max = G_N_ELEMENTS(cpuHaswellFeatures),
     .features = cpuHaswellFeatures,
 };
 
@@ -131,7 +130,15 @@ static virCPUDef cpuS390Data = {
     .threads = 1,
 };
 
-static inline virCPUDefPtr
+static virCPUDef cpuSparcData = {
+    .type = VIR_CPU_TYPE_HOST,
+    .arch = VIR_ARCH_SPARC,
+    .sockets = 1,
+    .cores = 1,
+    .threads = 1,
+};
+
+static inline virCPUDef *
 testUtilsHostCpusGetDefForModel(const char *model)
 {
     if (!model)
@@ -151,7 +158,7 @@ testUtilsHostCpusGetDefForModel(const char *model)
     return NULL;
 }
 
-static inline virCPUDefPtr
+static inline virCPUDef *
 testUtilsHostCpusGetDefForArch(virArch arch)
 {
     if (ARCH_IS_X86(arch))
@@ -162,8 +169,8 @@ testUtilsHostCpusGetDefForArch(virArch arch)
         return virCPUDefCopy(&cpuS390Data);
     else if (arch == VIR_ARCH_AARCH64)
         return virCPUDefCopy(&cpuAarch64Data);
+    else if (arch == VIR_ARCH_SPARC)
+        return virCPUDefCopy(&cpuSparcData);
 
     return NULL;
 }
-
-#endif /* LIBVIRT_TESTUTILSHOSTCPUS_H */

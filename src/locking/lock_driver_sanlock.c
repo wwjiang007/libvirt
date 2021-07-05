@@ -31,7 +31,6 @@
 #include <sanlock_resource.h>
 #include <sanlock_admin.h>
 
-#include "dirname.h"
 #include "lock_driver.h"
 #include "virlog.h"
 #include "virerror.h"
@@ -40,6 +39,7 @@
 #include "virfile.h"
 #include "virconf.h"
 #include "virstring.h"
+#include "virutil.h"
 
 #include "configmake.h"
 
@@ -59,10 +59,8 @@ VIR_LOG_INIT("locking.lock_driver_sanlock");
 #endif
 
 typedef struct _virLockManagerSanlockDriver virLockManagerSanlockDriver;
-typedef virLockManagerSanlockDriver *virLockManagerSanlockDriverPtr;
 
 typedef struct _virLockManagerSanlockPrivate virLockManagerSanlockPrivate;
-typedef virLockManagerSanlockPrivate *virLockManagerSanlockPrivatePtr;
 
 struct _virLockManagerSanlockDriver {
     bool requireLeaseForDisks;
@@ -76,7 +74,7 @@ struct _virLockManagerSanlockDriver {
     gid_t group;
 };
 
-static virLockManagerSanlockDriverPtr sanlockDriver;
+static virLockManagerSanlockDriver *sanlockDriver;
 
 struct _virLockManagerSanlockPrivate {
     const char *vm_uri;
@@ -100,10 +98,10 @@ virLockManagerSanlockError(int err,
                            char **message)
 {
     if (err <= -200) {
-#if HAVE_SANLOCK_STRERROR
-        ignore_value(VIR_STRDUP_QUIET(*message, sanlock_strerror(err)));
+#if WITH_SANLOCK_STRERROR
+        *message = g_strdup(sanlock_strerror(err));
 #else
-        ignore_value(virAsprintfQuiet(message, _("sanlock error %d"), err));
+        *message = g_strdup_printf(_("sanlock error %d"), err);
 #endif
         return true;
     } else {
@@ -116,10 +114,10 @@ virLockManagerSanlockError(int err,
  * sanlock plugin for the libvirt virLockManager API
  */
 static int
-virLockManagerSanlockLoadConfig(virLockManagerSanlockDriverPtr driver,
+virLockManagerSanlockLoadConfig(virLockManagerSanlockDriver *driver,
                                 const char *configFile)
 {
-    virConfPtr conf;
+    g_autoptr(virConf) conf = NULL;
     int ret = -1;
     char *user = NULL;
     char *group = NULL;
@@ -167,42 +165,29 @@ virLockManagerSanlockLoadConfig(virLockManagerSanlockDriverPtr driver,
 
     ret = 0;
  cleanup:
-    virConfFree(conf);
     VIR_FREE(user);
     VIR_FREE(group);
     return ret;
 }
 
 static int
-virLockManagerSanlockInitLockspace(virLockManagerSanlockDriverPtr driver,
+virLockManagerSanlockInitLockspace(virLockManagerSanlockDriver *driver,
                                    struct sanlk_lockspace *ls)
 {
     int ret;
 
-#ifdef HAVE_SANLOCK_IO_TIMEOUT
     const int max_hosts = 0; /* defaults used in sanlock_init() implementation */
     const unsigned int lockspaceFlags = 0;
 
     ret = sanlock_write_lockspace(ls, max_hosts, lockspaceFlags, driver->io_timeout);
-#else
-    if (driver->io_timeout) {
-        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("unable to use io_timeout with this version of sanlock"));
-        return -ENOTSUP;
-    }
-
-    ret = sanlock_init(ls, NULL, 0, 0);
-#endif
     return ret;
 }
 
-/* How much ms sleep before retrying to add a lockspace? */
-#define LOCKSPACE_SLEEP 100
 /* How many times try adding a lockspace? */
 #define LOCKSPACE_RETRIES 10
 
 static int
-virLockManagerSanlockSetupLockspace(virLockManagerSanlockDriverPtr driver)
+virLockManagerSanlockSetupLockspace(virLockManagerSanlockDriver *driver)
 {
     int fd = -1;
     struct stat st;
@@ -212,10 +197,8 @@ virLockManagerSanlockSetupLockspace(virLockManagerSanlockDriverPtr driver)
     char *dir = NULL;
     int retries = LOCKSPACE_RETRIES;
 
-    if (virAsprintf(&path, "%s/%s",
-                    driver->autoDiskLeasePath,
-                    VIR_LOCK_MANAGER_SANLOCK_AUTO_DISK_LOCKSPACE) < 0)
-        goto error;
+    path = g_strdup_printf("%s/%s", driver->autoDiskLeasePath,
+                           VIR_LOCK_MANAGER_SANLOCK_AUTO_DISK_LOCKSPACE);
 
     if (virStrcpyStatic(ls.name,
                         VIR_LOCK_MANAGER_SANLOCK_AUTO_DISK_LOCKSPACE) < 0) {
@@ -242,10 +225,7 @@ virLockManagerSanlockSetupLockspace(virLockManagerSanlockDriverPtr driver)
         int perms = 0600;
         VIR_DEBUG("Lockspace %s does not yet exist", path);
 
-        if (!(dir = mdir_name(path))) {
-            virReportOOMError();
-            goto error;
-        }
+        dir = g_path_get_dirname(path);
         if (stat(dir, &st) < 0 || !S_ISDIR(st.st_mode)) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("Unable to create lockspace %s: parent directory"
@@ -355,30 +335,15 @@ virLockManagerSanlockSetupLockspace(virLockManagerSanlockDriverPtr driver)
      * or we can fallback to polling.
      */
  retry:
-#ifdef HAVE_SANLOCK_IO_TIMEOUT
     rv = sanlock_add_lockspace_timeout(&ls, 0, driver->io_timeout);
-#else
-    if (driver->io_timeout) {
-        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                       _("unable to use io_timeout with this version of sanlock"));
-        goto error;
-    }
-    rv = sanlock_add_lockspace(&ls, 0);
-#endif
     if (rv < 0) {
         if (-rv == EINPROGRESS && --retries) {
-#ifdef HAVE_SANLOCK_INQ_LOCKSPACE
             /* we have this function which blocks until lockspace change the
              * state. It returns 0 if lockspace has been added, -ENOENT if it
              * hasn't. */
             VIR_DEBUG("Inquiring lockspace");
             if (sanlock_inq_lockspace(&ls, SANLK_INQ_WAIT) < 0)
                 VIR_DEBUG("Unable to inquire lockspace");
-#else
-            /* fall back to polling */
-            VIR_DEBUG("Sleeping for %dms", LOCKSPACE_SLEEP);
-            usleep(LOCKSPACE_SLEEP * 1000);
-#endif
             VIR_DEBUG("Retrying to add lockspace (left %d)", retries);
             goto retry;
         }
@@ -421,7 +386,7 @@ static int virLockManagerSanlockInit(unsigned int version,
                                      const char *configFile,
                                      unsigned int flags)
 {
-    virLockManagerSanlockDriverPtr driver;
+    virLockManagerSanlockDriver *driver;
 
     VIR_DEBUG("version=%u configFile=%s flags=0x%x",
               version, NULLSTR(configFile), flags);
@@ -430,8 +395,7 @@ static int virLockManagerSanlockInit(unsigned int version,
     if (sanlockDriver)
         return 0;
 
-    if (VIR_ALLOC(sanlockDriver) < 0)
-        return -1;
+    sanlockDriver = g_new0(virLockManagerSanlockDriver, 1);
 
     driver = sanlockDriver;
 
@@ -441,10 +405,7 @@ static int virLockManagerSanlockInit(unsigned int version,
     driver->io_timeout = 0;
     driver->user = (uid_t) -1;
     driver->group = (gid_t) -1;
-    if (VIR_STRDUP(driver->autoDiskLeasePath, LOCALSTATEDIR "/lib/libvirt/sanlock") < 0) {
-        VIR_FREE(driver);
-        goto error;
-    }
+    driver->autoDiskLeasePath = g_strdup(LOCALSTATEDIR "/lib/libvirt/sanlock");
 
     if (virLockManagerSanlockLoadConfig(driver, configFile) < 0)
         goto error;
@@ -479,14 +440,14 @@ static int virLockManagerSanlockDeinit(void)
 }
 
 
-static int virLockManagerSanlockNew(virLockManagerPtr lock,
+static int virLockManagerSanlockNew(virLockManager *lock,
                                     unsigned int type,
                                     size_t nparams,
-                                    virLockManagerParamPtr params,
+                                    virLockManagerParam *params,
                                     unsigned int flags)
 {
-    virLockManagerParamPtr param;
-    virLockManagerSanlockPrivatePtr priv;
+    virLockManagerParam *param;
+    virLockManagerSanlockPrivate *priv;
     size_t i;
     int resCount = 0;
 
@@ -504,8 +465,8 @@ static int virLockManagerSanlockNew(virLockManagerPtr lock,
         return -1;
     }
 
-    if (VIR_ALLOC(priv) < 0)
-        return -1;
+    priv = g_new0(virLockManagerSanlockPrivate,
+                  1);
 
     priv->flags = flags;
 
@@ -515,8 +476,7 @@ static int virLockManagerSanlockNew(virLockManagerPtr lock,
         if (STREQ(param->key, "uuid")) {
             memcpy(priv->vm_uuid, param->value.uuid, 16);
         } else if (STREQ(param->key, "name")) {
-            if (VIR_STRDUP(priv->vm_name, param->value.str) < 0)
-                goto error;
+            priv->vm_name = g_strdup(param->value.str);
         } else if (STREQ(param->key, "pid")) {
             priv->vm_pid = param->value.iv;
         } else if (STREQ(param->key, "id")) {
@@ -541,41 +501,35 @@ static int virLockManagerSanlockNew(virLockManagerPtr lock,
 
     lock->privateData = priv;
     return 0;
-
- error:
-    VIR_FREE(priv);
-    return -1;
 }
 
-static void virLockManagerSanlockFree(virLockManagerPtr lock)
+static void virLockManagerSanlockFree(virLockManager *lock)
 {
-    virLockManagerSanlockPrivatePtr priv = lock->privateData;
+    virLockManagerSanlockPrivate *priv = lock->privateData;
     size_t i;
 
     if (!priv)
         return;
 
-    VIR_FREE(priv->vm_name);
+    g_free(priv->vm_name);
     for (i = 0; i < priv->res_count; i++)
-        VIR_FREE(priv->res_args[i]);
-    VIR_FREE(priv);
+        g_free(priv->res_args[i]);
+    g_free(priv);
     lock->privateData = NULL;
 }
 
 
-static int virLockManagerSanlockAddLease(virLockManagerPtr lock,
+static int virLockManagerSanlockAddLease(virLockManager *lock,
                                          const char *name,
                                          size_t nparams,
-                                         virLockManagerParamPtr params,
+                                         virLockManagerParam *params,
                                          bool shared)
 {
-    virLockManagerSanlockPrivatePtr priv = lock->privateData;
-    int ret = -1;
-    struct sanlk_resource *res = NULL;
+    virLockManagerSanlockPrivate *priv = lock->privateData;
+    g_autofree struct sanlk_resource *res = NULL;
     size_t i;
 
-    if (VIR_ALLOC_VAR(res, struct sanlk_disk, 1) < 0)
-        goto cleanup;
+    res = g_malloc0(sizeof(struct sanlk_resource) + sizeof(struct sanlk_disk));
 
     res->flags = shared ? SANLK_RES_SHARED : 0;
     res->num_disks = 1;
@@ -583,7 +537,7 @@ static int virLockManagerSanlockAddLease(virLockManagerPtr lock,
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Resource name '%s' exceeds %d characters"),
                        name, SANLK_NAME_LEN);
-        goto cleanup;
+        return -1;
     }
 
     for (i = 0; i < nparams; i++) {
@@ -592,7 +546,7 @@ static int virLockManagerSanlockAddLease(virLockManagerPtr lock,
                 virReportError(VIR_ERR_INTERNAL_ERROR,
                                _("Lease path '%s' exceeds %d characters"),
                                params[i].value.str, SANLK_PATH_LEN);
-                goto cleanup;
+                return -1;
             }
         } else if (STREQ(params[i].key, "offset")) {
             res->disks[0].offset = params[i].value.ul;
@@ -601,38 +555,32 @@ static int virLockManagerSanlockAddLease(virLockManagerPtr lock,
                 virReportError(VIR_ERR_INTERNAL_ERROR,
                                _("Resource lockspace '%s' exceeds %d characters"),
                                params[i].value.str, SANLK_NAME_LEN);
-                goto cleanup;
+                return -1;
             }
         }
     }
 
-    priv->res_args[priv->res_count] = res;
+    priv->res_args[priv->res_count] = g_steal_pointer(&res);
     priv->res_count++;
 
-    ret = 0;
-
- cleanup:
-    if (ret == -1)
-        VIR_FREE(res);
-    return ret;
+    return 0;
 }
 
 
 
 
 static int
-virLockManagerSanlockAddDisk(virLockManagerSanlockDriverPtr driver,
-                             virLockManagerPtr lock,
+virLockManagerSanlockAddDisk(virLockManagerSanlockDriver *driver,
+                             virLockManager *lock,
                              const char *name,
                              size_t nparams,
-                             virLockManagerParamPtr params ATTRIBUTE_UNUSED,
+                             virLockManagerParam *params G_GNUC_UNUSED,
                              bool shared)
 {
-    virLockManagerSanlockPrivatePtr priv = lock->privateData;
-    int ret = -1;
-    struct sanlk_resource *res = NULL;
-    char *path = NULL;
-    char *hash = NULL;
+    virLockManagerSanlockPrivate *priv = lock->privateData;
+    g_autofree struct sanlk_resource *res = NULL;
+    g_autofree char *path = NULL;
+    g_autofree char *hash = NULL;
 
     if (nparams) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -640,28 +588,25 @@ virLockManagerSanlockAddDisk(virLockManagerSanlockDriverPtr driver,
         return -1;
     }
 
-    if (VIR_ALLOC_VAR(res, struct sanlk_disk, 1) < 0)
-        goto cleanup;
+    res = g_malloc0(sizeof(struct sanlk_resource) + sizeof(struct sanlk_disk));
 
     res->flags = shared ? SANLK_RES_SHARED : 0;
     res->num_disks = 1;
     if (virCryptoHashString(VIR_CRYPTO_HASH_MD5, name, &hash) < 0)
-        goto cleanup;
+        return -1;
     if (virStrcpy(res->name, hash, SANLK_NAME_LEN) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("MD5 hash '%s' unexpectedly larger than %d characters"),
                        hash, (SANLK_NAME_LEN - 1));
-        goto cleanup;
+        return -1;
     }
 
-    if (virAsprintf(&path, "%s/%s",
-                    driver->autoDiskLeasePath, res->name) < 0)
-        goto cleanup;
+    path = g_strdup_printf("%s/%s", driver->autoDiskLeasePath, res->name);
     if (virStrcpy(res->disks[0].path, path, SANLK_PATH_LEN) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Lease path '%s' exceeds %d characters"),
                        path, SANLK_PATH_LEN);
-        goto cleanup;
+        return -1;
     }
 
     if (virStrcpy(res->lockspace_name,
@@ -670,25 +615,18 @@ virLockManagerSanlockAddDisk(virLockManagerSanlockDriverPtr driver,
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Resource lockspace '%s' exceeds %d characters"),
                        VIR_LOCK_MANAGER_SANLOCK_AUTO_DISK_LOCKSPACE, SANLK_NAME_LEN);
-        goto cleanup;
+        return -1;
     }
 
-    priv->res_args[priv->res_count] = res;
+    priv->res_args[priv->res_count] = g_steal_pointer(&res);
     priv->res_count++;
 
-    ret = 0;
-
- cleanup:
-    if (ret == -1)
-        VIR_FREE(res);
-    VIR_FREE(path);
-    VIR_FREE(hash);
-    return ret;
+    return 0;
 }
 
 
 static int
-virLockManagerSanlockCreateLease(virLockManagerSanlockDriverPtr driver,
+virLockManagerSanlockCreateLease(virLockManagerSanlockDriver *driver,
                                  struct sanlk_resource *res)
 {
     int fd = -1;
@@ -776,15 +714,15 @@ virLockManagerSanlockCreateLease(virLockManagerSanlockDriverPtr driver,
 }
 
 
-static int virLockManagerSanlockAddResource(virLockManagerPtr lock,
+static int virLockManagerSanlockAddResource(virLockManager *lock,
                                             unsigned int type,
                                             const char *name,
                                             size_t nparams,
-                                            virLockManagerParamPtr params,
+                                            virLockManagerParam *params,
                                             unsigned int flags)
 {
-    virLockManagerSanlockDriverPtr driver = sanlockDriver;
-    virLockManagerSanlockPrivatePtr priv = lock->privateData;
+    virLockManagerSanlockDriver *driver = sanlockDriver;
+    virLockManagerSanlockPrivate *priv = lock->privateData;
 
     virCheckFlags(VIR_LOCK_MANAGER_RESOURCE_READONLY |
                   VIR_LOCK_MANAGER_RESOURCE_SHARED, -1);
@@ -834,14 +772,13 @@ static int virLockManagerSanlockAddResource(virLockManagerPtr lock,
     return 0;
 }
 
-#if HAVE_SANLOCK_KILLPATH
 static int
 virLockManagerSanlockRegisterKillscript(int sock,
                                         const char *vmuri,
                                         const char *uuidstr,
                                         virDomainLockFailureAction action)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     char *path;
     char *args = NULL;
     int ret = -1;
@@ -870,9 +807,6 @@ virLockManagerSanlockRegisterKillscript(int sock,
     virBufferAddLit(&buf, " ");
     virBufferEscape(&buf, '\\', "\\ ", "%s",
                     virDomainLockFailureTypeToString(action));
-
-    if (virBufferCheckError(&buf) < 0)
-        goto cleanup;
 
     /* Unfortunately, sanlock_killpath() does not use const for either
      * path or args even though it will just copy them into its own
@@ -919,27 +853,15 @@ virLockManagerSanlockRegisterKillscript(int sock,
     VIR_FREE(args);
     return ret;
 }
-#else
-static int
-virLockManagerSanlockRegisterKillscript(int sock ATTRIBUTE_UNUSED,
-                                        const char *vmuri ATTRIBUTE_UNUSED,
-                                        const char *uuidstr ATTRIBUTE_UNUSED,
-                                        virDomainLockFailureAction action ATTRIBUTE_UNUSED)
-{
-    virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                   _("sanlock is too old to support lock failure action"));
-    return -1;
-}
-#endif
 
-static int virLockManagerSanlockAcquire(virLockManagerPtr lock,
+static int virLockManagerSanlockAcquire(virLockManager *lock,
                                         const char *state,
                                         unsigned int flags,
                                         virDomainLockFailureAction action,
                                         int *fd)
 {
-    virLockManagerSanlockDriverPtr driver = sanlockDriver;
-    virLockManagerSanlockPrivatePtr priv = lock->privateData;
+    virLockManagerSanlockDriver *driver = sanlockDriver;
+    virLockManagerSanlockPrivate *priv = lock->privateData;
     struct sanlk_options *opt = NULL;
     struct sanlk_resource **res_args;
     int res_count;
@@ -996,14 +918,11 @@ static int virLockManagerSanlockAcquire(virLockManagerPtr lock,
         return 0;
     }
 
-    if (VIR_ALLOC(opt) < 0)
-        goto error;
+    opt = g_new0(struct sanlk_options, 1);
 
     /* sanlock doesn't use owner_name for anything, so it's safe to take just
      * the first SANLK_NAME_LEN - 1 characters from vm_name */
-    ignore_value(virStrncpy(opt->owner_name, priv->vm_name,
-                            MIN(strlen(priv->vm_name), SANLK_NAME_LEN - 1),
-                            SANLK_NAME_LEN));
+    virStrcpy(opt->owner_name, priv->vm_name, SANLK_NAME_LEN);
 
     if (state && STRNEQ(state, "")) {
         if ((rv = sanlock_state_to_args((char *)state,
@@ -1100,11 +1019,11 @@ static int virLockManagerSanlockAcquire(virLockManagerPtr lock,
 }
 
 
-static int virLockManagerSanlockRelease(virLockManagerPtr lock,
+static int virLockManagerSanlockRelease(virLockManager *lock,
                                         char **state,
                                         unsigned int flags)
 {
-    virLockManagerSanlockPrivatePtr priv = lock->privateData;
+    virLockManagerSanlockPrivate *priv = lock->privateData;
     int res_count = priv->res_count;
     int rv;
 
@@ -1152,11 +1071,11 @@ static int virLockManagerSanlockRelease(virLockManagerPtr lock,
     return 0;
 }
 
-static int virLockManagerSanlockInquire(virLockManagerPtr lock,
+static int virLockManagerSanlockInquire(virLockManager *lock,
                                         char **state,
                                         unsigned int flags)
 {
-    virLockManagerSanlockPrivatePtr priv = lock->privateData;
+    virLockManagerSanlockPrivate *priv = lock->privateData;
     int rv, res_count;
 
     virCheckFlags(0, -1);

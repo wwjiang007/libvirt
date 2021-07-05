@@ -35,6 +35,7 @@
 # include <sys/apparmor.h>
 #endif
 #include "vircgroup.h"
+#include "virstring.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -204,7 +205,7 @@ virDomainLxcEnterSecurityLabel(virSecurityModelPtr model,
     if (STREQ(model->model, "selinux")) {
 #ifdef WITH_SELINUX
         if (oldlabel) {
-            security_context_t ctx;
+            char *ctx;
 
             if (getcon(&ctx) < 0) {
                 virReportSystemError(errno,
@@ -213,7 +214,7 @@ virDomainLxcEnterSecurityLabel(virSecurityModelPtr model,
                 goto error;
             }
 
-            if (strlen((char *) ctx) >= VIR_SECURITY_LABEL_BUFLEN) {
+            if (virStrcpy(oldlabel->label, ctx, VIR_SECURITY_LABEL_BUFLEN) < 0) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
                                _("security label exceeds "
                                  "maximum length: %d"),
@@ -221,8 +222,6 @@ virDomainLxcEnterSecurityLabel(virSecurityModelPtr model,
                 freecon(ctx);
                 goto error;
             }
-
-            strcpy(oldlabel->label, (char *) ctx);
             freecon(ctx);
 
             if ((oldlabel->enforcing = security_getenforce()) < 0) {
@@ -289,7 +288,7 @@ int virDomainLxcEnterCGroup(virDomainPtr domain,
                             unsigned int flags)
 {
     virConnectPtr conn;
-    virCgroupPtr cgroup = NULL;
+    g_autoptr(virCgroup) cgroup = NULL;
 
     VIR_DOMAIN_DEBUG(domain, "flags=0x%x", flags);
 
@@ -307,12 +306,9 @@ int virDomainLxcEnterCGroup(virDomainPtr domain,
     if (virCgroupAddProcess(cgroup, getpid()) < 0)
         goto error;
 
-    virCgroupFree(&cgroup);
-
     return 0;
 
  error:
     virDispatchError(NULL);
-    virCgroupFree(&cgroup);
     return -1;
 }

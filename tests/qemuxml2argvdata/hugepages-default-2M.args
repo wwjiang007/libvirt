@@ -7,7 +7,7 @@ XDG_DATA_HOME=/tmp/lib/domain--1-SomeDummyHugepagesGu/.local/share \
 XDG_CACHE_HOME=/tmp/lib/domain--1-SomeDummyHugepagesGu/.cache \
 XDG_CONFIG_HOME=/tmp/lib/domain--1-SomeDummyHugepagesGu/.config \
 QEMU_AUDIO_DRV=none \
-/usr/bin/qemu-system-i686 \
+/usr/bin/qemu-system-i386 \
 -name SomeDummyHugepagesGuest \
 -S \
 -machine pc,accel=tcg,usb=off,dump-guest-core=off \
@@ -20,8 +20,7 @@ QEMU_AUDIO_DRV=none \
 -display none \
 -no-user-config \
 -nodefaults \
--chardev socket,id=charmonitor,\
-path=/tmp/lib/domain--1-SomeDummyHugepagesGu/monitor.sock,server,nowait \
+-chardev socket,id=charmonitor,path=/tmp/lib/domain--1-SomeDummyHugepagesGu/monitor.sock,server=on,wait=off \
 -mon chardev=charmonitor,id=monitor,mode=control \
 -rtc base=utc \
 -no-shutdown \

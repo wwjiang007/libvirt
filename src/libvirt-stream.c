@@ -85,8 +85,7 @@ virStreamNew(virConnectPtr conn,
 int
 virStreamRef(virStreamPtr stream)
 {
-    VIR_DEBUG("stream=%p refs=%d", stream,
-              stream ? stream->parent.u.s.refs : 0);
+    VIR_DEBUG("stream=%p", stream);
 
     virResetLastError();
 
@@ -520,11 +519,8 @@ virStreamInData(virStreamPtr stream,
     virCheckNonNullArgReturn(data, -1);
     virCheckNonNullArgReturn(length, -1);
 
-    if (stream->driver->streamInData) {
-        int ret;
-        ret = (stream->driver->streamInData)(stream, data, length);
-        return ret;
-    }
+    if (stream->driver->streamInData)
+        return (stream->driver->streamInData)(stream, data, length);
 
     virReportUnsupportedError();
     return -1;
@@ -576,7 +572,7 @@ virStreamSendAll(virStreamPtr stream,
                  virStreamSourceFunc handler,
                  void *opaque)
 {
-    char *bytes = NULL;
+    g_autofree char *bytes = NULL;
     size_t want = VIR_NET_MESSAGE_LEGACY_PAYLOAD_MAX;
     int ret = -1;
     VIR_DEBUG("stream=%p, handler=%p, opaque=%p", stream, handler, opaque);
@@ -592,8 +588,7 @@ virStreamSendAll(virStreamPtr stream,
         goto cleanup;
     }
 
-    if (VIR_ALLOC_N(bytes, want) < 0)
-        goto cleanup;
+    bytes = g_new0(char, want);
 
     errno = 0;
     for (;;) {
@@ -619,15 +614,12 @@ virStreamSendAll(virStreamPtr stream,
     ret = 0;
 
  cleanup:
-    VIR_FREE(bytes);
-
     if (ret != 0) {
-        virErrorPtr orig_err = virSaveLastError();
+        virErrorPtr orig_err;
+
+        virErrorPreserveLast(&orig_err);
         virStreamAbort(stream);
-        if (orig_err) {
-            virSetError(orig_err);
-            virFreeError(orig_err);
-        }
+        virErrorRestore(&orig_err);
         virDispatchError(stream->conn);
     }
 
@@ -710,7 +702,7 @@ int virStreamSparseSendAll(virStreamPtr stream,
                            virStreamSourceSkipFunc skipHandler,
                            void *opaque)
 {
-    char *bytes = NULL;
+    g_autofree char *bytes = NULL;
     size_t bufLen = VIR_NET_MESSAGE_LEGACY_PAYLOAD_MAX;
     int ret = -1;
     unsigned long long dataLen = 0;
@@ -731,8 +723,7 @@ int virStreamSparseSendAll(virStreamPtr stream,
         goto cleanup;
     }
 
-    if (VIR_ALLOC_N(bytes, bufLen) < 0)
-        goto cleanup;
+    bytes = g_new0(char, bufLen);
 
     errno = 0;
     for (;;) {
@@ -791,15 +782,12 @@ int virStreamSparseSendAll(virStreamPtr stream,
     ret = 0;
 
  cleanup:
-    VIR_FREE(bytes);
-
     if (ret != 0) {
-        virErrorPtr orig_err = virSaveLastError();
+        virErrorPtr orig_err;
+
+        virErrorPreserveLast(&orig_err);
         virStreamAbort(stream);
-        if (orig_err) {
-            virSetError(orig_err);
-            virFreeError(orig_err);
-        }
+        virErrorRestore(&orig_err);
         virDispatchError(stream->conn);
     }
 
@@ -852,7 +840,7 @@ virStreamRecvAll(virStreamPtr stream,
                  virStreamSinkFunc handler,
                  void *opaque)
 {
-    char *bytes = NULL;
+    g_autofree char *bytes = NULL;
     size_t want = VIR_NET_MESSAGE_LEGACY_PAYLOAD_MAX;
     int ret = -1;
     VIR_DEBUG("stream=%p, handler=%p, opaque=%p", stream, handler, opaque);
@@ -869,8 +857,7 @@ virStreamRecvAll(virStreamPtr stream,
     }
 
 
-    if (VIR_ALLOC_N(bytes, want) < 0)
-        goto cleanup;
+    bytes = g_new0(char, want);
 
     errno = 0;
     for (;;) {
@@ -897,15 +884,12 @@ virStreamRecvAll(virStreamPtr stream,
     ret = 0;
 
  cleanup:
-    VIR_FREE(bytes);
-
     if (ret != 0) {
-        virErrorPtr orig_err = virSaveLastError();
+        virErrorPtr orig_err;
+
+        virErrorPreserveLast(&orig_err);
         virStreamAbort(stream);
-        if (orig_err) {
-            virSetError(orig_err);
-            virFreeError(orig_err);
-        }
+        virErrorRestore(&orig_err);
         virDispatchError(stream->conn);
     }
 
@@ -970,7 +954,7 @@ virStreamSparseRecvAll(virStreamPtr stream,
                        virStreamSinkHoleFunc holeHandler,
                        void *opaque)
 {
-    char *bytes = NULL;
+    g_autofree char *bytes = NULL;
     size_t want = VIR_NET_MESSAGE_LEGACY_PAYLOAD_MAX;
     const unsigned int flags = VIR_STREAM_RECV_STOP_AT_HOLE;
     int ret = -1;
@@ -990,8 +974,7 @@ virStreamSparseRecvAll(virStreamPtr stream,
         goto cleanup;
     }
 
-    if (VIR_ALLOC_N(bytes, want) < 0)
-        goto cleanup;
+    bytes = g_new0(char, want);
 
     errno = 0;
     for (;;) {
@@ -1031,15 +1014,12 @@ virStreamSparseRecvAll(virStreamPtr stream,
     ret = 0;
 
  cleanup:
-    VIR_FREE(bytes);
-
     if (ret != 0) {
-        virErrorPtr orig_err = virSaveLastError();
+        virErrorPtr orig_err;
+
+        virErrorPreserveLast(&orig_err);
         virStreamAbort(stream);
-        if (orig_err) {
-            virSetError(orig_err);
-            virFreeError(orig_err);
-        }
+        virErrorRestore(&orig_err);
         virDispatchError(stream->conn);
     }
 

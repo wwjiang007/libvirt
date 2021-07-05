@@ -32,6 +32,7 @@
 #include "virt-host-validate-common.h"
 #include "virstring.h"
 #include "virarch.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -39,7 +40,9 @@ VIR_ENUM_IMPL(virHostValidateCPUFlag,
               VIR_HOST_VALIDATE_CPU_FLAG_LAST,
               "vmx",
               "svm",
-              "sie");
+              "sie",
+              "158",
+              "sev");
 
 static bool quiet;
 
@@ -59,10 +62,7 @@ void virHostMsgCheck(const char *prefix,
         return;
 
     va_start(args, format);
-    if (virVasprintf(&msg, format, args) < 0) {
-        perror("malloc");
-        abort();
-    }
+    msg = g_strdup_vprintf(format, args);
     va_end(args);
 
     fprintf(stdout, _("%6s: Checking %-60s: "), prefix, msg);
@@ -99,7 +99,7 @@ static const char * failMessages[] = {
     N_("NOTE"),
 };
 
-verify(ARRAY_CARDINALITY(failMessages) == VIR_HOST_VALIDATE_LAST);
+G_STATIC_ASSERT(G_N_ELEMENTS(failMessages) == VIR_HOST_VALIDATE_LAST);
 
 static const char *failEscapeCodes[] = {
     "\033[31m",
@@ -107,7 +107,7 @@ static const char *failEscapeCodes[] = {
     "\033[34m",
 };
 
-verify(ARRAY_CARDINALITY(failEscapeCodes) == VIR_HOST_VALIDATE_LAST);
+G_STATIC_ASSERT(G_N_ELEMENTS(failEscapeCodes) == VIR_HOST_VALIDATE_LAST);
 
 void virHostMsgFail(virHostValidateLevel level,
                     const char *format,
@@ -120,10 +120,7 @@ void virHostMsgFail(virHostValidateLevel level,
         return;
 
     va_start(args, format);
-    if (virVasprintf(&msg, format, args) < 0) {
-        perror("malloc");
-        abort();
-    }
+    msg = g_strdup_vprintf(format, args);
     va_end(args);
 
     if (virHostMsgWantEscape())
@@ -145,7 +142,7 @@ int virHostValidateDeviceExists(const char *hvname,
 
     if (access(dev_name, F_OK) < 0) {
         virHostMsgFail(level, "%s", hint);
-        return -1;
+        return VIR_HOST_VALIDATE_FAILURE(level);
     }
 
     virHostMsgPass();
@@ -162,7 +159,7 @@ int virHostValidateDeviceAccessible(const char *hvname,
 
     if (access(dev_name, R_OK|W_OK) < 0) {
         virHostMsgFail(level, "%s", hint);
-        return -1;
+        return VIR_HOST_VALIDATE_FAILURE(level);
     }
 
     virHostMsgPass();
@@ -175,14 +172,15 @@ int virHostValidateNamespace(const char *hvname,
                              virHostValidateLevel level,
                              const char *hint)
 {
-    virHostMsgCheck(hvname, "for namespace %s", ns_name);
     char nspath[100];
 
-    snprintf(nspath, sizeof(nspath), "/proc/self/ns/%s", ns_name);
+    virHostMsgCheck(hvname, "for namespace %s", ns_name);
+
+    g_snprintf(nspath, sizeof(nspath), "/proc/self/ns/%s", ns_name);
 
     if (access(nspath, F_OK) < 0) {
         virHostMsgFail(level, "%s", hint);
-        return -1;
+        return VIR_HOST_VALIDATE_FAILURE(level);
     }
 
     virHostMsgPass();
@@ -190,23 +188,21 @@ int virHostValidateNamespace(const char *hvname,
 }
 
 
-virBitmapPtr virHostValidateGetCPUFlags(void)
+virBitmap *virHostValidateGetCPUFlags(void)
 {
     FILE *fp;
-    virBitmapPtr flags = NULL;
+    virBitmap *flags = NULL;
 
     if (!(fp = fopen("/proc/cpuinfo", "r")))
         return NULL;
 
-    if (!(flags = virBitmapNewQuiet(VIR_HOST_VALIDATE_CPU_FLAG_LAST)))
-        goto cleanup;
+    flags = virBitmapNew(VIR_HOST_VALIDATE_CPU_FLAG_LAST);
 
     do {
         char line[1024];
         char *start;
-        char **tokens;
-        size_t ntokens;
-        size_t i;
+        g_auto(GStrv) tokens = NULL;
+        GStrv next;
 
         if (!fgets(line, sizeof(line), fp))
             break;
@@ -215,7 +211,8 @@ virBitmapPtr virHostValidateGetCPUFlags(void)
          * on the architecture, so check possible prefixes */
         if (!STRPREFIX(line, "flags") &&
             !STRPREFIX(line, "Features") &&
-            !STRPREFIX(line, "features"))
+            !STRPREFIX(line, "features") &&
+            !STRPREFIX(line, "facilities"))
             continue;
 
         /* fgets() includes the trailing newline in the output buffer,
@@ -230,23 +227,20 @@ virBitmapPtr virHostValidateGetCPUFlags(void)
 
         /* Split the line using " " as a delimiter. The first token
          * will always be ":", but that's okay */
-        if (!(tokens = virStringSplitCount(start, " ", 0, &ntokens)))
+        if (!(tokens = g_strsplit(start, " ", 0)))
             continue;
 
         /* Go through all flags and check whether one of those we
          * might want to check for later on is present; if that's
          * the case, set the relevant bit in the bitmap */
-        for (i = 0; i < ntokens; i++) {
+        for (next = tokens; *next; next++) {
             int value;
 
-            if ((value = virHostValidateCPUFlagTypeFromString(tokens[i])) >= 0)
+            if ((value = virHostValidateCPUFlagTypeFromString(*next)) >= 0)
                 ignore_value(virBitmapSetBit(flags, value));
         }
-
-        virStringListFreeCount(tokens, ntokens);
     } while (1);
 
- cleanup:
     VIR_FORCE_FCLOSE(fp);
 
     return flags;
@@ -270,17 +264,17 @@ int virHostValidateLinuxKernel(const char *hvname,
 
     if (STRNEQ(uts.sysname, "Linux")) {
         virHostMsgFail(level, "%s", hint);
-        return -1;
+        return VIR_HOST_VALIDATE_FAILURE(level);
     }
 
     if (virParseVersionString(uts.release, &thisversion, true) < 0) {
         virHostMsgFail(level, "%s", hint);
-        return -1;
+        return VIR_HOST_VALIDATE_FAILURE(level);
     }
 
     if (thisversion < version) {
         virHostMsgFail(level, "%s", hint);
-        return -1;
+        return VIR_HOST_VALIDATE_FAILURE(level);
     } else {
         virHostMsgPass();
         return 0;
@@ -292,12 +286,15 @@ int virHostValidateCGroupControllers(const char *hvname,
                                      int controllers,
                                      virHostValidateLevel level)
 {
-    virCgroupPtr group = NULL;
+    g_autoptr(virCgroup) group = NULL;
     int ret = 0;
     size_t i;
 
-    if (virCgroupNewSelf(&group) < 0)
-        return -1;
+    if (virCgroupNew("/", -1, &group) < 0) {
+        fprintf(stderr, "Unable to initialize cgroups: %s\n",
+                virGetLastErrorMessage());
+        return VIR_HOST_VALIDATE_FAILURE(level);
+    }
 
     for (i = 0; i < VIR_CGROUP_CONTROLLER_LAST; i++) {
         int flag = 1 << i;
@@ -309,7 +306,7 @@ int virHostValidateCGroupControllers(const char *hvname,
         virHostMsgCheck(hvname, "for cgroup '%s' controller support", cg_name);
 
         if (!virCgroupHasController(group, i)) {
-            ret = -1;
+            ret = VIR_HOST_VALIDATE_FAILURE(level);
             virHostMsgFail(level, "Enable '%s' in kernel Kconfig file or "
                            "mount/enable cgroup controller in your system",
                            cg_name);
@@ -318,31 +315,30 @@ int virHostValidateCGroupControllers(const char *hvname,
         }
     }
 
-    virCgroupFree(&group);
-
     return ret;
 }
 #else /*  !__linux__ */
-int virHostValidateCGroupControllers(const char *hvname ATTRIBUTE_UNUSED,
-                                     int controllers ATTRIBUTE_UNUSED,
+int virHostValidateCGroupControllers(const char *hvname G_GNUC_UNUSED,
+                                     int controllers G_GNUC_UNUSED,
                                      virHostValidateLevel level)
 {
     virHostMsgFail(level, "%s", "This platform does not support cgroups");
-    return -1;
+    return VIR_HOST_VALIDATE_FAILURE(level);
 }
 #endif /* !__linux__ */
 
 int virHostValidateIOMMU(const char *hvname,
                          virHostValidateLevel level)
 {
-    virBitmapPtr flags;
+    virBitmap *flags;
     struct stat sb;
     const char *bootarg = NULL;
     bool isAMD = false, isIntel = false;
     virArch arch = virArchFromHost();
     struct dirent *dent;
-    DIR *dir;
     int rc;
+
+    virHostMsgCheck(hvname, "%s", _("for device assignment IOMMU support"));
 
     flags = virHostValidateGetCPUFlags();
 
@@ -354,7 +350,6 @@ int virHostValidateIOMMU(const char *hvname,
     virBitmapFree(flags);
 
     if (isIntel) {
-        virHostMsgCheck(hvname, "%s", _("for device assignment IOMMU support"));
         if (access("/sys/firmware/acpi/tables/DMAR", F_OK) == 0) {
             virHostMsgPass();
             bootarg = "intel_iommu=on";
@@ -363,10 +358,9 @@ int virHostValidateIOMMU(const char *hvname,
                            "No ACPI DMAR table found, IOMMU either "
                            "disabled in BIOS or not supported by this "
                            "hardware platform");
-            return -1;
+            return VIR_HOST_VALIDATE_FAILURE(level);
         }
     } else if (isAMD) {
-        virHostMsgCheck(hvname, "%s", _("for device assignment IOMMU support"));
         if (access("/sys/firmware/acpi/tables/IVRS", F_OK) == 0) {
             virHostMsgPass();
             bootarg = "iommu=pt iommu=1";
@@ -375,11 +369,13 @@ int virHostValidateIOMMU(const char *hvname,
                            "No ACPI IVRS table found, IOMMU either "
                            "disabled in BIOS or not supported by this "
                            "hardware platform");
-            return -1;
+            return VIR_HOST_VALIDATE_FAILURE(level);
         }
     } else if (ARCH_IS_PPC64(arch)) {
-        /* Empty Block */
+        virHostMsgPass();
     } else if (ARCH_IS_S390(arch)) {
+        g_autoptr(DIR) dir = NULL;
+
         /* On s390x, we skip the IOMMU check if there are no PCI
          * devices (which is quite usual on s390x). If there are
          * no PCI devices the directory is still there but is
@@ -387,13 +383,13 @@ int virHostValidateIOMMU(const char *hvname,
         if (!virDirOpen(&dir, "/sys/bus/pci/devices"))
             return 0;
         rc = virDirRead(dir, &dent, NULL);
-        VIR_DIR_CLOSE(dir);
         if (rc <= 0)
             return 0;
+        virHostMsgPass();
     } else {
         virHostMsgFail(level,
                        "Unknown if this platform has IOMMU support");
-        return -1;
+        return VIR_HOST_VALIDATE_FAILURE(level);
     }
 
 
@@ -412,8 +408,119 @@ int virHostValidateIOMMU(const char *hvname,
                            "Add %s to kernel cmdline arguments", bootarg);
         else
             virHostMsgFail(level, "IOMMU capability not compiled into kernel.");
-        return -1;
+        return VIR_HOST_VALIDATE_FAILURE(level);
     }
     virHostMsgPass();
     return 0;
+}
+
+
+bool virHostKernelModuleIsLoaded(const char *module)
+{
+    FILE *fp;
+    bool ret = false;
+
+    if (!(fp = fopen("/proc/modules", "r")))
+        return false;
+
+    do {
+        char line[1024];
+
+        if (!fgets(line, sizeof(line), fp))
+            break;
+
+        if (STRPREFIX(line, module)) {
+            ret = true;
+            break;
+        }
+
+    } while (1);
+
+    VIR_FORCE_FCLOSE(fp);
+
+    return ret;
+}
+
+
+int virHostValidateSecureGuests(const char *hvname,
+                                virHostValidateLevel level)
+{
+    virBitmap *flags;
+    bool hasFac158 = false;
+    bool hasAMDSev = false;
+    virArch arch = virArchFromHost();
+    g_autofree char *cmdline = NULL;
+    static const char *kIBMValues[] = {"y", "Y", "on", "ON", "oN", "On", "1"};
+    g_autofree char *mod_value = NULL;
+
+    flags = virHostValidateGetCPUFlags();
+
+    if (flags && virBitmapIsBitSet(flags, VIR_HOST_VALIDATE_CPU_FLAG_FACILITY_158))
+        hasFac158 = true;
+    else if (flags && virBitmapIsBitSet(flags, VIR_HOST_VALIDATE_CPU_FLAG_SEV))
+        hasAMDSev = true;
+
+    virBitmapFree(flags);
+
+    virHostMsgCheck(hvname, "%s", _("for secure guest support"));
+    if (ARCH_IS_S390(arch)) {
+        if (hasFac158) {
+            if (!virFileIsDir("/sys/firmware/uv")) {
+                virHostMsgFail(level, "IBM Secure Execution not supported by "
+                                      "the currently used kernel");
+                return VIR_HOST_VALIDATE_FAILURE(level);
+            }
+
+            /* we're prefix matching rather than equality matching here, because
+             * kernel would treat even something like prot_virt='yFOO' as
+             * enabled
+             */
+            if (virFileReadValueString(&cmdline, "/proc/cmdline") >= 0 &&
+                virKernelCmdlineMatchParam(cmdline, "prot_virt", kIBMValues,
+                                           G_N_ELEMENTS(kIBMValues),
+                                           VIR_KERNEL_CMDLINE_FLAGS_SEARCH_FIRST |
+                                           VIR_KERNEL_CMDLINE_FLAGS_CMP_PREFIX)) {
+                virHostMsgPass();
+                return 1;
+            } else {
+                virHostMsgFail(level,
+                               "IBM Secure Execution appears to be disabled "
+                               "in kernel. Add prot_virt=1 to kernel cmdline "
+                               "arguments");
+                return VIR_HOST_VALIDATE_FAILURE(level);
+            }
+        } else {
+            virHostMsgFail(level, "Hardware or firmware does not provide "
+                                  "support for IBM Secure Execution");
+            return VIR_HOST_VALIDATE_FAILURE(level);
+        }
+    } else if (hasAMDSev) {
+        if (virFileReadValueString(&mod_value, "/sys/module/kvm_amd/parameters/sev") < 0) {
+            virHostMsgFail(level, "AMD Secure Encrypted Virtualization not "
+                                  "supported by the currently used kernel");
+            return VIR_HOST_VALIDATE_FAILURE(level);
+        }
+
+        if (mod_value[0] != '1') {
+            virHostMsgFail(level,
+                           "AMD Secure Encrypted Virtualization appears to be "
+                           "disabled in kernel. Add kvm_amd.sev=1 "
+                           "to the kernel cmdline arguments");
+            return VIR_HOST_VALIDATE_FAILURE(level);
+        }
+
+        if (virFileExists("/dev/sev")) {
+            virHostMsgPass();
+            return 1;
+        } else {
+            virHostMsgFail(level,
+                           "AMD Secure Encrypted Virtualization appears to be "
+                           "disabled in firemare.");
+            return VIR_HOST_VALIDATE_FAILURE(level);
+        }
+    }
+
+    virHostMsgFail(level,
+                   "Unknown if this platform has Secure Guest support");
+    return VIR_HOST_VALIDATE_FAILURE(level);
 }

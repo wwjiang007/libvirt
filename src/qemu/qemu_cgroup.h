@@ -19,67 +19,64 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_QEMU_CGROUP_H
-# define LIBVIRT_QEMU_CGROUP_H
+#pragma once
 
-# include "virusb.h"
-# include "vircgroup.h"
-# include "domain_conf.h"
-# include "qemu_conf.h"
+#include "virusb.h"
+#include "vircgroup.h"
+#include "domain_conf.h"
+#include "qemu_conf.h"
 
-int qemuSetupImageCgroup(virDomainObjPtr vm,
-                         virStorageSourcePtr src);
-int qemuTeardownImageCgroup(virDomainObjPtr vm,
-                            virStorageSourcePtr src);
-int qemuSetupImageChainCgroup(virDomainObjPtr vm,
-                              virStorageSourcePtr src);
-int qemuTeardownImageChainCgroup(virDomainObjPtr vm,
-                                 virStorageSourcePtr src);
-int qemuSetupInputCgroup(virDomainObjPtr vm,
-                         virDomainInputDefPtr dev);
-int qemuTeardownInputCgroup(virDomainObjPtr vm,
-                            virDomainInputDefPtr dev);
-int qemuSetupHostdevCgroup(virDomainObjPtr vm,
-                           virDomainHostdevDefPtr dev)
-   ATTRIBUTE_RETURN_CHECK;
-int qemuTeardownHostdevCgroup(virDomainObjPtr vm,
-                              virDomainHostdevDefPtr dev)
-   ATTRIBUTE_RETURN_CHECK;
-int qemuSetupMemoryDevicesCgroup(virDomainObjPtr vm,
-                                 virDomainMemoryDefPtr mem);
-int qemuTeardownMemoryDevicesCgroup(virDomainObjPtr vm,
-                                    virDomainMemoryDefPtr mem);
-int qemuSetupRNGCgroup(virDomainObjPtr vm,
-                       virDomainRNGDefPtr rng);
-int qemuTeardownRNGCgroup(virDomainObjPtr vm,
-                          virDomainRNGDefPtr rng);
-int qemuSetupChardevCgroup(virDomainObjPtr vm,
-                           virDomainChrDefPtr dev);
-int qemuTeardownChardevCgroup(virDomainObjPtr vm,
-                              virDomainChrDefPtr dev);
-int qemuConnectCgroup(virDomainObjPtr vm);
-int qemuSetupCgroup(virDomainObjPtr vm,
+int qemuSetupImageCgroup(virDomainObj *vm,
+                         virStorageSource *src);
+int qemuTeardownImageCgroup(virDomainObj *vm,
+                            virStorageSource *src);
+int qemuSetupImageChainCgroup(virDomainObj *vm,
+                              virStorageSource *src);
+int qemuTeardownImageChainCgroup(virDomainObj *vm,
+                                 virStorageSource *src);
+int qemuSetupInputCgroup(virDomainObj *vm,
+                         virDomainInputDef *dev);
+int qemuTeardownInputCgroup(virDomainObj *vm,
+                            virDomainInputDef *dev);
+int qemuSetupHostdevCgroup(virDomainObj *vm,
+                           virDomainHostdevDef *dev)
+   G_GNUC_WARN_UNUSED_RESULT;
+int qemuTeardownHostdevCgroup(virDomainObj *vm,
+                              virDomainHostdevDef *dev)
+   G_GNUC_WARN_UNUSED_RESULT;
+int qemuSetupMemoryDevicesCgroup(virDomainObj *vm,
+                                 virDomainMemoryDef *mem);
+int qemuTeardownMemoryDevicesCgroup(virDomainObj *vm,
+                                    virDomainMemoryDef *mem);
+int qemuSetupRNGCgroup(virDomainObj *vm,
+                       virDomainRNGDef *rng);
+int qemuTeardownRNGCgroup(virDomainObj *vm,
+                          virDomainRNGDef *rng);
+int qemuSetupChardevCgroup(virDomainObj *vm,
+                           virDomainChrDef *dev);
+int qemuTeardownChardevCgroup(virDomainObj *vm,
+                              virDomainChrDef *dev);
+int qemuConnectCgroup(virDomainObj *vm);
+int qemuSetupCgroup(virDomainObj *vm,
                     size_t nnicindexes,
                     int *nicindexes);
-int qemuSetupCgroupVcpuBW(virCgroupPtr cgroup,
+int qemuSetupCgroupVcpuBW(virCgroup *cgroup,
                           unsigned long long period,
                           long long quota);
-int qemuSetupCgroupCpusetCpus(virCgroupPtr cgroup, virBitmapPtr cpumask);
-int qemuSetupGlobalCpuCgroup(virDomainObjPtr vm);
-int qemuSetupCgroupForExtDevices(virDomainObjPtr vm,
-                                 virQEMUDriverPtr driver);
-int qemuRemoveCgroup(virDomainObjPtr vm);
+int qemuSetupCgroupCpusetCpus(virCgroup *cgroup, virBitmap *cpumask);
+int qemuSetupGlobalCpuCgroup(virDomainObj *vm);
+int qemuSetupCgroupForExtDevices(virDomainObj *vm,
+                                 virQEMUDriver *driver);
+int qemuRemoveCgroup(virDomainObj *vm);
 
 typedef struct _qemuCgroupEmulatorAllNodesData qemuCgroupEmulatorAllNodesData;
-typedef qemuCgroupEmulatorAllNodesData *qemuCgroupEmulatorAllNodesDataPtr;
 struct _qemuCgroupEmulatorAllNodesData {
-    virCgroupPtr emulatorCgroup;
+    virCgroup *emulatorCgroup;
     char *emulatorMemMask;
 };
 
-int qemuCgroupEmulatorAllNodesAllow(virCgroupPtr cgroup,
-                                    qemuCgroupEmulatorAllNodesDataPtr *data);
-void qemuCgroupEmulatorAllNodesRestore(qemuCgroupEmulatorAllNodesDataPtr data);
+int qemuCgroupEmulatorAllNodesAllow(virCgroup *cgroup,
+                                    qemuCgroupEmulatorAllNodesData **data);
+void qemuCgroupEmulatorAllNodesRestore(qemuCgroupEmulatorAllNodesData *data);
 
 extern const char *const defaultDeviceACL[];
-#endif /* LIBVIRT_QEMU_CGROUP_H */

@@ -28,7 +28,6 @@
 #include "virstring.h"
 #include "viralloc.h"
 
-/* For virReportOOMError()  and virReportSystemError() */
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 VIR_LOG_INIT("util.scsihost");
@@ -46,21 +45,21 @@ struct _virSCSIVHostDevice {
 struct _virSCSIVHostDeviceList {
     virObjectLockable parent;
     size_t count;
-    virSCSIVHostDevicePtr *devs;
+    virSCSIVHostDevice **devs;
 };
 
-static virClassPtr virSCSIVHostDeviceListClass;
+static virClass *virSCSIVHostDeviceListClass;
 
 static void
 virSCSIVHostDeviceListDispose(void *obj)
 {
-    virSCSIVHostDeviceListPtr list = obj;
+    virSCSIVHostDeviceList *list = obj;
     size_t i;
 
     for (i = 0; i < list->count; i++)
         virSCSIVHostDeviceFree(list->devs[i]);
 
-    VIR_FREE(list->devs);
+    g_free(list->devs);
 }
 
 
@@ -104,21 +103,21 @@ virSCSIVHostOpenVhostSCSI(int *vhostfd)
 
 
 void
-virSCSIVHostDeviceListDel(virSCSIVHostDeviceListPtr list,
-                          virSCSIVHostDevicePtr dev)
+virSCSIVHostDeviceListDel(virSCSIVHostDeviceList *list,
+                          virSCSIVHostDevice *dev)
 {
     virSCSIVHostDeviceFree(virSCSIVHostDeviceListSteal(list, dev));
 }
 
 
 static int
-virSCSIVHostDeviceListFindIndex(virSCSIVHostDeviceListPtr list,
-                                virSCSIVHostDevicePtr dev)
+virSCSIVHostDeviceListFindIndex(virSCSIVHostDeviceList *list,
+                                virSCSIVHostDevice *dev)
 {
     size_t i;
 
     for (i = 0; i < list->count; i++) {
-        virSCSIVHostDevicePtr other = list->devs[i];
+        virSCSIVHostDevice *other = list->devs[i];
         if (STREQ_NULLABLE(other->name, dev->name))
             return i;
     }
@@ -126,8 +125,8 @@ virSCSIVHostDeviceListFindIndex(virSCSIVHostDeviceListPtr list,
 }
 
 
-virSCSIVHostDevicePtr
-virSCSIVHostDeviceListGet(virSCSIVHostDeviceListPtr list, int idx)
+virSCSIVHostDevice *
+virSCSIVHostDeviceListGet(virSCSIVHostDeviceList *list, int idx)
 {
     if (idx >= list->count || idx < 0)
         return NULL;
@@ -137,17 +136,17 @@ virSCSIVHostDeviceListGet(virSCSIVHostDeviceListPtr list, int idx)
 
 
 size_t
-virSCSIVHostDeviceListCount(virSCSIVHostDeviceListPtr list)
+virSCSIVHostDeviceListCount(virSCSIVHostDeviceList *list)
 {
     return list->count;
 }
 
 
-virSCSIVHostDevicePtr
-virSCSIVHostDeviceListSteal(virSCSIVHostDeviceListPtr list,
-                            virSCSIVHostDevicePtr dev)
+virSCSIVHostDevice *
+virSCSIVHostDeviceListSteal(virSCSIVHostDeviceList *list,
+                            virSCSIVHostDevice *dev)
 {
-    virSCSIVHostDevicePtr ret = NULL;
+    virSCSIVHostDevice *ret = NULL;
     size_t i;
 
     for (i = 0; i < list->count; i++) {
@@ -162,9 +161,9 @@ virSCSIVHostDeviceListSteal(virSCSIVHostDeviceListPtr list,
 }
 
 
-virSCSIVHostDevicePtr
-virSCSIVHostDeviceListFind(virSCSIVHostDeviceListPtr list,
-                           virSCSIVHostDevicePtr dev)
+virSCSIVHostDevice *
+virSCSIVHostDeviceListFind(virSCSIVHostDeviceList *list,
+                           virSCSIVHostDevice *dev)
 {
     int idx;
 
@@ -176,8 +175,8 @@ virSCSIVHostDeviceListFind(virSCSIVHostDeviceListPtr list,
 
 
 int
-virSCSIVHostDeviceListAdd(virSCSIVHostDeviceListPtr list,
-                          virSCSIVHostDevicePtr dev)
+virSCSIVHostDeviceListAdd(virSCSIVHostDeviceList *list,
+                          virSCSIVHostDevice *dev)
 {
     if (virSCSIVHostDeviceListFind(list, dev)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -188,7 +187,7 @@ virSCSIVHostDeviceListAdd(virSCSIVHostDeviceListPtr list,
 }
 
 
-virSCSIVHostDeviceListPtr
+virSCSIVHostDeviceList *
 virSCSIVHostDeviceListNew(void)
 {
     if (virSCSIVHostInitialize() < 0)
@@ -199,23 +198,21 @@ virSCSIVHostDeviceListNew(void)
 
 
 int
-virSCSIVHostDeviceSetUsedBy(virSCSIVHostDevicePtr dev,
+virSCSIVHostDeviceSetUsedBy(virSCSIVHostDevice *dev,
                             const char *drvname,
                             const char *domname)
 {
     VIR_FREE(dev->used_by_drvname);
     VIR_FREE(dev->used_by_domname);
-    if (VIR_STRDUP(dev->used_by_drvname, drvname) < 0)
-        return -1;
-    if (VIR_STRDUP(dev->used_by_domname, domname) < 0)
-        return -1;
+    dev->used_by_drvname = g_strdup(drvname);
+    dev->used_by_domname = g_strdup(domname);
 
     return 0;
 }
 
 
 void
-virSCSIVHostDeviceGetUsedBy(virSCSIVHostDevicePtr dev,
+virSCSIVHostDeviceGetUsedBy(virSCSIVHostDevice *dev,
                             const char **drv_name,
                             const char **dom_name)
 {
@@ -225,7 +222,7 @@ virSCSIVHostDeviceGetUsedBy(virSCSIVHostDevicePtr dev,
 
 
 int
-virSCSIVHostDeviceFileIterate(virSCSIVHostDevicePtr dev,
+virSCSIVHostDeviceFileIterate(virSCSIVHostDevice *dev,
                               virSCSIVHostDeviceFileActor actor,
                               void *opaque)
 {
@@ -234,56 +231,45 @@ virSCSIVHostDeviceFileIterate(virSCSIVHostDevicePtr dev,
 
 
 const char *
-virSCSIVHostDeviceGetName(virSCSIVHostDevicePtr dev)
+virSCSIVHostDeviceGetName(virSCSIVHostDevice *dev)
 {
     return dev->name;
 }
 
 
 const char *
-virSCSIVHostDeviceGetPath(virSCSIVHostDevicePtr dev)
+virSCSIVHostDeviceGetPath(virSCSIVHostDevice *dev)
 {
     return dev->path;
 }
 
 
-virSCSIVHostDevicePtr
+virSCSIVHostDevice *
 virSCSIVHostDeviceNew(const char *name)
 {
-    VIR_AUTOPTR(virSCSIVHostDevice) dev = NULL;
-    virSCSIVHostDevicePtr ret = NULL;
+    g_autoptr(virSCSIVHostDevice) dev = NULL;
 
-    if (VIR_ALLOC(dev) < 0)
-        return NULL;
+    dev = g_new0(virSCSIVHostDevice, 1);
 
-    if (VIR_STRDUP(dev->name, name) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("dev->name buffer overflow: %s"),
-                       name);
-        return NULL;
-    }
+    dev->name = g_strdup(name);
 
-    if (virAsprintf(&dev->path, "%s/%s",
-                    SYSFS_VHOST_SCSI_DEVICES, name) < 0)
-        return NULL;
+    dev->path = g_strdup_printf("%s/%s", SYSFS_VHOST_SCSI_DEVICES, name);
 
     VIR_DEBUG("%s: initialized", dev->name);
 
-    VIR_STEAL_PTR(ret, dev);
-
-    return ret;
+    return g_steal_pointer(&dev);
 }
 
 
 void
-virSCSIVHostDeviceFree(virSCSIVHostDevicePtr dev)
+virSCSIVHostDeviceFree(virSCSIVHostDevice *dev)
 {
     if (!dev)
         return;
     VIR_DEBUG("%s: freeing", dev->name);
-    VIR_FREE(dev->name);
-    VIR_FREE(dev->path);
-    VIR_FREE(dev->used_by_drvname);
-    VIR_FREE(dev->used_by_domname);
-    VIR_FREE(dev);
+    g_free(dev->name);
+    g_free(dev->path);
+    g_free(dev->used_by_drvname);
+    g_free(dev->used_by_domname);
+    g_free(dev);
 }

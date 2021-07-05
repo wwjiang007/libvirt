@@ -35,14 +35,14 @@
 
 #define VIR_FROM_THIS VIR_FROM_STORAGE
 
-static int virStorageBackendSheepdogRefreshVol(virStoragePoolObjPtr pool,
-                                               virStorageVolDefPtr vol);
+static int virStorageBackendSheepdogRefreshVol(virStoragePoolObj *pool,
+                                               virStorageVolDef *vol);
 
-void virStorageBackendSheepdogAddHostArg(virCommandPtr cmd,
-                                         virStoragePoolObjPtr pool);
+void virStorageBackendSheepdogAddHostArg(virCommand *cmd,
+                                         virStoragePoolObj *pool);
 
 int
-virStorageBackendSheepdogParseNodeInfo(virStoragePoolDefPtr pool,
+virStorageBackendSheepdogParseNodeInfo(virStoragePoolDef *pool,
                                        char *output)
 {
     /* fields:
@@ -89,10 +89,10 @@ virStorageBackendSheepdogParseNodeInfo(virStoragePoolDefPtr pool,
 }
 
 void
-virStorageBackendSheepdogAddHostArg(virCommandPtr cmd,
-                                    virStoragePoolObjPtr pool)
+virStorageBackendSheepdogAddHostArg(virCommand *cmd,
+                                    virStoragePoolObj *pool)
 {
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
     const char *address = "localhost";
     int port = 7000;
     if (def->source.nhost > 0) {
@@ -108,9 +108,9 @@ virStorageBackendSheepdogAddHostArg(virCommandPtr cmd,
 }
 
 static int
-virStorageBackendSheepdogAddVolume(virStoragePoolObjPtr pool, const char *diskInfo)
+virStorageBackendSheepdogAddVolume(virStoragePoolObj *pool, const char *diskInfo)
 {
-    VIR_AUTOPTR(virStorageVolDef) vol = NULL;
+    g_autoptr(virStorageVolDef) vol = NULL;
 
     if (diskInfo == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -118,8 +118,9 @@ virStorageBackendSheepdogAddVolume(virStoragePoolObjPtr pool, const char *diskIn
         return -1;
     }
 
-    if (VIR_ALLOC(vol) < 0 || VIR_STRDUP(vol->name, diskInfo) < 0)
-        return -1;
+    vol = g_new0(virStorageVolDef, 1);
+
+    vol->name = g_strdup(diskInfo);
 
     vol->type = VIR_STORAGE_VOL_NETWORK;
 
@@ -134,13 +135,12 @@ virStorageBackendSheepdogAddVolume(virStoragePoolObjPtr pool, const char *diskIn
 }
 
 static int
-virStorageBackendSheepdogRefreshAllVol(virStoragePoolObjPtr pool)
+virStorageBackendSheepdogRefreshAllVol(virStoragePoolObj *pool)
 {
     size_t i;
-    VIR_AUTOFREE(char *) output = NULL;
-    VIR_AUTOSTRINGLIST lines = NULL;
-    VIR_AUTOSTRINGLIST cells = NULL;
-    VIR_AUTOPTR(virCommand) cmd = NULL;
+    g_autofree char *output = NULL;
+    g_auto(GStrv) lines = NULL;
+    g_autoptr(virCommand) cmd = NULL;
 
     cmd = virCommandNewArgList(SHEEPDOGCLI, "vdi", "list", "-r", NULL);
     virStorageBackendSheepdogAddHostArg(cmd, pool);
@@ -148,25 +148,19 @@ virStorageBackendSheepdogRefreshAllVol(virStoragePoolObjPtr pool)
     if (virCommandRun(cmd, NULL) < 0)
         return -1;
 
-    lines = virStringSplit(output, "\n", 0);
+    lines = g_strsplit(output, "\n", 0);
     if (lines == NULL)
         return -1;
 
     for (i = 0; lines[i]; i++) {
-        const char *line = lines[i];
-        if (line == NULL)
-            break;
+        g_auto(GStrv) cells = NULL;
 
-        cells = virStringSplit(line, " ", 0);
+        cells = g_strsplit(lines[i], " ", 0);
 
-        if (cells != NULL &&
-            virStringListLength((const char * const *)cells) > 2) {
+        if (cells != NULL && cells[0] && cells[1]) {
             if (virStorageBackendSheepdogAddVolume(pool, cells[1]) < 0)
                 return -1;
         }
-
-        virStringListFree(cells);
-        cells = NULL;
     }
 
     return 0;
@@ -174,10 +168,10 @@ virStorageBackendSheepdogRefreshAllVol(virStoragePoolObjPtr pool)
 
 
 static int
-virStorageBackendSheepdogRefreshPool(virStoragePoolObjPtr pool)
+virStorageBackendSheepdogRefreshPool(virStoragePoolObj *pool)
 {
-    VIR_AUTOFREE(char *) output = NULL;
-    VIR_AUTOPTR(virCommand) cmd = NULL;
+    g_autofree char *output = NULL;
+    g_autoptr(virCommand) cmd = NULL;
 
     cmd = virCommandNewArgList(SHEEPDOGCLI, "node", "info", "-r", NULL);
     virStorageBackendSheepdogAddHostArg(cmd, pool);
@@ -194,11 +188,11 @@ virStorageBackendSheepdogRefreshPool(virStoragePoolObjPtr pool)
 
 
 static int
-virStorageBackendSheepdogDeleteVol(virStoragePoolObjPtr pool,
-                                   virStorageVolDefPtr vol,
+virStorageBackendSheepdogDeleteVol(virStoragePoolObj *pool,
+                                   virStorageVolDef *vol,
                                    unsigned int flags)
 {
-    VIR_AUTOPTR(virCommand) cmd = NULL;
+    g_autoptr(virCommand) cmd = NULL;
 
     virCheckFlags(0, -1);
 
@@ -209,10 +203,10 @@ virStorageBackendSheepdogDeleteVol(virStoragePoolObjPtr pool,
 
 
 static int
-virStorageBackendSheepdogCreateVol(virStoragePoolObjPtr pool,
-                                   virStorageVolDefPtr vol)
+virStorageBackendSheepdogCreateVol(virStoragePoolObj *pool,
+                                   virStorageVolDef *vol)
 {
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
 
     if (vol->target.encryption != NULL) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
@@ -224,24 +218,21 @@ virStorageBackendSheepdogCreateVol(virStoragePoolObjPtr pool,
     vol->type = VIR_STORAGE_VOL_NETWORK;
 
     VIR_FREE(vol->key);
-    if (virAsprintf(&vol->key, "%s/%s",
-                    def->source.name, vol->name) < 0)
-        return -1;
+    vol->key = g_strdup_printf("%s/%s", def->source.name, vol->name);
 
     VIR_FREE(vol->target.path);
-    if (VIR_STRDUP(vol->target.path, vol->name) < 0)
-        return -1;
+    vol->target.path = g_strdup(vol->name);
 
     return 0;
 }
 
 
 static int
-virStorageBackendSheepdogBuildVol(virStoragePoolObjPtr pool,
-                                  virStorageVolDefPtr vol,
+virStorageBackendSheepdogBuildVol(virStoragePoolObj *pool,
+                                  virStorageVolDef *vol,
                                   unsigned int flags)
 {
-    VIR_AUTOPTR(virCommand) cmd = NULL;
+    g_autoptr(virCommand) cmd = NULL;
 
     virCheckFlags(0, -1);
 
@@ -259,7 +250,7 @@ virStorageBackendSheepdogBuildVol(virStoragePoolObjPtr pool,
 
 
 int
-virStorageBackendSheepdogParseVdiList(virStorageVolDefPtr vol,
+virStorageBackendSheepdogParseVdiList(virStorageVolDef *vol,
                                       char *output)
 {
     /* fields:
@@ -320,12 +311,12 @@ virStorageBackendSheepdogParseVdiList(virStorageVolDefPtr vol,
 }
 
 static int
-virStorageBackendSheepdogRefreshVol(virStoragePoolObjPtr pool,
-                                    virStorageVolDefPtr vol)
+virStorageBackendSheepdogRefreshVol(virStoragePoolObj *pool,
+                                    virStorageVolDef *vol)
 {
     char *output = NULL;
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
-    VIR_AUTOPTR(virCommand) cmd = NULL;
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
+    g_autoptr(virCommand) cmd = NULL;
 
     cmd = virCommandNewArgList(SHEEPDOGCLI, "vdi", "list", vol->name, "-r", NULL);
     virStorageBackendSheepdogAddHostArg(cmd, pool);
@@ -339,23 +330,22 @@ virStorageBackendSheepdogRefreshVol(virStoragePoolObjPtr pool,
     vol->type = VIR_STORAGE_VOL_NETWORK;
 
     VIR_FREE(vol->key);
-    if (virAsprintf(&vol->key, "%s/%s", def->source.name, vol->name) < 0)
-        return -1;
+    vol->key = g_strdup_printf("%s/%s", def->source.name, vol->name);
 
     VIR_FREE(vol->target.path);
-    ignore_value(VIR_STRDUP(vol->target.path, vol->name));
+    vol->target.path = g_strdup(vol->name);
 
     return 0;
 }
 
 
 static int
-virStorageBackendSheepdogResizeVol(virStoragePoolObjPtr pool,
-                                   virStorageVolDefPtr vol,
+virStorageBackendSheepdogResizeVol(virStoragePoolObj *pool,
+                                   virStorageVolDef *vol,
                                    unsigned long long capacity,
                                    unsigned int flags)
 {
-    VIR_AUTOPTR(virCommand) cmd = NULL;
+    g_autoptr(virCommand) cmd = NULL;
 
     virCheckFlags(0, -1);
 

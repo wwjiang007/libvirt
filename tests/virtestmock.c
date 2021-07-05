@@ -20,17 +20,11 @@
 
 #include "virmock.h"
 #include <unistd.h>
-#include <sys/types.h>
 #include <fcntl.h>
-#include <execinfo.h>
 #include <sys/file.h>
 #include <sys/stat.h>
-#include <sys/socket.h>
-#ifdef HAVE_SYS_UN_H
-# include <sys/un.h>
-#endif
 
-#include "internal.h"
+#include "virsocket.h"
 #include "configmake.h"
 #include "virstring.h"
 #include "viralloc.h"
@@ -75,13 +69,13 @@ printFile(const char *file,
             output = VIR_FILE_ACCESS_DEFAULT;
     }
 
-    if (!(fp = real_fopen(output, "a"))) {
-        fprintf(stderr, "Unable to open %s: %s\n", output, strerror(errno));
+    if (!(fp = real_fopen(output, "w"))) {
+        fprintf(stderr, "Unable to open %s: %s\n", output, g_strerror(errno));
         abort();
     }
 
     if (flock(fileno(fp), LOCK_EX) < 0) {
-        fprintf(stderr, "Unable to lock %s: %s\n", output, strerror(errno));
+        fprintf(stderr, "Unable to lock %s: %s\n", output, g_strerror(errno));
         fclose(fp);
         abort();
     }
@@ -110,9 +104,8 @@ checkPath(const char *path,
     char *relPath = NULL;
     char *crippledPath = NULL;
 
-    if (path[0] != '/' &&
-        virAsprintfQuiet(&relPath, "./%s", path) < 0)
-        goto error;
+    if (!g_path_is_absolute(path))
+        relPath = g_strdup_printf("./%s", path);
 
     /* Le sigh. virFileCanonicalizePath() expects @path to exist, otherwise
      * it will return an error. So if we are called over an non-existent
@@ -123,8 +116,7 @@ checkPath(const char *path,
     } else {
         /* Yeah, our worst nightmares just became true. Path does
          * not exist. Cut off the last component and retry. */
-        if (VIR_STRDUP_QUIET(crippledPath, relPath ? relPath : path) < 0)
-            goto error;
+        crippledPath = g_strdup(relPath ? relPath : path);
 
         virFileRemoveLastComponent(crippledPath);
 
@@ -143,9 +135,6 @@ checkPath(const char *path,
     VIR_FREE(fullPath);
 
     return;
- error:
-    fprintf(stderr, "Out of memory\n");
-    abort();
 }
 
 
@@ -198,7 +187,7 @@ int access(const char *path, int mode)
 
 #include "virmockstathelpers.c"
 
-static int virMockStatRedirect(const char *path ATTRIBUTE_UNUSED, char **newpath ATTRIBUTE_UNUSED)
+static int virMockStatRedirect(const char *path G_GNUC_UNUSED, char **newpath G_GNUC_UNUSED)
 {
     return 0;
 }
@@ -208,7 +197,7 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
 {
     init_syms();
 
-#ifdef HAVE_SYS_UN_H
+#ifndef WIN32
     if (addrlen == sizeof(struct sockaddr_un)) {
         struct sockaddr_un *tmp = (struct sockaddr_un *) addr;
         if (tmp->sun_family == AF_UNIX)

@@ -21,23 +21,20 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_NWFILTER_TECH_DRIVER_H
-# define LIBVIRT_NWFILTER_TECH_DRIVER_H
+#pragma once
 
-# include "virnwfilterobj.h"
+#include "virnwfilterobj.h"
 
 typedef struct _virNWFilterTechDriver virNWFilterTechDriver;
-typedef virNWFilterTechDriver *virNWFilterTechDriverPtr;
 
 
 typedef struct _virNWFilterRuleInst virNWFilterRuleInst;
-typedef virNWFilterRuleInst *virNWFilterRuleInstPtr;
 struct _virNWFilterRuleInst {
     const char *chainSuffix;
     virNWFilterChainPriority chainPriority;
-    virNWFilterRuleDefPtr def;
+    virNWFilterRuleDef *def;
     virNWFilterRulePriority priority;
-    virHashTablePtr vars;
+    GHashTable *vars;
 };
 
 
@@ -45,7 +42,7 @@ typedef int (*virNWFilterTechDrvInit)(bool privileged);
 typedef void (*virNWFilterTechDrvShutdown)(void);
 
 typedef int (*virNWFilterRuleApplyNewRules)(const char *ifname,
-                                            virNWFilterRuleInstPtr *rules,
+                                            virNWFilterRuleInst **rules,
                                             size_t nrules);
 
 typedef int (*virNWFilterRuleTeardownNewRules)(const char *ifname);
@@ -61,7 +58,7 @@ typedef int (*virNWFilterApplyBasicRules)(const char *ifname,
 
 typedef int (*virNWFilterApplyDHCPOnlyRules)(const char *ifname,
                                              const virMacAddr *macaddr,
-                                             virNWFilterVarValuePtr dhcpsrvs,
+                                             virNWFilterVarValue *dhcpsrvs,
                                              bool leaveTemporary);
 
 typedef int (*virNWFilterRemoveBasicRules)(const char *ifname);
@@ -90,5 +87,3 @@ struct _virNWFilterTechDriver {
     virNWFilterDropAllRules applyDropAllRules;
     virNWFilterRemoveBasicRules removeBasicRules;
 };
-
-#endif /* LIBVIRT_NWFILTER_TECH_DRIVER_H */

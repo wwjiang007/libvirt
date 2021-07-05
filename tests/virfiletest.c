@@ -19,6 +19,7 @@
 #include <config.h>
 
 #include <fcntl.h>
+#include <unistd.h>
 
 #include "testutils.h"
 #include "virfile.h"
@@ -30,7 +31,7 @@
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
-#if defined HAVE_MNTENT_H && defined HAVE_GETMNTENT_R
+#if defined WITH_MNTENT_H && defined WITH_GETMNTENT_R
 static int testFileCheckMounts(const char *prefix,
                                char **gotmounts,
                                size_t gotnmounts,
@@ -87,10 +88,10 @@ static int testFileGetMountSubtree(const void *opaque)
                               data->mounts, data->nmounts);
 
  cleanup:
-    virStringListFree(gotmounts);
+    g_strfreev(gotmounts);
     return ret;
 }
-#endif /* ! defined HAVE_MNTENT_H && defined HAVE_GETMNTENT_R */
+#endif /* ! defined WITH_MNTENT_H && defined WITH_GETMNTENT_R */
 
 struct testFileSanitizePathData
 {
@@ -121,7 +122,7 @@ testFileSanitizePath(const void *opaque)
 }
 
 
-#if HAVE_DECL_SEEK_HOLE && defined(__linux__)
+#if WITH_DECL_SEEK_HOLE && defined(__linux__)
 
 /* Create a sparse file. @offsets in KiB. */
 static int
@@ -133,7 +134,7 @@ makeSparseFile(const off_t offsets[],
     off_t len = 0;
     size_t i;
 
-    if ((fd = mkostemp(path,  O_CLOEXEC|O_RDWR)) < 0)
+    if ((fd = g_mkstemp_full(path, O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR)) < 0)
         goto error;
 
     if (unlink(path) < 0)
@@ -233,11 +234,11 @@ holesSupported(void)
     return ret;
 }
 
-#else /* !HAVE_DECL_SEEK_HOLE || !defined(__linux__)*/
+#else /* !WITH_DECL_SEEK_HOLE || !defined(__linux__)*/
 
 static int
-makeSparseFile(const off_t offsets[] ATTRIBUTE_UNUSED,
-               const bool startData ATTRIBUTE_UNUSED)
+makeSparseFile(const off_t offsets[] G_GNUC_UNUSED,
+               const bool startData G_GNUC_UNUSED)
 {
     return -1;
 }
@@ -249,7 +250,7 @@ holesSupported(void)
     return false;
 }
 
-#endif /* !HAVE_DECL_SEEK_HOLE || !defined(__linux__)*/
+#endif /* !WITH_DECL_SEEK_HOLE || !defined(__linux__)*/
 
 struct testFileInData {
     bool startData;     /* whether the list of offsets starts with data section */
@@ -315,7 +316,7 @@ struct testFileIsSharedFSType {
 };
 
 static int
-testFileIsSharedFSType(const void *opaque ATTRIBUTE_UNUSED)
+testFileIsSharedFSType(const void *opaque G_GNUC_UNUSED)
 {
 #ifndef __linux__
     return EXIT_AM_SKIP;
@@ -325,10 +326,9 @@ testFileIsSharedFSType(const void *opaque ATTRIBUTE_UNUSED)
     bool actual;
     int ret = -1;
 
-    if (virAsprintf(&mtabFile, abs_srcdir "/virfiledata/%s", data->mtabFile) < 0)
-        return -1;
+    mtabFile = g_strdup_printf(abs_srcdir "/virfiledata/%s", data->mtabFile);
 
-    if (setenv("LIBVIRT_MTAB", mtabFile, 1) < 0) {
+    if (g_setenv("LIBVIRT_MTAB", mtabFile, TRUE) == FALSE) {
         fprintf(stderr, "Unable to set env variable\n");
         goto cleanup;
     }
@@ -344,7 +344,7 @@ testFileIsSharedFSType(const void *opaque ATTRIBUTE_UNUSED)
     ret = 0;
  cleanup:
     VIR_FREE(mtabFile);
-    unsetenv("LIBVIRT_MTAB");
+    g_unsetenv("LIBVIRT_MTAB");
     return ret;
 #endif
 }
@@ -356,7 +356,7 @@ mymain(void)
     int ret = 0;
     struct testFileSanitizePathData data1;
 
-#if defined HAVE_MNTENT_H && defined HAVE_GETMNTENT_R
+#if defined WITH_MNTENT_H && defined WITH_GETMNTENT_R
 # define MTAB_PATH1 abs_srcdir "/virfiledata/mounts1.txt"
 # define MTAB_PATH2 abs_srcdir "/virfiledata/mounts2.txt"
 
@@ -376,7 +376,7 @@ mymain(void)
 # define DO_TEST_MOUNT_SUBTREE(name, path, prefix, mounts, rev) \
     do { \
         struct testFileGetMountSubtreeData data = { \
-            path, prefix, mounts, ARRAY_CARDINALITY(mounts), rev \
+            path, prefix, mounts, G_N_ELEMENTS(mounts), rev \
         }; \
         if (virTestRun(name, testFileGetMountSubtree, &data) < 0) \
             ret = -1; \
@@ -386,7 +386,7 @@ mymain(void)
     DO_TEST_MOUNT_SUBTREE("/proc reverse", MTAB_PATH1, "/proc", wantmounts1rev, true);
     DO_TEST_MOUNT_SUBTREE("/etc/aliases", MTAB_PATH2, "/etc/aliases", wantmounts2a, false);
     DO_TEST_MOUNT_SUBTREE("/etc/aliases.db", MTAB_PATH2, "/etc/aliases.db", wantmounts2b, false);
-#endif /* ! defined HAVE_MNTENT_H && defined HAVE_GETMNTENT_R */
+#endif /* ! defined WITH_MNTENT_H && defined WITH_GETMNTENT_R */
 
 #define DO_TEST_SANITIZE_PATH(PATH, EXPECT) \
     do { \
@@ -458,12 +458,13 @@ mymain(void)
     DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/ceph/file", true);
     DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/ceph/multi/file", true);
     DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/gpfs/data", true);
+    DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/quobyte", true);
 
     return ret != 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
 #ifdef __linux__
-VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/virfilemock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("virfile"))
 #else
 VIR_TEST_MAIN(mymain)
 #endif

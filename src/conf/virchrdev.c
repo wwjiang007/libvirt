@@ -45,13 +45,12 @@ VIR_LOG_INIT("conf.chrdev");
  * open in a given domain */
 struct _virChrdevs {
     virMutex lock;
-    virHashTablePtr hash;
+    GHashTable *hash;
 };
 
 typedef struct _virChrdevStreamInfo virChrdevStreamInfo;
-typedef virChrdevStreamInfo *virChrdevStreamInfoPtr;
 struct _virChrdevStreamInfo {
-    virChrdevsPtr devs;
+    virChrdevs *devs;
     char *path;
 };
 
@@ -67,14 +66,13 @@ struct _virChrdevStreamInfo {
  */
 static char *virChrdevLockFilePath(const char *dev)
 {
-    char *path = NULL;
-    char *sanitizedPath = NULL;
-    char *devCopy;
+    g_autofree char *path = NULL;
+    g_autofree char *sanitizedPath = NULL;
+    g_autofree char *devCopy = NULL;
     char *filename;
     char *p;
 
-    if (VIR_STRDUP(devCopy, dev) < 0)
-        goto cleanup;
+    devCopy = g_strdup(dev);
 
     /* skip the leading "/dev/" */
     filename = STRSKIP(devCopy, "/dev");
@@ -89,16 +87,11 @@ static char *virChrdevLockFilePath(const char *dev)
         ++p;
     }
 
-    if (virAsprintf(&path, "%s/LCK..%s", VIR_CHRDEV_LOCK_FILE_PATH, filename) < 0)
-        goto cleanup;
+    path = g_strdup_printf("%s/LCK..%s", VIR_CHRDEV_LOCK_FILE_PATH, filename);
 
     sanitizedPath = virFileSanitizePath(path);
 
- cleanup:
-    VIR_FREE(path);
-    VIR_FREE(devCopy);
-
-    return sanitizedPath;
+    return g_steal_pointer(&sanitizedPath);
 }
 
 /**
@@ -110,15 +103,14 @@ static char *virChrdevLockFilePath(const char *dev)
  */
 static int virChrdevLockFileCreate(const char *dev)
 {
-    char *path = NULL;
-    int ret = -1;
-    int lockfd = -1;
-    char *pidStr = NULL;
+    g_autofree char *path = NULL;
+    g_autofree char *pidStr = NULL;
+    VIR_AUTOCLOSE lockfd = -1;
     pid_t pid;
 
     /* build lock file path */
     if (!(path = virChrdevLockFilePath(dev)))
-        goto cleanup;
+        return -1;
 
     /* check if a log file and process holding the lock still exists */
     if (virPidFileReadPathIfAlive(path, &pid, NULL) == 0 && pid >= 0) {
@@ -127,7 +119,7 @@ static int virChrdevLockFileCreate(const char *dev)
                        _("Requested device '%s' is locked by "
                          "lock file '%s' held by process %lld"),
                        dev, path, (long long) pid);
-        goto cleanup;
+        return -1;
     } else {
         /* clean up the stale/corrupted/nonexistent lockfile */
         unlink(path);
@@ -135,9 +127,8 @@ static int virChrdevLockFileCreate(const char *dev)
     /* lockfile doesn't (shouldn't) exist */
 
     /* ensure correct format according to filesystem hierarchy standard */
-    /* http://www.pathname.com/fhs/pub/fhs-2.3.html#VARLOCKLOCKFILES */
-    if (virAsprintf(&pidStr, "%10lld\n", (long long) getpid()) < 0)
-        goto cleanup;
+    /* https://www.pathname.com/fhs/pub/fhs-2.3.html#VARLOCKLOCKFILES */
+    pidStr = g_strdup_printf("%10lld\n", (long long)getpid());
 
     /* create the lock file */
     if ((lockfd = open(path, O_WRONLY | O_CREAT | O_EXCL, 00644)) < 0) {
@@ -149,14 +140,13 @@ static int virChrdevLockFileCreate(const char *dev)
         if (errno == EACCES && geteuid() != 0) {
             VIR_DEBUG("Skipping lock file creation for device '%s in path '%s'.",
                       dev, path);
-            ret = 0;
-            goto cleanup;
+            return 0;
         }
         virReportSystemError(errno,
                              _("Couldn't create lock file for "
                                "device '%s' in path '%s'"),
                              dev, path);
-        goto cleanup;
+        return -1;
     }
 
     /* write the pid to the file */
@@ -165,20 +155,12 @@ static int virChrdevLockFileCreate(const char *dev)
                              _("Couldn't write to lock file for "
                                "device '%s' in path '%s'"),
                              dev, path);
-        VIR_FORCE_CLOSE(lockfd);
         unlink(path);
-        goto cleanup;
+        return -1;
     }
 
     /* we hold the lock */
-    ret = 0;
-
- cleanup:
-    VIR_FORCE_CLOSE(lockfd);
-    VIR_FREE(path);
-    VIR_FREE(pidStr);
-
-    return ret;
+    return 0;
 }
 
 /**
@@ -188,41 +170,47 @@ static int virChrdevLockFileCreate(const char *dev)
  */
 static void virChrdevLockFileRemove(const char *dev)
 {
-    char *path = virChrdevLockFilePath(dev);
-    if (path)
-        unlink(path);
-    VIR_FREE(path);
+    g_autofree char *path = virChrdevLockFilePath(dev);
+    unlink(path);
 }
 #else /* #ifdef VIR_CHRDEV_LOCK_FILE_PATH */
 /* file locking for character devices is disabled */
-static int virChrdevLockFileCreate(const char *dev ATTRIBUTE_UNUSED)
+static int virChrdevLockFileCreate(const char *dev G_GNUC_UNUSED)
 {
     return 0;
 }
 
-static void virChrdevLockFileRemove(const char *dev ATTRIBUTE_UNUSED)
+static void virChrdevLockFileRemove(const char *dev G_GNUC_UNUSED)
 {
     return;
 }
 #endif /* #ifdef VIR_CHRDEV_LOCK_FILE_PATH */
 
+typedef struct {
+    char *dev;
+    virStreamPtr st;
+} virChrdevHashEntry;
+
 /**
  * Frees an entry from the hash containing domain's active devices
  *
  * @data Opaque data, struct holding information about the device
- * @name Path of the device.
  */
-static void virChrdevHashEntryFree(void *data,
-                                    const void *name)
+static void virChrdevHashEntryFree(void *data)
 {
-    const char *dev = name;
-    virStreamPtr st = data;
+    virChrdevHashEntry *ent = data;
+
+    if (!ent)
+        return;
 
     /* free stream reference */
-    virObjectUnref(st);
+    virObjectUnref(ent->st);
 
     /* delete lock file */
-    virChrdevLockFileRemove(dev);
+    virChrdevLockFileRemove(ent->dev);
+
+    g_free(ent->dev);
+    g_free(ent);
 }
 
 /**
@@ -232,10 +220,10 @@ static void virChrdevHashEntryFree(void *data,
  */
 static void virChrdevFDStreamCloseCbFree(void *opaque)
 {
-    virChrdevStreamInfoPtr priv = opaque;
+    virChrdevStreamInfo *priv = opaque;
 
-    VIR_FREE(priv->path);
-    VIR_FREE(priv);
+    g_free(priv->path);
+    g_free(priv);
 }
 
 /**
@@ -245,10 +233,10 @@ static void virChrdevFDStreamCloseCbFree(void *opaque)
  * @st Pointer to stream being closed.
  * @opaque Domain's device information structure.
  */
-static void virChrdevFDStreamCloseCb(virStreamPtr st ATTRIBUTE_UNUSED,
+static void virChrdevFDStreamCloseCb(virStreamPtr st G_GNUC_UNUSED,
                                       void *opaque)
 {
-    virChrdevStreamInfoPtr priv = opaque;
+    virChrdevStreamInfo *priv = opaque;
     virMutexLock(&priv->devs->lock);
 
     /* remove entry from hash */
@@ -263,11 +251,10 @@ static void virChrdevFDStreamCloseCb(virStreamPtr st ATTRIBUTE_UNUSED,
  *
  * Returns pointer to the allocated structure or NULL on error
  */
-virChrdevsPtr virChrdevAlloc(void)
+virChrdevs *virChrdevAlloc(void)
 {
-    virChrdevsPtr devs;
-    if (VIR_ALLOC(devs) < 0)
-        return NULL;
+    virChrdevs *devs;
+    devs = g_new0(virChrdevs, 1);
 
     if (virMutexInit(&devs->lock) < 0) {
         virReportSystemError(errno, "%s",
@@ -278,7 +265,7 @@ virChrdevsPtr virChrdevAlloc(void)
 
     /* there will hardly be any devices most of the time, the hash
      * does not have to be huge */
-    if (!(devs->hash = virHashCreate(3, virChrdevHashEntryFree)))
+    if (!(devs->hash = virHashNew(virChrdevHashEntryFree)))
         goto error;
 
     return devs;
@@ -291,12 +278,12 @@ virChrdevsPtr virChrdevAlloc(void)
  * Helper to clear stream callbacks when freeing the hash
  */
 static int virChrdevFreeClearCallbacks(void *payload,
-                                       const void *name ATTRIBUTE_UNUSED,
-                                       void *data ATTRIBUTE_UNUSED)
+                                       const char *name G_GNUC_UNUSED,
+                                       void *data G_GNUC_UNUSED)
 {
-    virStreamPtr st = payload;
+    virChrdevHashEntry *ent = payload;
 
-    virFDStreamSetInternalCloseCb(st, NULL, NULL, NULL);
+    virFDStreamSetInternalCloseCb(ent->st, NULL, NULL, NULL);
     return 0;
 }
 
@@ -305,18 +292,18 @@ static int virChrdevFreeClearCallbacks(void *payload,
  *
  * @devs Pointer to the private structure.
  */
-void virChrdevFree(virChrdevsPtr devs)
+void virChrdevFree(virChrdevs *devs)
 {
-    if (!devs || !devs->hash)
+    if (!devs)
         return;
 
     virMutexLock(&devs->lock);
-    virHashForEach(devs->hash, virChrdevFreeClearCallbacks, NULL);
+    virHashForEachSafe(devs->hash, virChrdevFreeClearCallbacks, NULL);
     virHashFree(devs->hash);
     virMutexUnlock(&devs->lock);
     virMutexDestroy(&devs->lock);
 
-    VIR_FREE(devs);
+    g_free(devs);
 }
 
 /**
@@ -335,13 +322,13 @@ void virChrdevFree(virChrdevsPtr devs)
  * corresponding lock file is created (if configured). Returns -1 on
  * error and 1 if the device stream is open and busy.
  */
-int virChrdevOpen(virChrdevsPtr devs,
-                  virDomainChrSourceDefPtr source,
+int virChrdevOpen(virChrdevs *devs,
+                  virDomainChrSourceDef *source,
                   virStreamPtr st,
                   bool force)
 {
-    virChrdevStreamInfoPtr cbdata = NULL;
-    virStreamPtr savedStream;
+    virChrdevStreamInfo *cbdata = NULL;
+    virChrdevHashEntry *ent;
     char *path;
     int ret;
     bool added = false;
@@ -367,7 +354,7 @@ int virChrdevOpen(virChrdevsPtr devs,
 
     virMutexLock(&devs->lock);
 
-    if ((savedStream = virHashLookup(devs->hash, path))) {
+    if ((ent = virHashLookup(devs->hash, path))) {
         if (!force) {
              /* entry found, device is busy */
             virMutexUnlock(&devs->lock);
@@ -380,8 +367,8 @@ int virChrdevOpen(virChrdevsPtr devs,
             * same thread. We need to unregister the callback and abort the
             * stream manually before we create a new device connection.
             */
-           virFDStreamSetInternalCloseCb(savedStream, NULL, NULL, NULL);
-           virStreamAbort(savedStream);
+           virFDStreamSetInternalCloseCb(ent->st, NULL, NULL, NULL);
+           virStreamAbort(ent->st);
            virHashRemoveEntry(devs->hash, path);
            /* continue adding a new stream connection */
        }
@@ -399,16 +386,19 @@ int virChrdevOpen(virChrdevsPtr devs,
         return -1;
     }
 
-    if (VIR_ALLOC(cbdata) < 0)
-        goto error;
+    cbdata = g_new0(virChrdevStreamInfo, 1);
+    ent = g_new0(virChrdevHashEntry, 1);
 
-    if (virHashAddEntry(devs->hash, path, st) < 0)
+    ent->st = st;
+    ent->dev = g_strdup(path);
+
+    if (virHashAddEntry(devs->hash, path, ent) < 0)
         goto error;
+    ent = NULL;
     added = true;
 
     cbdata->devs = devs;
-    if (VIR_STRDUP(cbdata->path, path) < 0)
-        goto error;
+    cbdata->path = g_strdup(path);
 
     /* open the character device */
     switch (source->type) {
@@ -446,5 +436,6 @@ int virChrdevOpen(virChrdevsPtr devs,
         VIR_FREE(cbdata->path);
     VIR_FREE(cbdata);
     virMutexUnlock(&devs->lock);
+    virChrdevHashEntryFree(ent);
     return -1;
 }

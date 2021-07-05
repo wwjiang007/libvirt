@@ -18,39 +18,35 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_LIBXL_CAPABILITIES_H
-# define LIBVIRT_LIBXL_CAPABILITIES_H
+#pragma once
 
-# include <libxl.h>
+#include <libxl.h>
 
-# include "virobject.h"
-# include "capabilities.h"
-# include "domain_capabilities.h"
-# include "virfirmware.h"
+#include "virobject.h"
+#include "capabilities.h"
+#include "domain_capabilities.h"
+#include "virfirmware.h"
 
 
-# ifndef LIBXL_FIRMWARE_DIR
-#  define LIBXL_FIRMWARE_DIR "/usr/lib/xen/boot"
-# endif
-# ifndef LIBXL_EXECBIN_DIR
-#  define LIBXL_EXECBIN_DIR "/usr/lib/xen/bin"
-# endif
+#ifndef LIBXL_FIRMWARE_DIR
+# define LIBXL_FIRMWARE_DIR "/usr/lib/xen/boot"
+#endif
+#ifndef LIBXL_EXECBIN_DIR
+# define LIBXL_EXECBIN_DIR "/usr/lib/xen/bin"
+#endif
 
 /* Used for prefix of ifname of any network name generated dynamically
  * by libvirt for Xen, and cannot be used for a persistent network name.  */
-# define LIBXL_GENERATED_PREFIX_XEN "vif"
+#define LIBXL_GENERATED_PREFIX_XEN "vif"
 
-bool libxlCapsHasPVUSB(void);
-
-virCapsPtr
+virCaps *
 libxlMakeCapabilities(libxl_ctx *ctx);
 
 int
-libxlMakeDomainCapabilities(virDomainCapsPtr domCaps,
-                            virFirmwarePtr *firmwares,
+libxlMakeDomainCapabilities(virDomainCaps *domCaps,
+                            virFirmware **firmwares,
                             size_t nfirmwares);
 
 int
-libxlDomainGetEmulatorType(const virDomainDef *def);
-
-#endif /* LIBVIRT_LIBXL_CAPABILITIES_H */
+libxlDomainGetEmulatorType(const virDomainDef *def)
+    G_GNUC_NO_INLINE;

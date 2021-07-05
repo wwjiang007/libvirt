@@ -30,12 +30,12 @@
 #define VIR_FROM_THIS VIR_FROM_VBOX
 VIR_LOG_INIT("vbox.vbox_snapshot_conf");
 
-static virVBoxSnapshotConfHardDiskPtr
+static virVBoxSnapshotConfHardDisk *
 virVBoxSnapshotConfCreateVBoxSnapshotConfHardDiskPtr(xmlNodePtr diskNode,
                                                      xmlXPathContextPtr xPathContext,
                                                      const char *machineLocation)
 {
-    virVBoxSnapshotConfHardDiskPtr hardDisk = NULL;
+    virVBoxSnapshotConfHardDisk *hardDisk = NULL;
     xmlNodePtr *nodes = NULL;
     char *uuid = NULL;
     char **searchTabResult = NULL;
@@ -45,8 +45,8 @@ virVBoxSnapshotConfCreateVBoxSnapshotConfHardDiskPtr(xmlNodePtr diskNode,
     char *location = NULL;
     char *tmp = NULL;
     int n = 0;
-    if (VIR_ALLOC(hardDisk) < 0)
-        goto cleanup;
+
+    hardDisk = g_new0(virVBoxSnapshotConfHardDisk, 1);
 
     xPathContext->node = diskNode;
 
@@ -54,8 +54,8 @@ virVBoxSnapshotConfCreateVBoxSnapshotConfHardDiskPtr(xmlNodePtr diskNode,
     if (n < 0)
         goto cleanup;
 
-    if (n && VIR_ALLOC_N(hardDisk->children, n) < 0)
-        goto cleanup;
+    if (n)
+        hardDisk->children = g_new0(virVBoxSnapshotConfHardDisk *, n);
     hardDisk->nchildren = n;
     for (i = 0; i < hardDisk->nchildren; i++) {
         hardDisk->children[i] = virVBoxSnapshotConfCreateVBoxSnapshotConfHardDiskPtr(nodes[i], xPathContext, machineLocation);
@@ -64,7 +64,7 @@ virVBoxSnapshotConfCreateVBoxSnapshotConfHardDiskPtr(xmlNodePtr diskNode,
         hardDisk->children[i]->parent = hardDisk;
     }
     uuid = virXMLPropString(diskNode, "uuid");
-    /*we use virStringSearch because the uuid is between brackets*/
+    /* we use virStringSearch because the uuid is between brackets */
     resultSize = virStringSearch(uuid,
                                  VBOX_UUID_REGEX,
                                  1,
@@ -74,8 +74,7 @@ virVBoxSnapshotConfCreateVBoxSnapshotConfHardDiskPtr(xmlNodePtr diskNode,
                        _("Cannot parse <HardDisk> 'uuid' attribute"));
         goto cleanup;
     }
-    if (VIR_STRDUP(hardDisk->uuid, searchTabResult[0]) < 0)
-        goto cleanup;
+    hardDisk->uuid = g_strdup(searchTabResult[0]);
 
     location = virXMLPropString(diskNode, "location");
     if (location == NULL) {
@@ -83,15 +82,12 @@ virVBoxSnapshotConfCreateVBoxSnapshotConfHardDiskPtr(xmlNodePtr diskNode,
                        _("Cannot parse <HardDisk> 'location' attribute"));
         goto cleanup;
     }
-    if (location[0] != '/') {
-        /*The location is a relative path, so we must change it into an absolute one. */
-        if (virAsprintf(&tmp, "%s%s", machineLocation, location) < 0)
-            goto cleanup;
-        if (VIR_STRDUP(hardDisk->location, tmp) < 0)
-            goto cleanup;
+    if (!g_path_is_absolute(location)) {
+        /* The location is a relative path, so we must change it into an absolute one. */
+        tmp = g_strdup_printf("%s%s", machineLocation, location);
+        hardDisk->location = g_strdup(tmp);
     } else {
-        if (VIR_STRDUP(hardDisk->location, location) < 0)
-            goto cleanup;
+        hardDisk->location = g_strdup(location);
     }
     hardDisk->format = virXMLPropString(diskNode, "format");
     if (hardDisk->format == NULL) {
@@ -107,7 +103,7 @@ virVBoxSnapshotConfCreateVBoxSnapshotConfHardDiskPtr(xmlNodePtr diskNode,
     VIR_FREE(nodes);
     VIR_FREE(location);
     VIR_FREE(tmp);
-    virStringListFree(searchTabResult);
+    g_strfreev(searchTabResult);
     if (result < 0) {
         virVboxSnapshotConfHardDiskFree(hardDisk);
         hardDisk = NULL;
@@ -115,20 +111,19 @@ virVBoxSnapshotConfCreateVBoxSnapshotConfHardDiskPtr(xmlNodePtr diskNode,
     return hardDisk;
 }
 
-static virVBoxSnapshotConfMediaRegistryPtr
+static virVBoxSnapshotConfMediaRegistry *
 virVBoxSnapshotConfRetrieveMediaRegistry(xmlNodePtr mediaRegistryNode,
                                          xmlXPathContextPtr xPathContext,
                                          const char *machineLocation)
 {
-    virVBoxSnapshotConfMediaRegistryPtr mediaRegistry = NULL;
+    virVBoxSnapshotConfMediaRegistry *mediaRegistry = NULL;
     xmlNodePtr hardDisksNode = NULL;
     xmlNodePtr *nodes = NULL;
     size_t i = 0;
     int result = -1;
     int n = 0;
 
-    if (VIR_ALLOC(mediaRegistry) < 0)
-        goto cleanup;
+    mediaRegistry = g_new0(virVBoxSnapshotConfMediaRegistry, 1);
 
     xPathContext->node = mediaRegistryNode;
     hardDisksNode = virXPathNode("./vbox:HardDisks", xPathContext);
@@ -137,8 +132,8 @@ virVBoxSnapshotConfRetrieveMediaRegistry(xmlNodePtr mediaRegistryNode,
     n = virXPathNodeSet("./vbox:HardDisk", xPathContext, &nodes);
     if (n < 0)
         goto cleanup;
-    if (n && VIR_ALLOC_N(mediaRegistry->disks, n) < 0)
-        goto cleanup;
+    if (n)
+        mediaRegistry->disks = g_new0(virVBoxSnapshotConfHardDisk *, n);
     mediaRegistry->ndisks = n;
     for (i = 0; i < mediaRegistry->ndisks; i++) {
         mediaRegistry->disks[i] = virVBoxSnapshotConfCreateVBoxSnapshotConfHardDiskPtr(nodes[i],
@@ -158,8 +153,9 @@ virVBoxSnapshotConfRetrieveMediaRegistry(xmlNodePtr mediaRegistryNode,
                                                  xPathContext, &nodes);
     if (n < 0)
         goto cleanup;
-    if (n && VIR_ALLOC_N(mediaRegistry->otherMedia, n) < 0)
-        goto cleanup;
+    if (n)
+        mediaRegistry->otherMedia = g_new0(char *, n);
+
     mediaRegistry->notherMedia = n;
     for (i = 0; i < mediaRegistry->notherMedia; i++) {
         mediaRegistry->otherMedia[i] = virXMLNodeToString(mediaRegistryNode->doc,
@@ -177,11 +173,11 @@ virVBoxSnapshotConfRetrieveMediaRegistry(xmlNodePtr mediaRegistryNode,
     return mediaRegistry;
 }
 
-static virVBoxSnapshotConfSnapshotPtr
+static virVBoxSnapshotConfSnapshot *
 virVBoxSnapshotConfRetrieveSnapshot(xmlNodePtr snapshotNode,
                                     xmlXPathContextPtr xPathContext)
 {
-    virVBoxSnapshotConfSnapshotPtr snapshot = NULL;
+    virVBoxSnapshotConfSnapshot *snapshot = NULL;
     xmlNodePtr hardwareNode = NULL;
     xmlNodePtr descriptionNode = NULL;
     xmlNodePtr storageControllerNode = NULL;
@@ -194,11 +190,10 @@ virVBoxSnapshotConfRetrieveSnapshot(xmlNodePtr snapshotNode,
     int result = -1;
     int n = 0;
 
-    if (VIR_ALLOC(snapshot) < 0)
-        goto cleanup;
+    snapshot = g_new0(virVBoxSnapshotConfSnapshot, 1);
 
     uuid = virXMLPropString(snapshotNode, "uuid");
-    /*we use virStringSearch because the uuid is between brackets*/
+    /* we use virStringSearch because the uuid is between brackets */
     resultSize = virStringSearch(uuid,
                                  VBOX_UUID_REGEX,
                                  1,
@@ -208,8 +203,7 @@ virVBoxSnapshotConfRetrieveSnapshot(xmlNodePtr snapshotNode,
                        _("Cannot parse <Snapshot> 'uuid' attribute"));
         goto cleanup;
     }
-    if (VIR_STRDUP(snapshot->uuid, searchTabResult[0]) < 0)
-        goto cleanup;
+    snapshot->uuid = g_strdup(searchTabResult[0]);
 
     snapshot->name = virXMLPropString(snapshotNode, "name");
     if (snapshot->name == NULL) {
@@ -253,8 +247,8 @@ virVBoxSnapshotConfRetrieveSnapshot(xmlNodePtr snapshotNode,
         n = virXPathNodeSet("./vbox:Snapshot", xPathContext, &nodes);
         if (n < 0)
             goto cleanup;
-        if (n && VIR_ALLOC_N(snapshot->children, n) < 0)
-            goto cleanup;
+        if (n)
+            snapshot->children = g_new0(virVBoxSnapshotConfSnapshot *, n);
         snapshot->nchildren = n;
         for (i = 0; i < snapshot->nchildren; i++) {
             snapshot->children[i] = virVBoxSnapshotConfRetrieveSnapshot(nodes[i], xPathContext);
@@ -276,16 +270,16 @@ virVBoxSnapshotConfRetrieveSnapshot(xmlNodePtr snapshotNode,
     }
     VIR_FREE(nodes);
     VIR_FREE(uuid);
-    virStringListFree(searchTabResult);
+    g_strfreev(searchTabResult);
     return snapshot;
 }
 
-virVBoxSnapshotConfSnapshotPtr
-virVBoxSnapshotConfSnapshotByName(virVBoxSnapshotConfSnapshotPtr snapshot,
+virVBoxSnapshotConfSnapshot *
+virVBoxSnapshotConfSnapshotByName(virVBoxSnapshotConfSnapshot *snapshot,
                                   const char *snapshotName)
 {
     size_t i = 0;
-    virVBoxSnapshotConfSnapshotPtr ret = NULL;
+    virVBoxSnapshotConfSnapshot *ret = NULL;
     if (STREQ(snapshot->name, snapshotName))
         return snapshot;
     for (i = 0; i < snapshot->nchildren; i++) {
@@ -296,12 +290,12 @@ virVBoxSnapshotConfSnapshotByName(virVBoxSnapshotConfSnapshotPtr snapshot,
     return ret;
 }
 
-static virVBoxSnapshotConfHardDiskPtr
-virVBoxSnapshotConfHardDiskById(virVBoxSnapshotConfHardDiskPtr disk,
+static virVBoxSnapshotConfHardDisk *
+virVBoxSnapshotConfHardDiskById(virVBoxSnapshotConfHardDisk *disk,
                                 const char *parentHardDiskId)
 {
     size_t i = 0;
-    virVBoxSnapshotConfHardDiskPtr ret = NULL;
+    virVBoxSnapshotConfHardDisk *ret = NULL;
     if (STREQ(disk->uuid, parentHardDiskId))
         return disk;
     for (i = 0; i < disk->nchildren; i++) {
@@ -312,12 +306,12 @@ virVBoxSnapshotConfHardDiskById(virVBoxSnapshotConfHardDiskPtr disk,
     return ret;
 }
 
-static virVBoxSnapshotConfHardDiskPtr
-virVBoxSnapshotConfHardDiskByLocation(virVBoxSnapshotConfHardDiskPtr disk,
+static virVBoxSnapshotConfHardDisk *
+virVBoxSnapshotConfHardDiskByLocation(virVBoxSnapshotConfHardDisk *disk,
                                       const char *parentLocation)
 {
     size_t i = 0;
-    virVBoxSnapshotConfHardDiskPtr ret = NULL;
+    virVBoxSnapshotConfHardDisk *ret = NULL;
     if (STREQ(disk->location, parentLocation))
         return disk;
     for (i = 0; i < disk->nchildren; i++) {
@@ -329,14 +323,13 @@ virVBoxSnapshotConfHardDiskByLocation(virVBoxSnapshotConfHardDiskPtr disk,
 }
 
 static xmlNodePtr
-virVBoxSnapshotConfCreateHardDiskNode(virVBoxSnapshotConfHardDiskPtr hardDisk)
+virVBoxSnapshotConfCreateHardDiskNode(virVBoxSnapshotConfHardDisk *hardDisk)
 {
     int result = -1;
     size_t i = 0;
     char *uuid = NULL;
-    xmlNodePtr ret = xmlNewNode(NULL, BAD_CAST "HardDisk");
-    if (virAsprintf(&uuid, "{%s}", hardDisk->uuid) < 0)
-        goto cleanup;
+    xmlNodePtr ret = virXMLNewNode(NULL, "HardDisk");
+    uuid = g_strdup_printf("{%s}", hardDisk->uuid);
 
     if (xmlNewProp(ret, BAD_CAST "uuid", BAD_CAST uuid) == NULL)
         goto cleanup;
@@ -358,6 +351,7 @@ virVBoxSnapshotConfCreateHardDiskNode(virVBoxSnapshotConfHardDiskPtr hardDisk)
     if (result < 0) {
         xmlUnlinkNode(ret);
         xmlFreeNode(ret);
+        ret = NULL;
     }
     VIR_FREE(uuid);
     return ret;
@@ -365,7 +359,7 @@ virVBoxSnapshotConfCreateHardDiskNode(virVBoxSnapshotConfHardDiskPtr hardDisk)
 
 static int
 virVBoxSnapshotConfSerializeSnapshot(xmlNodePtr node,
-                                     virVBoxSnapshotConfSnapshotPtr snapshot)
+                                     virVBoxSnapshotConfSnapshot *snapshot)
 {
     int result = -1;
     size_t i = 0;
@@ -382,8 +376,7 @@ virVBoxSnapshotConfSerializeSnapshot(xmlNodePtr node,
     char **secondRegex = NULL;
     int secondRegexResult = 0;
 
-    if (virAsprintf(&uuid, "{%s}", snapshot->uuid) < 0)
-        goto cleanup;
+    uuid = g_strdup_printf("{%s}", snapshot->uuid);
 
     if (xmlNewProp(node, BAD_CAST "uuid", BAD_CAST uuid) == NULL)
         goto cleanup;
@@ -391,7 +384,7 @@ virVBoxSnapshotConfSerializeSnapshot(xmlNodePtr node,
         goto cleanup;
 
     /* We change the date format from "yyyy-MM-dd hh:mm:ss.msec+timeZone"
-     * to "yyyy-MM-ddThh:mm:ssZ"*/
+     * to "yyyy-MM-ddThh:mm:ssZ" */
     firstRegexResult = virStringSearch(snapshot->timeStamp,
                                        "([0-9]{4}-[0-9]{2}-[0-9]{2})",
                                        1,
@@ -404,19 +397,18 @@ virVBoxSnapshotConfSerializeSnapshot(xmlNodePtr node,
         goto cleanup;
     if (secondRegexResult < 1)
         goto cleanup;
-    if (virAsprintf(&timeStamp, "%sT%sZ", firstRegex[0], secondRegex[0]) < 0)
-        goto cleanup;
+    timeStamp = g_strdup_printf("%sT%sZ", firstRegex[0], secondRegex[0]);
 
     if (xmlNewProp(node, BAD_CAST "timeStamp", BAD_CAST timeStamp) == NULL)
         goto cleanup;
 
-    /*node description*/
+    /* node description */
     if (snapshot->description != NULL) {
-        descriptionNode = xmlNewNode(NULL, BAD_CAST "Description");
+        descriptionNode = virXMLNewNode(NULL, "Description");
         xmlNodeSetContent(descriptionNode, BAD_CAST snapshot->description);
         xmlAddChild(node, descriptionNode);
     }
-    /*hardware*/
+    /* hardware */
     parseError = xmlParseInNodeContext(node,
                                        snapshot->hardware,
                                        (int)strlen(snapshot->hardware),
@@ -429,7 +421,7 @@ virVBoxSnapshotConfSerializeSnapshot(xmlNodePtr node,
     }
     xmlAddChild(node, hardwareNode);
 
-    /*storageController*/
+    /* storageController */
     if (xmlParseInNodeContext(node, snapshot->storageController,
                               (int)strlen(snapshot->storageController),
                               0,
@@ -441,10 +433,10 @@ virVBoxSnapshotConfSerializeSnapshot(xmlNodePtr node,
     xmlAddChild(node, storageControllerNode);
 
     if (snapshot->nchildren > 0) {
-        snapshotsNode = xmlNewNode(NULL, BAD_CAST "Snapshots");
+        snapshotsNode = virXMLNewNode(NULL, "Snapshots");
         xmlAddChild(node, snapshotsNode);
         for (i = 0; i < snapshot->nchildren; i++) {
-            xmlNodePtr child = xmlNewNode(NULL, BAD_CAST "Snapshot");
+            xmlNodePtr child = virXMLNewNode(NULL, "Snapshot");
             xmlAddChild(snapshotsNode, child);
             if (virVBoxSnapshotConfSerializeSnapshot(child, snapshot->children[i]) < 0)
                 goto cleanup;
@@ -458,31 +450,29 @@ virVBoxSnapshotConfSerializeSnapshot(xmlNodePtr node,
         xmlUnlinkNode(snapshotsNode);
         xmlFreeNode(snapshotsNode);
     }
-    virStringListFree(firstRegex);
-    virStringListFree(secondRegex);
+    g_strfreev(firstRegex);
+    g_strfreev(secondRegex);
     VIR_FREE(uuid);
     VIR_FREE(timeStamp);
     return result;
 }
 
 static size_t
-virVBoxSnapshotConfAllChildren(virVBoxSnapshotConfHardDiskPtr disk,
-                               virVBoxSnapshotConfHardDiskPtr **list)
+virVBoxSnapshotConfAllChildren(virVBoxSnapshotConfHardDisk *disk,
+                               virVBoxSnapshotConfHardDisk ***list)
 {
     size_t returnSize = 0;
     size_t tempSize = 0;
-    virVBoxSnapshotConfHardDiskPtr *ret = NULL;
-    virVBoxSnapshotConfHardDiskPtr *tempList = NULL;
+    virVBoxSnapshotConfHardDisk **ret = NULL;
+    virVBoxSnapshotConfHardDisk **tempList = NULL;
     size_t i = 0;
     size_t j = 0;
 
-    if (VIR_ALLOC_N(ret, 0) < 0)
-        return 0;
+    ret = g_new0(virVBoxSnapshotConfHardDisk *, 0);
 
     for (i = 0; i < disk->nchildren; i++) {
         tempSize = virVBoxSnapshotConfAllChildren(disk->children[i], &tempList);
-        if (VIR_EXPAND_N(ret, returnSize, tempSize) < 0)
-            goto error;
+        VIR_EXPAND_N(ret, returnSize, tempSize);
 
         for (j = 0; j < tempSize; j++)
             ret[returnSize - tempSize + j] = tempList[j];
@@ -490,40 +480,33 @@ virVBoxSnapshotConfAllChildren(virVBoxSnapshotConfHardDiskPtr disk,
         VIR_FREE(tempList);
     }
 
-    if (VIR_EXPAND_N(ret, returnSize, 1) < 0)
-        goto error;
-
+    VIR_EXPAND_N(ret, returnSize, 1);
     ret[returnSize - 1] = disk;
     *list = ret;
     return returnSize;
-
- error:
-    VIR_FREE(tempList);
-    VIR_FREE(ret);
-    return 0;
 }
 
 void
-virVboxSnapshotConfHardDiskFree(virVBoxSnapshotConfHardDiskPtr disk)
+virVboxSnapshotConfHardDiskFree(virVBoxSnapshotConfHardDisk *disk)
 {
     size_t i = 0;
 
     if (!disk)
         return;
 
-    VIR_FREE(disk->uuid);
-    VIR_FREE(disk->location);
-    VIR_FREE(disk->format);
-    VIR_FREE(disk->type);
+    g_free(disk->uuid);
+    g_free(disk->location);
+    g_free(disk->format);
+    g_free(disk->type);
     for (i = 0; i < disk->nchildren; i++)
         virVboxSnapshotConfHardDiskFree(disk->children[i]);
-    VIR_FREE(disk->children);
-    VIR_FREE(disk);
+    g_free(disk->children);
+    g_free(disk);
 }
 
 
 void
-virVBoxSnapshotConfMediaRegistryFree(virVBoxSnapshotConfMediaRegistryPtr mediaRegistry)
+virVBoxSnapshotConfMediaRegistryFree(virVBoxSnapshotConfMediaRegistry *mediaRegistry)
 {
     size_t i = 0;
 
@@ -532,51 +515,53 @@ virVBoxSnapshotConfMediaRegistryFree(virVBoxSnapshotConfMediaRegistryPtr mediaRe
 
     for (i = 0; i < mediaRegistry->ndisks; i++)
         virVboxSnapshotConfHardDiskFree(mediaRegistry->disks[i]);
-    VIR_FREE(mediaRegistry->disks);
+    g_free(mediaRegistry->disks);
     for (i = 0; i < mediaRegistry->notherMedia; i++)
-        VIR_FREE(mediaRegistry->otherMedia[i]);
-    VIR_FREE(mediaRegistry->otherMedia);
-    VIR_FREE(mediaRegistry);
+        g_free(mediaRegistry->otherMedia[i]);
+    g_free(mediaRegistry->otherMedia);
+    g_free(mediaRegistry);
 }
 
 void
-virVBoxSnapshotConfSnapshotFree(virVBoxSnapshotConfSnapshotPtr snapshot)
+virVBoxSnapshotConfSnapshotFree(virVBoxSnapshotConfSnapshot *snapshot)
 {
     size_t i = 0;
 
     if (!snapshot)
         return;
 
-    VIR_FREE(snapshot->uuid);
-    VIR_FREE(snapshot->name);
-    VIR_FREE(snapshot->timeStamp);
-    VIR_FREE(snapshot->description);
-    VIR_FREE(snapshot->hardware);
-    VIR_FREE(snapshot->storageController);
+    g_free(snapshot->uuid);
+    g_free(snapshot->name);
+    g_free(snapshot->timeStamp);
+    g_free(snapshot->description);
+    g_free(snapshot->hardware);
+    g_free(snapshot->storageController);
     for (i = 0; i < snapshot->nchildren; i++)
         virVBoxSnapshotConfSnapshotFree(snapshot->children[i]);
-    VIR_FREE(snapshot->children);
-    VIR_FREE(snapshot);
+    g_free(snapshot->children);
+    g_free(snapshot);
 }
 
 void
-virVBoxSnapshotConfMachineFree(virVBoxSnapshotConfMachinePtr machine)
+virVBoxSnapshotConfMachineFree(virVBoxSnapshotConfMachine *machine)
 {
     if (!machine)
         return;
 
-    VIR_FREE(machine->uuid);
-    VIR_FREE(machine->name);
-    VIR_FREE(machine->currentSnapshot);
-    VIR_FREE(machine->snapshotFolder);
-    VIR_FREE(machine->lastStateChange);
+    g_free(machine->uuid);
+    g_free(machine->name);
+    g_free(machine->currentSnapshot);
+    g_free(machine->snapshotFolder);
+    g_free(machine->lastStateChange);
     virVBoxSnapshotConfMediaRegistryFree(machine->mediaRegistry);
-    VIR_FREE(machine->hardware);
-    VIR_FREE(machine->extraData);
+    g_free(machine->hardware);
+    g_free(machine->extraData);
     virVBoxSnapshotConfSnapshotFree(machine->snapshot);
-    VIR_FREE(machine->storageController);
-    VIR_FREE(machine);
+    g_free(machine->storageController);
+    g_free(machine);
 }
+
+#define VBOX_SETTINGS_NS "http://www.innotek.de/VirtualBox-settings"
 
 /*
  *vboxSnapshotLoadVboxFile: Create a vboxSnapshotXmlMachinePtr from a VirtualBoxl xml file.
@@ -584,12 +569,12 @@ virVBoxSnapshotConfMachineFree(virVBoxSnapshotConfMachinePtr machine)
  *return NULL on failure
  *filePath must not be NULL.
  */
-virVBoxSnapshotConfMachinePtr
+virVBoxSnapshotConfMachine *
 virVBoxSnapshotConfLoadVboxFile(const char *filePath,
                                 const char *machineLocation)
 {
     int ret = -1;
-    virVBoxSnapshotConfMachinePtr machineDescription = NULL;
+    virVBoxSnapshotConfMachine *machineDescription = NULL;
     xmlDocPtr xml = NULL;
     xmlNodePtr machineNode = NULL;
     xmlNodePtr cur = NULL;
@@ -606,8 +591,7 @@ virVBoxSnapshotConfLoadVboxFile(const char *filePath,
         goto cleanup;
     }
 
-    if (VIR_ALLOC(machineDescription) < 0)
-        goto cleanup;
+    machineDescription = g_new0(virVBoxSnapshotConfMachine, 1);
 
     xml = virXMLParse(filePath, NULL, NULL);
     if (xml == NULL) {
@@ -615,20 +599,19 @@ virVBoxSnapshotConfLoadVboxFile(const char *filePath,
                        _("Unable to parse the xml"));
         goto cleanup;
     }
-    if (!(xPathContext = xmlXPathNewContext(xml))) {
-        virReportOOMError();
+    if (!(xPathContext = virXMLXPathContextNew(xml)))
         goto cleanup;
-    }
+
     if (xmlXPathRegisterNs(xPathContext,
                            BAD_CAST "vbox",
-                           BAD_CAST "http://www.innotek.de/VirtualBox-settings") < 0) {
-        virReportError(VIR_ERR_XML_ERROR, "%s",
-                       _("Failed to register xml namespace "
-                         "'http://www.innotek.de/VirtualBox-settings'"));
+                           BAD_CAST VBOX_SETTINGS_NS) < 0) {
+        virReportError(VIR_ERR_XML_ERROR,
+                       _("Failed to register xml namespace '%s'"),
+                       VBOX_SETTINGS_NS);
         goto cleanup;
     }
 
-    /*Retrieve MachineNode*/
+    /* Retrieve MachineNode */
     cur = xmlDocGetRootElement(xml);
     xPathContext->node = cur;
     machineNode = virXPathNode("./vbox:Machine", xPathContext);
@@ -653,7 +636,7 @@ virVBoxSnapshotConfLoadVboxFile(const char *filePath,
 
     currentSnapshotAttribute = virXMLPropString(machineNode, "currentSnapshot");
     if (currentSnapshotAttribute != NULL) {
-        /*we use virStringSearch because the uuid is between brackets*/
+        /* we use virStringSearch because the uuid is between brackets */
         searchResultSize = virStringSearch(currentSnapshotAttribute,
                                            VBOX_UUID_REGEX,
                                            1,
@@ -663,8 +646,7 @@ virVBoxSnapshotConfLoadVboxFile(const char *filePath,
                            _("Cannot parse <Machine> 'currentSnapshot' attribute"));
             goto cleanup;
         }
-        if (VIR_STRDUP(machineDescription->currentSnapshot, searchResultTab[0]) < 0)
-            goto cleanup;
+        machineDescription->currentSnapshot = g_strdup(searchResultTab[0]);
     }
 
     machineDescription->snapshotFolder = virXMLPropString(machineNode, "snapshotFolder");
@@ -708,7 +690,7 @@ virVBoxSnapshotConfLoadVboxFile(const char *filePath,
     }
     machineDescription->storageController = virXMLNodeToString(xml, cur);
 
-    /*retrieve mediaRegistry*/
+    /* retrieve mediaRegistry */
     cur = virXPathNode("./vbox:MediaRegistry", xPathContext);
     if (cur == NULL) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
@@ -722,7 +704,7 @@ virVBoxSnapshotConfLoadVboxFile(const char *filePath,
         goto cleanup;
     }
 
-    /*retrieve snapshot*/
+    /* retrieve snapshot */
     xPathContext->node = machineNode;
     cur = virXPathNode("./vbox:Snapshot", xPathContext);
     if (cur != NULL) {
@@ -739,7 +721,7 @@ virVBoxSnapshotConfLoadVboxFile(const char *filePath,
 
     VIR_FREE(currentStateModifiedString);
     VIR_FREE(currentSnapshotAttribute);
-    virStringListFree(searchResultTab);
+    g_strfreev(searchResultTab);
     if (ret < 0) {
         virVBoxSnapshotConfMachineFree(machineDescription);
         machineDescription = NULL;
@@ -755,57 +737,51 @@ virVBoxSnapshotConfLoadVboxFile(const char *filePath,
  *return -1 on failure
  */
 int
-virVBoxSnapshotConfAddSnapshotToXmlMachine(virVBoxSnapshotConfSnapshotPtr snapshot,
-                                           virVBoxSnapshotConfMachinePtr machine,
+virVBoxSnapshotConfAddSnapshotToXmlMachine(virVBoxSnapshotConfSnapshot *snapshot,
+                                           virVBoxSnapshotConfMachine *machine,
                                            const char *snapshotParentName)
 {
-    int ret = -1;
-    virVBoxSnapshotConfSnapshotPtr parentSnapshot = NULL;
+    virVBoxSnapshotConfSnapshot *parentSnapshot = NULL;
 
     if (snapshot == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Snapshot is Null"));
-        goto cleanup;
+        return -1;
     }
     if (machine == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Machine is Null"));
-        goto cleanup;
+        return -1;
     }
 
-    /*If parent is NULL and the machine has no snapshot yet,
-     *it means that the added snapshot is the first snapshot*/
+    /* If parent is NULL and the machine has no snapshot yet,
+     * it means that the added snapshot is the first snapshot */
     if (snapshotParentName == NULL) {
         if (machine->snapshot != NULL) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("Unable to add this snapshot, there is already a snapshot "
                              "linked to the machine"));
-            goto cleanup;
+            return -1;
         }
         machine->snapshot = snapshot;
-        ret = 0;
-        goto cleanup;
+        return 0;
     } else {
         if (machine->snapshot == NULL) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("The machine has no snapshot and it should have it"));
-            goto cleanup;
+            return -1;
         }
         parentSnapshot = virVBoxSnapshotConfSnapshotByName(machine->snapshot, snapshotParentName);
         if (parentSnapshot == NULL) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("Unable to find the snapshot %s"), snapshotParentName);
-            goto cleanup;
+            return -1;
         }
-        if (VIR_EXPAND_N(parentSnapshot->children, parentSnapshot->nchildren, 1) < 0)
-            goto cleanup;
-
+        VIR_EXPAND_N(parentSnapshot->children, parentSnapshot->nchildren, 1);
         parentSnapshot->children[parentSnapshot->nchildren - 1] = snapshot;
-        ret = 0;
     }
 
- cleanup:
-    return ret;
+    return 0;
 }
 
 /*
@@ -815,22 +791,21 @@ virVBoxSnapshotConfAddSnapshotToXmlMachine(virVBoxSnapshotConfSnapshotPtr snapsh
  *return -1 on failure
  */
 int
-virVBoxSnapshotConfAddHardDiskToMediaRegistry(virVBoxSnapshotConfHardDiskPtr hardDisk,
-                                              virVBoxSnapshotConfMediaRegistryPtr mediaRegistry,
+virVBoxSnapshotConfAddHardDiskToMediaRegistry(virVBoxSnapshotConfHardDisk *hardDisk,
+                                              virVBoxSnapshotConfMediaRegistry *mediaRegistry,
                                               const char *parentHardDiskId)
 {
-    int ret = -1;
     size_t i = 0;
-    virVBoxSnapshotConfHardDiskPtr parentDisk = NULL;
+    virVBoxSnapshotConfHardDisk *parentDisk = NULL;
     if (hardDisk == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Hard disk is null"));
-        goto cleanup;
+        return -1;
     }
     if (mediaRegistry == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Media Registry is null"));
-        goto cleanup;
+        return -1;
     }
 
     for (i = 0; i < mediaRegistry->ndisks; i++) {
@@ -841,19 +816,15 @@ virVBoxSnapshotConfAddHardDiskToMediaRegistry(virVBoxSnapshotConfHardDiskPtr har
     if (parentDisk == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Unable to get the parent disk"));
-        goto cleanup;
+        return -1;
     }
-    /*Hard disk found*/
-    if (VIR_EXPAND_N(parentDisk->children, parentDisk->nchildren, 1) < 0)
-        goto cleanup;
-
+    /* Hard disk found */
+    VIR_EXPAND_N(parentDisk->children, parentDisk->nchildren, 1);
     parentDisk->children[parentDisk->nchildren - 1] = hardDisk;
     if (hardDisk->parent == NULL)
         hardDisk->parent = parentDisk;
-    ret = 0;
 
- cleanup:
-    return ret;
+    return 0;
 }
 
 /*
@@ -863,63 +834,58 @@ virVBoxSnapshotConfAddHardDiskToMediaRegistry(virVBoxSnapshotConfHardDiskPtr har
  *return -1 on failure
  */
 int
-virVBoxSnapshotConfRemoveSnapshot(virVBoxSnapshotConfMachinePtr machine,
+virVBoxSnapshotConfRemoveSnapshot(virVBoxSnapshotConfMachine *machine,
                                   const char *snapshotName)
 {
-    int ret = -1;
     size_t i = 0;
-    virVBoxSnapshotConfSnapshotPtr snapshot = NULL;
-    virVBoxSnapshotConfSnapshotPtr parentSnapshot = NULL;
+    virVBoxSnapshotConfSnapshot *snapshot = NULL;
+    virVBoxSnapshotConfSnapshot *parentSnapshot = NULL;
     if (machine == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("machine is null"));
-        goto cleanup;
+        return -1;
     }
     if (snapshotName == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("snapshotName is null"));
-        goto cleanup;
+        return -1;
     }
     if (machine->snapshot == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("the machine has no snapshot"));
-        goto cleanup;
+        return -1;
     }
     snapshot = virVBoxSnapshotConfSnapshotByName(machine->snapshot, snapshotName);
     if (snapshot == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Unable to find the snapshot with name %s"), snapshotName);
-        goto cleanup;
+        return -1;
     }
     if (snapshot->nchildren > 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("This snapshot has children, "
-                         "please delete theses snapshots before"));
-        goto cleanup;
+                         "please delete these snapshots before"));
+        return -1;
     }
 
     if (snapshot->parent == NULL) {
         if (machine->snapshot != snapshot) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("You are trying to remove a snapshot which does not exists"));
-            goto cleanup;
+            return -1;
         }
         machine->snapshot = NULL;
         virVBoxSnapshotConfSnapshotFree(snapshot);
-        ret = 0;
-        goto cleanup;
-    }
-    parentSnapshot = snapshot->parent;
 
-    snapshot->parent = NULL;
+        return 0;
+    }
+    parentSnapshot = g_steal_pointer(&snapshot->parent);
     while (i < parentSnapshot->nchildren && parentSnapshot->children[i] != snapshot)
         ++i;
     if (VIR_DELETE_ELEMENT(parentSnapshot->children, i, parentSnapshot->nchildren) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 /*
@@ -929,22 +895,21 @@ virVBoxSnapshotConfRemoveSnapshot(virVBoxSnapshotConfMachinePtr machine,
  *return -1 on failure
  */
 int
-virVBoxSnapshotConfRemoveHardDisk(virVBoxSnapshotConfMediaRegistryPtr mediaRegistry,
+virVBoxSnapshotConfRemoveHardDisk(virVBoxSnapshotConfMediaRegistry *mediaRegistry,
                                   const char *uuid)
 {
-    int ret = -1;
     size_t i = 0;
-    virVBoxSnapshotConfHardDiskPtr hardDisk = NULL;
-    virVBoxSnapshotConfHardDiskPtr parentHardDisk = NULL;
+    virVBoxSnapshotConfHardDisk *hardDisk = NULL;
+    virVBoxSnapshotConfHardDisk *parentHardDisk = NULL;
     if (mediaRegistry == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Media registry is null"));
-        goto cleanup;
+        return -1;
     }
     if (uuid == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Uuid is null"));
-        goto cleanup;
+        return -1;
     }
 
     for (i = 0; i < mediaRegistry->ndisks; i++) {
@@ -955,7 +920,7 @@ virVBoxSnapshotConfRemoveHardDisk(virVBoxSnapshotConfMediaRegistryPtr mediaRegis
     if (hardDisk == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Unable to find the hard disk with uuid %s"), uuid);
-        goto cleanup;
+        return -1;
     }
     if (hardDisk->parent == NULL) {
         /* it means that the hard disk is in 'root' */
@@ -964,22 +929,19 @@ virVBoxSnapshotConfRemoveHardDisk(virVBoxSnapshotConfMediaRegistryPtr mediaRegis
                 break;
         }
         if (VIR_DELETE_ELEMENT(mediaRegistry->disks, i, mediaRegistry->ndisks) < 0)
-            goto cleanup;
-        ret = 0;
-        goto cleanup;
+            return -1;
+
+        return 0;
     }
 
-    parentHardDisk = hardDisk->parent;
+    parentHardDisk = g_steal_pointer(&hardDisk->parent);
     i = 0;
     while (i < parentHardDisk->nchildren && parentHardDisk->children[i] != hardDisk)
         ++i;
-    hardDisk->parent = NULL;
     if (VIR_DELETE_ELEMENT(parentHardDisk->children, i, parentHardDisk->nchildren) < 0)
-        goto cleanup;
-    ret = 0;
+        return -1;
 
- cleanup:
-    return ret;
+    return 0;
 }
 
 /*vboxSnapshotSaveVboxFile: Create a VirtualBox XML file from a vboxSnapshotXmlMachinePtr.
@@ -988,7 +950,7 @@ virVBoxSnapshotConfRemoveHardDisk(virVBoxSnapshotConfMediaRegistryPtr mediaRegis
  *return -1 on failure
  */
 int
-virVBoxSnapshotConfSaveVboxFile(virVBoxSnapshotConfMachinePtr machine,
+virVBoxSnapshotConfSaveVboxFile(virVBoxSnapshotConfMachine *machine,
                                 const char *filePath)
 {
     int ret = -1;
@@ -1019,16 +981,10 @@ virVBoxSnapshotConfSaveVboxFile(virVBoxSnapshotConfMachinePtr machine,
         goto cleanup;
     }
     xml = xmlNewDoc(BAD_CAST "1.0");
-    if (!xml) {
-        virReportOOMError();
-        goto cleanup;
-    }
+    if (!xml)
+        abort();
 
-    cur = xmlNewNode(NULL, BAD_CAST "VirtualBox");
-    if (!cur) {
-        virReportOOMError();
-        goto cleanup;
-    }
+    cur = virXMLNewNode(NULL, "VirtualBox");
 
     if (!xmlNewProp(cur, BAD_CAST "version", BAD_CAST "1.12-linux")) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
@@ -1037,7 +993,7 @@ virVBoxSnapshotConfSaveVboxFile(virVBoxSnapshotConfMachinePtr machine,
     }
     if (xmlNewProp(cur,
                    BAD_CAST "xmlns",
-                   BAD_CAST "http://www.innotek.de/VirtualBox-settings") == NULL) {
+                   BAD_CAST VBOX_SETTINGS_NS) == NULL) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
                        _("Error in xmlNewProp"));
         goto cleanup;
@@ -1050,10 +1006,8 @@ virVBoxSnapshotConfSaveVboxFile(virVBoxSnapshotConfMachinePtr machine,
                            "OVERWRITTEN AND LOST.\n"
                            "Changes to this xml configuration should be made using Virtualbox\n"
                            "or other application using the libvirt API");
-    if (!cur) {
-        virReportOOMError();
-        goto cleanup;
-    }
+    if (!cur)
+        abort();
 
     if (!xmlAddPrevSibling(xmlDocGetRootElement(xml), cur)) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
@@ -1061,11 +1015,7 @@ virVBoxSnapshotConfSaveVboxFile(virVBoxSnapshotConfMachinePtr machine,
         goto cleanup;
     }
 
-    machineNode = xmlNewNode(NULL, BAD_CAST "Machine");
-    if (!machineNode) {
-        virReportOOMError();
-        goto cleanup;
-    }
+    machineNode = virXMLNewNode(NULL, "Machine");
 
     if (!xmlNewProp(machineNode, BAD_CAST "uuid", BAD_CAST machine->uuid)) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
@@ -1079,8 +1029,7 @@ virVBoxSnapshotConfSaveVboxFile(virVBoxSnapshotConfMachinePtr machine,
     }
 
     if (machine->currentSnapshot != NULL) {
-        if (virAsprintf(&currentSnapshot, "{%s}", machine->currentSnapshot) < 0)
-            goto cleanup;
+        currentSnapshot = g_strdup_printf("{%s}", machine->currentSnapshot);
         if (!xmlNewProp(machineNode, BAD_CAST "currentSnapshot", BAD_CAST currentSnapshot)) {
             virReportError(VIR_ERR_XML_ERROR, "%s",
                            _("Error in xmlNewProp"));
@@ -1117,8 +1066,7 @@ virVBoxSnapshotConfSaveVboxFile(virVBoxSnapshotConfMachinePtr machine,
     if (secondRegexResult < 1)
         goto cleanup;
 
-    if (virAsprintf(&timeStamp, "%sT%sZ", firstRegex[0], secondRegex[0]) < 0)
-        goto cleanup;
+    timeStamp = g_strdup_printf("%sT%sZ", firstRegex[0], secondRegex[0]);
     if (!xmlNewProp(machineNode, BAD_CAST "lastStateChange", BAD_CAST timeStamp)) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
                        _("Error in xmlNewProp"));
@@ -1126,11 +1074,7 @@ virVBoxSnapshotConfSaveVboxFile(virVBoxSnapshotConfMachinePtr machine,
     }
     xmlAddChild(xmlDocGetRootElement(xml), machineNode);
 
-    mediaRegistryNode = xmlNewNode(NULL, BAD_CAST "MediaRegistry");
-    if (!mediaRegistryNode) {
-        virReportOOMError();
-        goto cleanup;
-    }
+    mediaRegistryNode = virXMLNewNode(NULL, "MediaRegistry");
 
     xmlAddChild(machineNode, mediaRegistryNode);
     for (i = 0; i < machine->mediaRegistry->notherMedia; i++) {
@@ -1146,11 +1090,7 @@ virVBoxSnapshotConfSaveVboxFile(virVBoxSnapshotConfMachinePtr machine,
         }
         xmlAddChild(mediaRegistryNode, cur);
     }
-    hardDisksNode = xmlNewNode(NULL, BAD_CAST "HardDisks");
-    if (!hardDisksNode) {
-        virReportOOMError();
-        goto cleanup;
-    }
+    hardDisksNode = virXMLNewNode(NULL, "HardDisks");
     for (i = 0; i < machine->mediaRegistry->ndisks; i++) {
         xmlNodePtr child = virVBoxSnapshotConfCreateHardDiskNode(machine->mediaRegistry->disks[i]);
         if (child != NULL)
@@ -1197,7 +1137,7 @@ virVBoxSnapshotConfSaveVboxFile(virVBoxSnapshotConfMachinePtr machine,
     xmlAddChild(machineNode, cur);
 
     if (machine->snapshot != NULL) {
-        snapshotNode = xmlNewNode(NULL, BAD_CAST "Snapshot");
+        snapshotNode = virXMLNewNode(NULL, "Snapshot");
         xmlAddChild(machineNode, snapshotNode);
         if (virVBoxSnapshotConfSerializeSnapshot(snapshotNode, machine->snapshot) < 0) {
             virReportError(VIR_ERR_XML_ERROR, "%s",
@@ -1235,8 +1175,8 @@ virVBoxSnapshotConfSaveVboxFile(virVBoxSnapshotConfMachinePtr machine,
 
     xmlFreeDoc(xml);
 
-    virStringListFree(firstRegex);
-    virStringListFree(secondRegex);
+    g_strfreev(firstRegex);
+    g_strfreev(secondRegex);
     return ret;
 }
 
@@ -1245,30 +1185,27 @@ virVBoxSnapshotConfSaveVboxFile(virVBoxSnapshotConfMachinePtr machine,
  *vboxSnapshotXmlMachinePtr's current snapshot, return 0 otherwise.
  */
 int
-virVBoxSnapshotConfIsCurrentSnapshot(virVBoxSnapshotConfMachinePtr machine,
+virVBoxSnapshotConfIsCurrentSnapshot(virVBoxSnapshotConfMachine *machine,
                                      const char *snapshotName)
 {
-    virVBoxSnapshotConfSnapshotPtr snapshot = NULL;
+    virVBoxSnapshotConfSnapshot *snapshot = NULL;
     if (machine == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Machine is null"));
-        goto cleanup;
+        return 0;
     }
     if (snapshotName == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("snapshotName is null"));
-        goto cleanup;
+        return 0;
     }
     snapshot = virVBoxSnapshotConfSnapshotByName(machine->snapshot, snapshotName);
     if (snapshot == NULL) {
         virReportError(VIR_ERR_NO_DOMAIN_SNAPSHOT,
                        _("Unable to find the snapshot %s"), snapshotName);
-        goto cleanup;
+        return 0;
     }
     return STREQ(snapshot->uuid, machine->currentSnapshot);
-
- cleanup:
-    return 0;
 }
 
 /*
@@ -1299,22 +1236,23 @@ virVBoxSnapshotConfGetRWDisksPathsFromLibvirtXML(const char *filePath,
                        _("Unable to parse the xml"));
         goto cleanup;
     }
-    if (!(xPathContext = xmlXPathNewContext(xml))) {
-        virReportOOMError();
+
+    if (!(xPathContext = virXMLXPathContextNew(xml)))
         goto cleanup;
-    }
+
     xPathContext->node = xmlDocGetRootElement(xml);
     if ((nodeSize = virXPathNodeSet("/domainsnapshot/disks/disk",
                                     xPathContext, &nodes)) < 0)
         goto cleanup;
 
-    if (VIR_ALLOC_N(ret, nodeSize) < 0)
-        goto cleanup;
+    ret = g_new0(char *, nodeSize);
 
     for (i = 0; i < nodeSize; i++) {
         xmlNodePtr node = nodes[i];
+        xmlNodePtr sourceNode;
+
         xPathContext->node = node;
-        xmlNodePtr sourceNode = virXPathNode("./source", xPathContext);
+        sourceNode = virXPathNode("./source", xPathContext);
         if (sourceNode)
             ret[i] = virXMLPropString(sourceNode, "file");
     }
@@ -1324,7 +1262,7 @@ virVBoxSnapshotConfGetRWDisksPathsFromLibvirtXML(const char *filePath,
     xmlFreeDoc(xml);
     xmlXPathFreeContext(xPathContext);
     if (result < 0) {
-        virStringListFree(ret);
+        g_strfreev(ret);
         nodeSize = -1;
     } else {
         *rwDisksPath = ret;
@@ -1360,22 +1298,23 @@ virVBoxSnapshotConfGetRODisksPathsFromLibvirtXML(const char *filePath,
                        _("Unable to parse the xml"));
         goto cleanup;
     }
-    if (!(xPathContext = xmlXPathNewContext(xml))) {
-        virReportOOMError();
+
+    if (!(xPathContext = virXMLXPathContextNew(xml)))
         goto cleanup;
-    }
+
     xPathContext->node = xmlDocGetRootElement(xml);
     if ((nodeSize = virXPathNodeSet("/domainsnapshot/domain/devices/disk",
                                     xPathContext,
                                     &nodes)) < 0)
         goto cleanup;
-    if (VIR_ALLOC_N(ret, nodeSize) < 0)
-        goto cleanup;
+    ret = g_new0(char *, nodeSize);
 
     for (i = 0; i < nodeSize; i++) {
         xmlNodePtr node = nodes[i];
+        xmlNodePtr sourceNode;
+
         xPathContext->node = node;
-        xmlNodePtr sourceNode = virXPathNode("./source", xPathContext);
+        sourceNode = virXPathNode("./source", xPathContext);
         if (sourceNode)
             ret[i] = virXMLPropString(sourceNode, "file");
     }
@@ -1385,7 +1324,7 @@ virVBoxSnapshotConfGetRODisksPathsFromLibvirtXML(const char *filePath,
     xmlFreeDoc(xml);
     xmlXPathFreeContext(xPathContext);
     if (result < 0) {
-        virStringListFree(ret);
+        g_strfreev(ret);
         nodeSize = -1;
     } else {
         *roDisksPath = ret;
@@ -1399,11 +1338,11 @@ virVBoxSnapshotConfGetRODisksPathsFromLibvirtXML(const char *filePath,
  *return a valid uuid, or NULL on failure
  */
 const char *
-virVBoxSnapshotConfHardDiskUuidByLocation(virVBoxSnapshotConfMachinePtr machine,
+virVBoxSnapshotConfHardDiskUuidByLocation(virVBoxSnapshotConfMachine *machine,
                                           const char *location)
 {
     size_t i = 0;
-    virVBoxSnapshotConfHardDiskPtr hardDisk = NULL;
+    virVBoxSnapshotConfHardDisk *hardDisk = NULL;
     for (i = 0; i < machine->mediaRegistry->ndisks; i++) {
         hardDisk = virVBoxSnapshotConfHardDiskByLocation(machine->mediaRegistry->disks[i], location);
         if (hardDisk != NULL)
@@ -1414,20 +1353,20 @@ virVBoxSnapshotConfHardDiskUuidByLocation(virVBoxSnapshotConfMachinePtr machine,
     return hardDisk->uuid;
 }
 
-/*Retreive the whole ancestry of the vboxSnapshotXmlHardDiskPtr whose location is
+/*Retrieve the whole ancestry of the vboxSnapshotXmlHardDiskPtr whose location is
  *'location', and store them in a newly allocated list of vboxSnapshotXmlHardDiskPtr.
  *This list begins with the requested disk, and ends with the farthest ancestor.
  *return array length on success, -1 on failure.*/
 
 size_t
-virVBoxSnapshotConfDiskListToOpen(virVBoxSnapshotConfMachinePtr machine,
-                                  virVBoxSnapshotConfHardDiskPtr **hardDiskToOpen,
+virVBoxSnapshotConfDiskListToOpen(virVBoxSnapshotConfMachine *machine,
+                                  virVBoxSnapshotConfHardDisk ***hardDiskToOpen,
                                   const char *location)
 {
     size_t i = 0;
     size_t returnSize = 0;
-    virVBoxSnapshotConfHardDiskPtr *ret = NULL;
-    virVBoxSnapshotConfHardDiskPtr hardDisk = NULL;
+    virVBoxSnapshotConfHardDisk **ret = NULL;
+    virVBoxSnapshotConfHardDisk *hardDisk = NULL;
     for (i = 0; i < machine->mediaRegistry->ndisks; i++) {
         hardDisk = virVBoxSnapshotConfHardDiskByLocation(machine->mediaRegistry->disks[i], location);
         if (hardDisk != NULL)
@@ -1435,15 +1374,13 @@ virVBoxSnapshotConfDiskListToOpen(virVBoxSnapshotConfMachinePtr machine,
     }
     if (hardDisk == NULL)
         return 0;
-    if (VIR_ALLOC_N(ret, 1) < 0)
-        return 0;
+    ret = g_new0(virVBoxSnapshotConfHardDisk *, 1);
 
     returnSize = 1;
     ret[returnSize - 1] = hardDisk;
 
     while (hardDisk->parent != NULL) {
-        if (VIR_EXPAND_N(ret, returnSize, 1) < 0)
-            return 0;
+        VIR_EXPAND_N(ret, returnSize, 1);
         ret[returnSize - 1] = hardDisk->parent;
         hardDisk = hardDisk->parent;
     }
@@ -1457,23 +1394,21 @@ virVBoxSnapshotConfDiskListToOpen(virVBoxSnapshotConfMachinePtr machine,
  *return -1 on failure
  */
 int
-virVBoxSnapshotConfRemoveFakeDisks(virVBoxSnapshotConfMachinePtr machine)
+virVBoxSnapshotConfRemoveFakeDisks(virVBoxSnapshotConfMachine *machine)
 {
     int ret = -1;
     size_t i = 0;
     size_t j = 0;
     size_t tempSize = 0;
     size_t diskSize = 0;
-    virVBoxSnapshotConfHardDiskPtr *tempList = NULL;
-    virVBoxSnapshotConfHardDiskPtr *diskList = NULL;
+    virVBoxSnapshotConfHardDisk **tempList = NULL;
+    virVBoxSnapshotConfHardDisk **diskList = NULL;
 
-    if (VIR_ALLOC_N(diskList, 0) < 0)
-        return -1;
+    diskList = g_new0(virVBoxSnapshotConfHardDisk *, 0);
 
     for (i = 0; i < machine->mediaRegistry->ndisks; i++) {
         tempSize = virVBoxSnapshotConfAllChildren(machine->mediaRegistry->disks[i], &tempList);
-        if (VIR_EXPAND_N(diskList, diskSize, tempSize) < 0)
-            goto cleanup;
+        VIR_EXPAND_N(diskList, diskSize, tempSize);
 
         for (j = 0; j < tempSize; j++)
             diskList[diskSize - tempSize + j] = tempList[j];
@@ -1508,7 +1443,7 @@ virVBoxSnapshotConfRemoveFakeDisks(virVBoxSnapshotConfMachinePtr machine)
  *return -1 on failure
  */
 int
-virVBoxSnapshotConfDiskIsInMediaRegistry(virVBoxSnapshotConfMachinePtr machine,
+virVBoxSnapshotConfDiskIsInMediaRegistry(virVBoxSnapshotConfMachine *machine,
                                          const char *location)
 {
     int ret = -1;
@@ -1516,16 +1451,14 @@ virVBoxSnapshotConfDiskIsInMediaRegistry(virVBoxSnapshotConfMachinePtr machine,
     size_t j = 0;
     size_t tempSize = 0;
     size_t diskSize = 0;
-    virVBoxSnapshotConfHardDiskPtr *tempList = NULL;
-    virVBoxSnapshotConfHardDiskPtr *diskList = NULL;
+    virVBoxSnapshotConfHardDisk **tempList = NULL;
+    virVBoxSnapshotConfHardDisk **diskList = NULL;
 
-    if (VIR_ALLOC_N(diskList, 0) < 0)
-        return -1;
+    diskList = g_new0(virVBoxSnapshotConfHardDisk *, 0);
 
     for (i = 0; i < machine->mediaRegistry->ndisks; i++) {
         tempSize = virVBoxSnapshotConfAllChildren(machine->mediaRegistry->disks[i], &tempList);
-        if (VIR_EXPAND_N(diskList, diskSize, tempSize) < 0)
-            goto cleanup;
+        VIR_EXPAND_N(diskList, diskSize, tempSize);
 
         for (j = 0; j < tempSize; j++)
             diskList[diskSize - tempSize + j] = tempList[j];
@@ -1552,12 +1485,12 @@ virVBoxSnapshotConfDiskIsInMediaRegistry(virVBoxSnapshotConfMachinePtr machine,
 /*
  *hardDisksPtrByLocation: Return a vboxSnapshotXmlHardDiskPtr whose location is 'location'
  */
-virVBoxSnapshotConfHardDiskPtr
-virVBoxSnapshotConfHardDiskPtrByLocation(virVBoxSnapshotConfMachinePtr machine,
+virVBoxSnapshotConfHardDisk *
+virVBoxSnapshotConfHardDiskPtrByLocation(virVBoxSnapshotConfMachine *machine,
                                          const char *location)
 {
     int it = 0;
-    virVBoxSnapshotConfHardDiskPtr disk = NULL;
+    virVBoxSnapshotConfHardDisk *disk = NULL;
     for (it = 0; it < machine->mediaRegistry->ndisks; it++) {
         disk = virVBoxSnapshotConfHardDiskByLocation(machine->mediaRegistry->disks[it], location);
         if (disk != NULL)

@@ -12,7 +12,7 @@
     <type arch='x86_64'>hvm</type>
   </os>
   <cpu>
-    <topology sockets='4' cores='4' threads='1'/>
+    <topology sockets='4' dies='1' cores='4' threads='1'/>
   </cpu>
   <clock offset='utc'/>
   <on_poweroff>destroy</on_poweroff>
@@ -26,7 +26,7 @@
     </disk>
     <controller type='scsi' index='0' model='lsisas1068'/>
     <interface type='bridge'>
-      <mac address='00:50:56:80:b3:81'/>
+      <mac address='00:50:56:80:b3:81' type='generated'/>
       <source bridge='VM Network'/>
       <model type='vmxnet3'/>
     </interface>

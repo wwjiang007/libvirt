@@ -96,9 +96,9 @@ struct virInitctlRequest {
 };
 
 # ifdef MAXHOSTNAMELEN
-  verify(sizeof(struct virInitctlRequest) == 320 + MAXHOSTNAMELEN);
+  G_STATIC_ASSERT(sizeof(struct virInitctlRequest) == 320 + MAXHOSTNAMELEN);
 # else
-  verify(sizeof(struct virInitctlRequest) == 384);
+  G_STATIC_ASSERT(sizeof(struct virInitctlRequest) == 384);
 # endif
 
 
@@ -189,8 +189,8 @@ const char *virInitctlFifos[] = {
   NULL
 };
 
-int virInitctlSetRunLevel(const char *fifo ATTRIBUTE_UNUSED,
-                          virInitctlRunLevel level ATTRIBUTE_UNUSED)
+int virInitctlSetRunLevel(const char *fifo G_GNUC_UNUSED,
+                          virInitctlRunLevel level G_GNUC_UNUSED)
 {
     virReportUnsupportedError();
     return -1;

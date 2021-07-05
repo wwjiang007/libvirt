@@ -20,10 +20,9 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_OBJECT_EVENT_PRIVATE_H
-# define LIBVIRT_OBJECT_EVENT_PRIVATE_H
+#pragma once
 
-# include "datatypes.h"
+#include "datatypes.h"
 
 struct _virObjectMeta {
     int id;
@@ -32,18 +31,16 @@ struct _virObjectMeta {
     char *key;
 };
 typedef struct _virObjectMeta virObjectMeta;
-typedef virObjectMeta *virObjectMetaPtr;
 
 typedef struct _virObjectEventCallbackList virObjectEventCallbackList;
-typedef virObjectEventCallbackList *virObjectEventCallbackListPtr;
 
 typedef void
 (*virObjectEventDispatchFunc)(virConnectPtr conn,
-                              virObjectEventPtr event,
+                              virObjectEvent *event,
                               virConnectObjectEventGenericCallback cb,
                               void *cbopaque);
 
-struct _virObjectEvent {
+struct  __attribute__((aligned(8))) _virObjectEvent {
     virObject parent;
     int eventID;
     virObjectMeta meta;
@@ -62,19 +59,19 @@ struct _virObjectEvent {
  * be sent to @conn.
  */
 typedef bool (*virObjectEventCallbackFilter)(virConnectPtr conn,
-                                             virObjectEventPtr event,
+                                             virObjectEvent *event,
                                              void *opaque);
 
-virClassPtr
+virClass *
 virClassForObjectEvent(void);
 
 int
 virObjectEventStateRegisterID(virConnectPtr conn,
-                              virObjectEventStatePtr state,
+                              virObjectEventState *state,
                               const char *key,
                               virObjectEventCallbackFilter filter,
                               void *filter_opaque,
-                              virClassPtr klass,
+                              virClass *klass,
                               int eventID,
                               virConnectObjectEventGenericCallback cb,
                               void *opaque,
@@ -87,8 +84,8 @@ virObjectEventStateRegisterID(virConnectPtr conn,
 
 int
 virObjectEventStateCallbackID(virConnectPtr conn,
-                              virObjectEventStatePtr state,
-                              virClassPtr klass,
+                              virObjectEventState *state,
+                              virClass *klass,
                               int eventID,
                               virConnectObjectEventGenericCallback callback,
                               int *remoteID)
@@ -96,7 +93,7 @@ virObjectEventStateCallbackID(virConnectPtr conn,
     ATTRIBUTE_NONNULL(5);
 
 void *
-virObjectEventNew(virClassPtr klass,
+virObjectEventNew(virClass *klass,
                   virObjectEventDispatchFunc dispatcher,
                   int eventID,
                   int id,
@@ -105,5 +102,3 @@ virObjectEventNew(virClassPtr klass,
                   const char *key)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(5)
     ATTRIBUTE_NONNULL(7);
-
-#endif /* LIBVIRT_OBJECT_EVENT_PRIVATE_H */

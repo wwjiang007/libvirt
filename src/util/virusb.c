@@ -29,7 +29,6 @@
 
 #include "virusb.h"
 #include "virlog.h"
-#include "virutil.h"
 #include "virerror.h"
 #include "virfile.h"
 #include "virstring.h"
@@ -59,7 +58,7 @@ struct _virUSBDevice {
 struct _virUSBDeviceList {
     virObjectLockable parent;
     size_t count;
-    virUSBDevicePtr *devs;
+    virUSBDevice **devs;
 };
 
 typedef enum {
@@ -68,7 +67,7 @@ typedef enum {
     USB_DEVICE_FIND_BY_BUS = 1 << 1,
 } virUSBDeviceFindFlags;
 
-static virClassPtr virUSBDeviceListClass;
+static virClass *virUSBDeviceListClass;
 
 static void virUSBDeviceListDispose(void *obj);
 
@@ -85,14 +84,11 @@ VIR_ONCE_GLOBAL_INIT(virUSB);
 static int virUSBSysReadFile(const char *f_name, const char *d_name,
                              int base, unsigned int *value)
 {
-    int tmp;
-    VIR_AUTOFREE(char *) buf = NULL;
-    VIR_AUTOFREE(char *) filename = NULL;
+    g_autofree char *buf = NULL;
+    g_autofree char *filename = NULL;
     char *ignore = NULL;
 
-    tmp = virAsprintf(&filename, USB_SYSFS "/devices/%s/%s", d_name, f_name);
-    if (tmp < 0)
-        return -1;
+    filename = g_strdup_printf(USB_SYSFS "/devices/%s/%s", d_name, f_name);
 
     if (virFileReadAll(filename, 1024, &buf) < 0)
         return -1;
@@ -106,7 +102,7 @@ static int virUSBSysReadFile(const char *f_name, const char *d_name,
     return 0;
 }
 
-static virUSBDeviceListPtr
+static virUSBDeviceList *
 virUSBDeviceSearch(unsigned int vendor,
                    unsigned int product,
                    unsigned int bus,
@@ -114,13 +110,13 @@ virUSBDeviceSearch(unsigned int vendor,
                    const char *vroot,
                    unsigned int flags)
 {
-    DIR *dir = NULL;
+    g_autoptr(DIR) dir = NULL;
     bool found = false;
     char *ignore = NULL;
     struct dirent *de;
-    virUSBDeviceListPtr list = NULL;
-    virUSBDeviceListPtr ret = NULL;
-    VIR_AUTOPTR(virUSBDevice) usb = NULL;
+    virUSBDeviceList *list = NULL;
+    virUSBDeviceList *ret = NULL;
+    g_autoptr(virUSBDevice) usb = NULL;
     int direrr;
 
     if (!(list = virUSBDeviceListNew()))
@@ -184,7 +180,6 @@ virUSBDeviceSearch(unsigned int vendor,
     ret = list;
 
  cleanup:
-    VIR_DIR_CLOSE(dir);
     if (!ret)
         virObjectUnref(list);
     return ret;
@@ -195,9 +190,9 @@ virUSBDeviceFindByVendor(unsigned int vendor,
                          unsigned int product,
                          const char *vroot,
                          bool mandatory,
-                         virUSBDeviceListPtr *devices)
+                         virUSBDeviceList **devices)
 {
-    virUSBDeviceListPtr list;
+    virUSBDeviceList *list;
     int count;
 
     if (!(list = virUSBDeviceSearch(vendor, product, 0, 0,
@@ -234,9 +229,9 @@ virUSBDeviceFindByBus(unsigned int bus,
                       unsigned int devno,
                       const char *vroot,
                       bool mandatory,
-                      virUSBDevicePtr *usb)
+                      virUSBDevice **usb)
 {
-    virUSBDeviceListPtr list;
+    virUSBDeviceList *list;
 
     if (!(list = virUSBDeviceSearch(0, 0, bus, devno,
                                     vroot,
@@ -275,9 +270,9 @@ virUSBDeviceFind(unsigned int vendor,
                  unsigned int devno,
                  const char *vroot,
                  bool mandatory,
-                 virUSBDevicePtr *usb)
+                 virUSBDevice **usb)
 {
-    virUSBDeviceListPtr list;
+    virUSBDeviceList *list;
 
     unsigned int flags = USB_DEVICE_FIND_BY_VENDOR|USB_DEVICE_FIND_BY_BUS;
     if (!(list = virUSBDeviceSearch(vendor, product, bus, devno,
@@ -309,22 +304,20 @@ virUSBDeviceFind(unsigned int vendor,
     return 0;
 }
 
-virUSBDevicePtr
+virUSBDevice *
 virUSBDeviceNew(unsigned int bus,
                 unsigned int devno,
                 const char *vroot)
 {
-    virUSBDevicePtr dev;
-    int rc;
+    virUSBDevice *dev;
 
-    if (VIR_ALLOC(dev) < 0)
-        return NULL;
+    dev = g_new0(virUSBDevice, 1);
 
     dev->bus     = bus;
     dev->dev     = devno;
 
-    if (snprintf(dev->name, sizeof(dev->name), "%.3d:%.3d",
-                 dev->bus, dev->dev) >= sizeof(dev->name)) {
+    if (g_snprintf(dev->name, sizeof(dev->name), "%.3d:%.3d",
+                   dev->bus, dev->dev) >= sizeof(dev->name)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("dev->name buffer overflow: %.3d:%.3d"),
                        dev->bus, dev->dev);
@@ -333,21 +326,16 @@ virUSBDeviceNew(unsigned int bus,
     }
 
     if (vroot) {
-        rc = virAsprintf(&dev->path, "%s/%03d/%03d",
-                         vroot, dev->bus, dev->dev);
+        dev->path = g_strdup_printf("%s/%03d/%03d",
+                                    vroot, dev->bus, dev->dev);
     } else {
-        rc = virAsprintf(&dev->path, USB_DEVFS "%03d/%03d",
-                         dev->bus, dev->dev);
-    }
-
-    if (rc < 0) {
-        virUSBDeviceFree(dev);
-        return NULL;
+        dev->path = g_strdup_printf(USB_DEVFS "%03d/%03d",
+                                    dev->bus, dev->dev);
     }
 
     /* XXX fixme. this should be product/vendor */
-    if (snprintf(dev->id, sizeof(dev->id), "%d %d", dev->bus,
-                 dev->dev) >= sizeof(dev->id)) {
+    if (g_snprintf(dev->id, sizeof(dev->id), "%d %d", dev->bus,
+                   dev->dev) >= sizeof(dev->id)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("dev->id buffer overflow: %d %d"),
                        dev->bus, dev->dev);
@@ -361,34 +349,32 @@ virUSBDeviceNew(unsigned int bus,
 }
 
 void
-virUSBDeviceFree(virUSBDevicePtr dev)
+virUSBDeviceFree(virUSBDevice *dev)
 {
     if (!dev)
         return;
     VIR_DEBUG("%s %s: freeing", dev->id, dev->name);
-    VIR_FREE(dev->path);
-    VIR_FREE(dev->used_by_drvname);
-    VIR_FREE(dev->used_by_domname);
-    VIR_FREE(dev);
+    g_free(dev->path);
+    g_free(dev->used_by_drvname);
+    g_free(dev->used_by_domname);
+    g_free(dev);
 }
 
 int
-virUSBDeviceSetUsedBy(virUSBDevicePtr dev,
+virUSBDeviceSetUsedBy(virUSBDevice *dev,
                       const char *drv_name,
                       const char *dom_name)
 {
     VIR_FREE(dev->used_by_drvname);
     VIR_FREE(dev->used_by_domname);
-    if (VIR_STRDUP(dev->used_by_drvname, drv_name) < 0)
-        return -1;
-    if (VIR_STRDUP(dev->used_by_domname, dom_name) < 0)
-        return -1;
+    dev->used_by_drvname = g_strdup(drv_name);
+    dev->used_by_domname = g_strdup(dom_name);
 
     return 0;
 }
 
 void
-virUSBDeviceGetUsedBy(virUSBDevicePtr dev,
+virUSBDeviceGetUsedBy(virUSBDevice *dev,
                       const char **drv_name,
                       const char **dom_name)
 {
@@ -396,39 +382,39 @@ virUSBDeviceGetUsedBy(virUSBDevicePtr dev,
     *dom_name = dev->used_by_domname;
 }
 
-const char *virUSBDeviceGetName(virUSBDevicePtr dev)
+const char *virUSBDeviceGetName(virUSBDevice *dev)
 {
     return dev->name;
 }
 
-const char *virUSBDeviceGetPath(virUSBDevicePtr dev)
+const char *virUSBDeviceGetPath(virUSBDevice *dev)
 {
     return dev->path;
 }
 
-unsigned int virUSBDeviceGetBus(virUSBDevicePtr dev)
+unsigned int virUSBDeviceGetBus(virUSBDevice *dev)
 {
     return dev->bus;
 }
 
 
-unsigned int virUSBDeviceGetDevno(virUSBDevicePtr dev)
+unsigned int virUSBDeviceGetDevno(virUSBDevice *dev)
 {
     return dev->dev;
 }
 
 
-int virUSBDeviceFileIterate(virUSBDevicePtr dev,
+int virUSBDeviceFileIterate(virUSBDevice *dev,
                             virUSBDeviceFileActor actor,
                             void *opaque)
 {
     return (actor)(dev, dev->path, opaque);
 }
 
-virUSBDeviceListPtr
+virUSBDeviceList *
 virUSBDeviceListNew(void)
 {
-    virUSBDeviceListPtr list;
+    virUSBDeviceList *list;
 
     if (virUSBInitialize() < 0)
         return NULL;
@@ -442,18 +428,18 @@ virUSBDeviceListNew(void)
 static void
 virUSBDeviceListDispose(void *obj)
 {
-    virUSBDeviceListPtr list = obj;
+    virUSBDeviceList *list = obj;
     size_t i;
 
     for (i = 0; i < list->count; i++)
         virUSBDeviceFree(list->devs[i]);
 
-    VIR_FREE(list->devs);
+    g_free(list->devs);
 }
 
 int
-virUSBDeviceListAdd(virUSBDeviceListPtr list,
-                    virUSBDevicePtr *dev)
+virUSBDeviceListAdd(virUSBDeviceList *list,
+                    virUSBDevice **dev)
 {
     if (virUSBDeviceListFind(list, *dev)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -464,8 +450,8 @@ virUSBDeviceListAdd(virUSBDeviceListPtr list,
     return VIR_APPEND_ELEMENT(list->devs, list->count, *dev);
 }
 
-virUSBDevicePtr
-virUSBDeviceListGet(virUSBDeviceListPtr list,
+virUSBDevice *
+virUSBDeviceListGet(virUSBDeviceList *list,
                     int idx)
 {
     if (idx >= list->count ||
@@ -476,16 +462,16 @@ virUSBDeviceListGet(virUSBDeviceListPtr list,
 }
 
 size_t
-virUSBDeviceListCount(virUSBDeviceListPtr list)
+virUSBDeviceListCount(virUSBDeviceList *list)
 {
     return list->count;
 }
 
-virUSBDevicePtr
-virUSBDeviceListSteal(virUSBDeviceListPtr list,
-                      virUSBDevicePtr dev)
+virUSBDevice *
+virUSBDeviceListSteal(virUSBDeviceList *list,
+                      virUSBDevice *dev)
 {
-    virUSBDevicePtr ret = NULL;
+    virUSBDevice *ret = NULL;
     size_t i;
 
     for (i = 0; i < list->count; i++) {
@@ -500,15 +486,15 @@ virUSBDeviceListSteal(virUSBDeviceListPtr list,
 }
 
 void
-virUSBDeviceListDel(virUSBDeviceListPtr list,
-                    virUSBDevicePtr dev)
+virUSBDeviceListDel(virUSBDeviceList *list,
+                    virUSBDevice *dev)
 {
     virUSBDeviceFree(virUSBDeviceListSteal(list, dev));
 }
 
-virUSBDevicePtr
-virUSBDeviceListFind(virUSBDeviceListPtr list,
-                     virUSBDevicePtr dev)
+virUSBDevice *
+virUSBDeviceListFind(virUSBDeviceList *list,
+                     virUSBDevice *dev)
 {
     size_t i;
 

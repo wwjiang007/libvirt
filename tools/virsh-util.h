@@ -16,13 +16,12 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRSH_UTIL_H
-# define LIBVIRT_VIRSH_UTIL_H
+#pragma once
 
-# include "virsh.h"
+#include "virsh.h"
 
-# include <libxml/parser.h>
-# include <libxml/xpath.h>
+#include <libxml/parser.h>
+#include <libxml/xpath.h>
 
 virDomainPtr
 virshLookupDomainBy(vshControl *ctl,
@@ -40,8 +39,19 @@ virshCommandOptDomain(vshControl *ctl,
                       const vshCmd *cmd,
                       const char **name);
 
+typedef virDomain virshDomain;
+
 void
 virshDomainFree(virDomainPtr dom);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virshDomain, virshDomainFree);
+
+typedef virSecret virshSecret;
+void
+virshSecretFree(virSecretPtr secret);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virshSecret, virshSecretFree);
+
+void
+virshDomainCheckpointFree(virDomainCheckpointPtr chk);
 
 void
 virshDomainSnapshotFree(virDomainSnapshotPtr snap);
@@ -58,10 +68,10 @@ virshStreamSink(virStreamPtr st,
                 void *opaque);
 
 typedef struct _virshStreamCallbackData virshStreamCallbackData;
-typedef virshStreamCallbackData *virshStreamCallbackDataPtr;
 struct _virshStreamCallbackData {
     vshControl *ctl;
     int fd;
+    bool isBlock;
 };
 
 int
@@ -93,7 +103,7 @@ virshDomainGetXMLFromDom(vshControl *ctl,
                          xmlDocPtr *xml,
                          xmlXPathContextPtr *ctxt)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(4)
-    ATTRIBUTE_NONNULL(5) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(5) G_GNUC_WARN_UNUSED_RESULT;
 
 int
 virshDomainGetXML(vshControl *ctl,
@@ -102,6 +112,4 @@ virshDomainGetXML(vshControl *ctl,
                   xmlDocPtr *xml,
                   xmlXPathContextPtr *ctxt)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(4)
-    ATTRIBUTE_NONNULL(5) ATTRIBUTE_RETURN_CHECK;
-
-#endif /* LIBVIRT_VIRSH_UTIL_H */
+    ATTRIBUTE_NONNULL(5) G_GNUC_WARN_UNUSED_RESULT;

@@ -24,126 +24,310 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
-#include "internal.h"
-#define NO_LIBVIRT
+/* This file intentionally does not link to libvirt/glib */
+#define VIR_NO_GLIB_STDIO
+#define cleanup(T, F) __attribute__((cleanup(F))) T
 #include "testutils.h"
 
 #ifndef WIN32
+# include <poll.h>
+
+/* Some UNIX lack it in headers & it doesn't hurt to redeclare */
+extern char **environ;
 
 # define VIR_FROM_THIS VIR_FROM_NONE
 
-static int envsort(const void *a, const void *b)
-{
-    const char *const*astrptr = a;
-    const char *const*bstrptr = b;
-    const char *astr = *astrptr;
-    const char *bstr = *bstrptr;
-    char *aeq = strchr(astr, '=');
-    char *beq = strchr(bstr, '=');
-    char *akey;
-    char *bkey;
-    int ret;
+struct Arguments {
+    int *readfds;
+    int numreadfds;
+    bool daemonize_check;
+    bool close_stdin;
+};
 
-    if (!(akey = strndup(astr, aeq - astr)))
-        abort();
-    if (!(bkey = strndup(bstr, beq - bstr)))
-        abort();
-    ret = strcmp(akey, bkey);
-    free(akey);
-    free(bkey);
+static void cleanupArguments(struct Arguments **ptr)
+{
+    struct Arguments *args = *ptr;
+
+    if (args)
+        free(args->readfds);
+
+    free(args);
+}
+
+static void cleanupStringList(char ***ptr)
+{
+    char **strings = *ptr;
+
+    if (strings) {
+        char **str;
+        for (str = strings; *str; str++)
+            free(*str);
+    }
+
+    free(strings);
+}
+
+static void cleanupFile(FILE **ptr)
+{
+    FILE *file = *ptr;
+    fclose(file);
+}
+
+static void cleanupGeneric(void *ptr)
+{
+    void **ptrptr = ptr;
+    free (*ptrptr);
+}
+
+static struct Arguments *parseArguments(int argc, char** argv)
+{
+    cleanup(struct Arguments *, cleanupArguments) args = NULL;
+    struct Arguments *ret;
+    size_t i;
+
+    if (!(args = calloc(1, sizeof(*args))))
+        return NULL;
+
+    if (!(args->readfds = calloc(1, sizeof(*args->readfds))))
+        return NULL;
+
+    args->numreadfds = 1;
+    args->readfds[0] = STDIN_FILENO;
+
+    for (i = 1; i < argc; i++) {
+        if (STREQ(argv[i - 1], "--readfd")) {
+            char c;
+
+            args->readfds = realloc(args->readfds,
+                                    (args->numreadfds + 1) *
+                                    sizeof(*args->readfds));
+            if (!args->readfds)
+                return NULL;
+
+            if (1 != sscanf(argv[i], "%u%c",
+                            &args->readfds[args->numreadfds++], &c)) {
+                printf("Could not parse fd %s\n", argv[i]);
+                return NULL;
+            }
+        } else if (STREQ(argv[i], "--check-daemonize")) {
+            args->daemonize_check = true;
+        } else if (STREQ(argv[i], "--close-stdin")) {
+            args->close_stdin = true;
+        }
+    }
+
+    ret = g_steal_pointer(&args);
     return ret;
 }
 
-int main(int argc, char **argv) {
-    size_t i, n;
-    int open_max;
-    char **origenv;
-    char **newenv = NULL;
-    char *cwd;
-    FILE *log = fopen(abs_builddir "/commandhelper.log", "w");
-    int ret = EXIT_FAILURE;
+static void printArguments(FILE *log, int argc, char** argv)
+{
+    size_t i;
 
-    if (!log)
-        return ret;
-
-    for (i = 1; i < argc; i++)
+    for (i = 1; i < argc; i++) {
         fprintf(log, "ARG:%s\n", argv[i]);
+    }
+}
 
-    origenv = environ;
-    n = 0;
-    while (*origenv != NULL) {
-        n++;
-        origenv++;
+static int envsort(const void *a, const void *b)
+{
+    const char *astr = *(const char**)a;
+    const char *bstr = *(const char**)b;
+
+    while (true) {
+        char achar = (*astr == '=') ? '\0' : *astr;
+        char bchar = (*bstr == '=') ? '\0' : *bstr;
+
+        if ((achar == '\0') || (achar != bchar))
+            return achar - bchar;
+
+        astr++;
+        bstr++;
+    }
+}
+
+static int printEnvironment(FILE *log)
+{
+    cleanup(char **, cleanupGeneric) newenv = NULL;
+    size_t length;
+    size_t i;
+
+    for (length = 0; environ[length]; length++) {
     }
 
-    if (!(newenv = malloc(sizeof(*newenv) * n)))
-        abort();
+    if (length == 0)
+        return 0;
 
-    origenv = environ;
-    n = i = 0;
-    while (*origenv != NULL) {
-        newenv[i++] = *origenv;
-        n++;
-        origenv++;
+    if (!(newenv = malloc(sizeof(*newenv) * length)))
+        return -1;
+
+    for (i = 0; i < length; i++) {
+        newenv[i] = environ[i];
     }
-    qsort(newenv, n, sizeof(newenv[0]), envsort);
 
-    for (i = 0; i < n; i++) {
+    qsort(newenv, length, sizeof(newenv[0]), envsort);
+
+    for (i = 0; i < length; i++) {
         /* Ignore the variables used to instruct the loader into
          * behaving differently, as they could throw the tests off. */
         if (!STRPREFIX(newenv[i], "LD_"))
             fprintf(log, "ENV:%s\n", newenv[i]);
     }
 
-    open_max = sysconf(_SC_OPEN_MAX);
+    return 0;
+}
+
+static int printFds(FILE *log)
+{
+    long int open_max = sysconf(_SC_OPEN_MAX);
+    size_t i;
+
     if (open_max < 0)
-        goto cleanup;
+        return -1;
+
     for (i = 0; i < open_max; i++) {
-        int f;
-        int closed;
+        int ignore;
+
         if (i == fileno(log))
             continue;
-        closed = fcntl(i, F_GETFD, &f) == -1 &&
-            errno == EBADF;
-        if (!closed)
-            fprintf(log, "FD:%zu\n", i);
+
+        if (fcntl(i, F_GETFD, &ignore) == -1 && errno == EBADF)
+            continue;
+
+        fprintf(log, "FD:%zu\n", i);
     }
 
-    fprintf(log, "DAEMON:%s\n", getpgrp() == getsid(0) ? "yes" : "no");
+    return 0;
+}
+
+static void printDaemonization(FILE *log, struct Arguments *args)
+{
+    int retries = 3;
+
+    if (args->daemonize_check) {
+        while ((getpgrp() == getppid()) && (retries-- > 0)) {
+            usleep(100 * 1000);
+        }
+    }
+
+    fprintf(log, "DAEMON:%s\n", getpgrp() != getppid() ? "yes" : "no");
+}
+
+static int printCwd(FILE *log)
+{
+    cleanup(char *, cleanupGeneric) cwd = NULL;
+    char *display;
+
     if (!(cwd = getcwd(NULL, 0)))
-        goto cleanup;
-    if (strlen(cwd) > strlen(".../commanddata") &&
-        STREQ(cwd + strlen(cwd) - strlen("/commanddata"), "/commanddata"))
-        strcpy(cwd, ".../commanddata");
-    fprintf(log, "CWD:%s\n", cwd);
-    free(cwd);
+        return -1;
 
-    fprintf(log, "UMASK:%04o\n", umask(0));
-
-    if (argc > 1 && STREQ(argv[1], "--close-stdin")) {
-        if (freopen("/dev/null", "r", stdin) != stdin)
-            goto cleanup;
-        usleep(100*1000);
+    if ((display = strstr(cwd, "/commanddata")) &&
+        STREQ(display, "/commanddata")) {
+        fprintf(log, "CWD:.../commanddata\n");
+        return 0;
     }
 
+    display = cwd;
+
+# ifdef __APPLE__
+    if (strstr(cwd, "/private"))
+        display = cwd + strlen("/private");
+# endif
+
+    fprintf(log, "CWD:%s\n", display);
+    return 0;
+}
+
+static int printInput(struct Arguments *args)
+{
     char buf[1024];
+    cleanup(struct pollfd *, cleanupGeneric) fds = NULL;
+    cleanup(char **, cleanupStringList) buffers = NULL;
+    cleanup(size_t *, cleanupGeneric) buflen = NULL;
+    size_t i;
     ssize_t got;
+
+    if (!(fds = calloc(args->numreadfds, sizeof(*fds))))
+        return -1;
+
+    /* plus one NULL terminator */
+    if (!(buffers = calloc(args->numreadfds + 1, sizeof(*buffers))))
+        return -1;
+
+    if (!(buflen = calloc(args->numreadfds, sizeof(*buflen))))
+        return -1;
+
+    if (args->close_stdin) {
+        if (freopen("/dev/null", "r", stdin) != stdin)
+            return -1;
+        usleep(100 * 1000);
+    }
 
     fprintf(stdout, "BEGIN STDOUT\n");
     fflush(stdout);
     fprintf(stderr, "BEGIN STDERR\n");
     fflush(stderr);
 
+    for (i = 0; i < args->numreadfds; i++) {
+        fds[i].fd = args->readfds[i];
+        fds[i].events = POLLIN;
+        fds[i].revents = 0;
+    }
+
     for (;;) {
-        got = read(STDIN_FILENO, buf, sizeof(buf));
-        if (got < 0)
-            goto cleanup;
-        if (got == 0)
+        unsigned ctr = 0;
+
+        if (poll(fds, args->numreadfds, -1) < 0) {
+            printf("poll failed: %s\n", strerror(errno));
+            return -1;
+        }
+
+        for (i = 0; i < args->numreadfds; i++) {
+            short revents = POLLIN | POLLHUP | POLLERR;
+
+# ifdef __APPLE__
+            /*
+             * poll() on /dev/null will return POLLNVAL
+             * Apple-Feedback: FB8785208
+             */
+            revents |= POLLNVAL;
+# endif
+
+            if (fds[i].revents & revents) {
+                fds[i].revents = 0;
+
+                got = read(fds[i].fd, buf, sizeof(buf));
+                if (got < 0)
+                    return -1;
+                if (got == 0) {
+                    /* do not want to hear from this fd anymore */
+                    fds[i].events = 0;
+                } else {
+                    buffers[i] = realloc(buffers[i], buflen[i] + got);
+                    if (!buf[i]) {
+                        fprintf(stdout, "Out of memory!\n");
+                        return -1;
+                    }
+                    memcpy(buffers[i] + buflen[i], buf, got);
+                    buflen[i] += got;
+                }
+            }
+        }
+        for (i = 0; i < args->numreadfds; i++) {
+            if (fds[i].events) {
+                ctr++;
+                break;
+            }
+        }
+        if (ctr == 0)
             break;
-        if (write(STDOUT_FILENO, buf, got) != got)
-            goto cleanup;
-        if (write(STDERR_FILENO, buf, got) != got)
-            goto cleanup;
+    }
+
+    for (i = 0; i < args->numreadfds; i++) {
+        if (fwrite(buffers[i], 1, buflen[i], stdout) != buflen[i])
+            return -1;
+        if (fwrite(buffers[i], 1, buflen[i], stderr) != buflen[i])
+            return -1;
     }
 
     fprintf(stdout, "END STDOUT\n");
@@ -151,12 +335,38 @@ int main(int argc, char **argv) {
     fprintf(stderr, "END STDERR\n");
     fflush(stderr);
 
-    ret = EXIT_SUCCESS;
+    return 0;
+}
 
- cleanup:
-    fclose(log);
-    free(newenv);
-    return ret;
+int main(int argc, char **argv) {
+    cleanup(struct Arguments *, cleanupArguments) args = NULL;
+    cleanup(FILE *, cleanupFile) log = NULL;
+
+    if (!(log = fopen(abs_builddir "/commandhelper.log", "w")))
+        return EXIT_FAILURE;
+
+    if (!(args = parseArguments(argc, argv)))
+        return EXIT_FAILURE;
+
+    printArguments(log, argc, argv);
+
+    if (printEnvironment(log) != 0)
+        return EXIT_FAILURE;
+
+    if (printFds(log) != 0)
+        return EXIT_FAILURE;
+
+    printDaemonization(log, args);
+
+    if (printCwd(log) != 0)
+        return EXIT_FAILURE;
+
+    fprintf(log, "UMASK:%04o\n", umask(0));
+
+    if (printInput(args) != 0)
+        return EXIT_FAILURE;
+
+    return EXIT_SUCCESS;
 }
 
 #else

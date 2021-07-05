@@ -18,24 +18,22 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_STORAGE_CAPABILITIES_H
-# define LIBVIRT_STORAGE_CAPABILITIES_H
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 typedef struct _virStoragePoolCaps virStoragePoolCaps;
-typedef virStoragePoolCaps *virStoragePoolCapsPtr;
 struct _virStoragePoolCaps {
     virObjectLockable parent;
 
-    virCapsPtr driverCaps;
+    virCaps *driverCaps;
 };
 
-virStoragePoolCapsPtr
-virStoragePoolCapsNew(virCapsPtr driverCaps);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virStoragePoolCaps, virObjectUnref);
+
+
+virStoragePoolCaps *
+virStoragePoolCapsNew(virCaps *driverCaps);
 
 char *
-virStoragePoolCapsFormat(virStoragePoolCapsPtr const caps);
-
-
-#endif /* LIBVIRT_STORAGE_CAPABILITIES_H */
+virStoragePoolCapsFormat(const virStoragePoolCaps *caps);

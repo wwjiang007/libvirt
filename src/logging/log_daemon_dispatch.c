@@ -37,10 +37,10 @@ VIR_LOG_INIT("logging.log_daemon_dispatch");
 #include "log_daemon_dispatch_stubs.h"
 
 static int
-virLogManagerProtocolDispatchDomainOpenLogFile(virNetServerPtr server ATTRIBUTE_UNUSED,
-                                               virNetServerClientPtr client ATTRIBUTE_UNUSED,
-                                               virNetMessagePtr msg,
-                                               virNetMessageErrorPtr rerr,
+virLogManagerProtocolDispatchDomainOpenLogFile(virNetServer *server G_GNUC_UNUSED,
+                                               virNetServerClient *client G_GNUC_UNUSED,
+                                               virNetMessage *msg,
+                                               struct virNetMessageError *rerr,
                                                virLogManagerProtocolDomainOpenLogFileArgs *args,
                                                virLogManagerProtocolDomainOpenLogFileRet *ret)
 {
@@ -76,10 +76,10 @@ virLogManagerProtocolDispatchDomainOpenLogFile(virNetServerPtr server ATTRIBUTE_
 
 
 static int
-virLogManagerProtocolDispatchDomainGetLogFilePosition(virNetServerPtr server ATTRIBUTE_UNUSED,
-                                                      virNetServerClientPtr client ATTRIBUTE_UNUSED,
-                                                      virNetMessagePtr msg ATTRIBUTE_UNUSED,
-                                                      virNetMessageErrorPtr rerr,
+virLogManagerProtocolDispatchDomainGetLogFilePosition(virNetServer *server G_GNUC_UNUSED,
+                                                      virNetServerClient *client G_GNUC_UNUSED,
+                                                      virNetMessage *msg G_GNUC_UNUSED,
+                                                      struct virNetMessageError *rerr,
                                                       virLogManagerProtocolDomainGetLogFilePositionArgs *args,
                                                       virLogManagerProtocolDomainGetLogFilePositionRet *ret)
 {
@@ -106,10 +106,10 @@ virLogManagerProtocolDispatchDomainGetLogFilePosition(virNetServerPtr server ATT
 
 
 static int
-virLogManagerProtocolDispatchDomainReadLogFile(virNetServerPtr server ATTRIBUTE_UNUSED,
-                                               virNetServerClientPtr client ATTRIBUTE_UNUSED,
-                                               virNetMessagePtr msg ATTRIBUTE_UNUSED,
-                                               virNetMessageErrorPtr rerr,
+virLogManagerProtocolDispatchDomainReadLogFile(virNetServer *server G_GNUC_UNUSED,
+                                               virNetServerClient *client G_GNUC_UNUSED,
+                                               virNetMessage *msg G_GNUC_UNUSED,
+                                               struct virNetMessageError *rerr,
                                                virLogManagerProtocolDomainReadLogFileArgs *args,
                                                virLogManagerProtocolDomainReadLogFileRet *ret)
 {
@@ -144,10 +144,10 @@ virLogManagerProtocolDispatchDomainReadLogFile(virNetServerPtr server ATTRIBUTE_
 
 
 static int
-virLogManagerProtocolDispatchDomainAppendLogFile(virNetServerPtr server ATTRIBUTE_UNUSED,
-                                                 virNetServerClientPtr client ATTRIBUTE_UNUSED,
-                                                 virNetMessagePtr msg ATTRIBUTE_UNUSED,
-                                                 virNetMessageErrorPtr rerr,
+virLogManagerProtocolDispatchDomainAppendLogFile(virNetServer *server G_GNUC_UNUSED,
+                                                 virNetServerClient *client G_GNUC_UNUSED,
+                                                 virNetMessage *msg G_GNUC_UNUSED,
+                                                 struct virNetMessageError *rerr,
                                                  virLogManagerProtocolDomainAppendLogFileArgs *args,
                                                  virLogManagerProtocolDomainAppendLogFileRet *ret)
 {

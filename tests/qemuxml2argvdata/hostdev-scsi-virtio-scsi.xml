@@ -13,7 +13,7 @@
   <on_reboot>restart</on_reboot>
   <on_crash>destroy</on_crash>
   <devices>
-    <emulator>/usr/bin/qemu-system-i686</emulator>
+    <emulator>/usr/bin/qemu-system-i386</emulator>
     <disk type='block' device='disk'>
       <source dev='/dev/HostVG/QEMUGuest2'/>
       <target dev='hda' bus='ide'/>
@@ -31,6 +31,56 @@
         <address bus='0' target='0' unit='0'/>
       </source>
       <address type='drive' controller='0' bus='0' target='4' unit='8'/>
+    </hostdev>
+    <hostdev mode='subsystem' type='scsi' managed='yes'>
+      <source>
+        <adapter name='scsi_host0'/>
+        <address bus='0' target='0' unit='1'/>
+      </source>
+      <readonly/>
+      <address type='drive' controller='0' bus='0' target='4' unit='7'/>
+    </hostdev>
+    <hostdev mode='subsystem' type='scsi' managed='no'>
+      <source>
+        <adapter name='scsi_host0'/>
+        <address bus='0' target='0' unit='2'/>
+      </source>
+      <alias name='ua-7996c8dc-a4fa-4012-b76f-043d20144263'/>
+      <address type='drive' controller='0' bus='0' target='4' unit='6'/>
+    </hostdev>
+    <hostdev mode='subsystem' type='scsi' managed='yes'>
+      <source protocol='iscsi' name='iqn.1992-01.com.example'>
+        <host name='example.org' port='3260'/>
+      </source>
+      <address type='drive' controller='0' bus='0' target='2' unit='4'/>
+    </hostdev>
+    <hostdev mode='subsystem' type='scsi' managed='yes'>
+      <source protocol='iscsi' name='iqn.1992-01.com.example/1'>
+        <host name='example.org' port='3260'/>
+      </source>
+      <readonly/>
+      <address type='drive' controller='0' bus='0' target='2' unit='5'/>
+    </hostdev>
+    <hostdev mode='subsystem' type='scsi' managed='yes'>
+      <source protocol='iscsi' name='iqn.1992-01.com.example:storage/1'>
+        <host name='example.org' port='3260'/>
+        <auth username='myname'>
+          <secret type='iscsi' usage='mycluster_myname'/>
+        </auth>
+      </source>
+      <address type='drive' controller='0' bus='0' target='3' unit='4'/>
+    </hostdev>
+    <hostdev mode='subsystem' type='scsi' managed='yes'>
+      <source protocol='iscsi' name='iqn.1992-01.com.example:storage/2'>
+        <host name='example.org' port='3260'/>
+        <auth username='myname'>
+          <secret type='iscsi' usage='mycluster_myname'/>
+        </auth>
+        <initiator>
+          <iqn name='iqn.2020-07.com.example:test'/>
+        </initiator>
+      </source>
+      <address type='drive' controller='0' bus='0' target='3' unit='5'/>
     </hostdev>
     <memballoon model='virtio'/>
   </devices>

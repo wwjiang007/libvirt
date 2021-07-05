@@ -18,11 +18,12 @@
 
 #include <config.h>
 
-#include <regex.h>
+#include <glib/gprintf.h>
 #include <locale.h>
+#ifdef WITH_XLOCALE_H
+# include <xlocale.h>
+#endif
 
-#include "base64.h"
-#include "c-ctype.h"
 #include "virstring.h"
 #include "virthread.h"
 #include "viralloc.h"
@@ -33,197 +34,6 @@
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 VIR_LOG_INIT("util.string");
-
-/*
- * The following virStringSplit & virStringListJoin methods
- * are derived from g_strsplit / g_strjoin in glib2,
- * also available under the LGPLv2+ license terms
- */
-
-/**
- * virStringSplitCount:
- * @string: a string to split
- * @delim: a string which specifies the places at which to split
- *     the string. The delimiter is not included in any of the resulting
- *     strings, unless @max_tokens is reached.
- * @max_tokens: the maximum number of pieces to split @string into.
- *     If this is 0, the string is split completely.
- * @tokcount: If provided, the value is set to the count of pieces the string
- *            was split to excluding the terminating NULL element.
- *
- * Splits a string into a maximum of @max_tokens pieces, using the given
- * @delim. If @max_tokens is reached, the remainder of @string is
- * appended to the last token.
- *
- * As a special case, the result of splitting the empty string "" is an empty
- * vector, not a vector containing a single string. The reason for this
- * special case is that being able to represent an empty vector is typically
- * more useful than consistent handling of empty elements. If you do need
- * to represent empty elements, you'll need to check for the empty string
- * before calling virStringSplit().
- *
- * Return value: a newly-allocated NULL-terminated array of strings. Use
- *    virStringListFree() to free it.
- */
-char **
-virStringSplitCount(const char *string,
-                    const char *delim,
-                    size_t max_tokens,
-                    size_t *tokcount)
-{
-    char **tokens = NULL;
-    size_t ntokens = 0;
-    size_t maxtokens = 0;
-    const char *remainder = string;
-    char *tmp;
-    size_t i;
-
-    if (max_tokens == 0)
-        max_tokens = INT_MAX;
-
-    tmp = strstr(remainder, delim);
-    if (tmp) {
-        size_t delimlen = strlen(delim);
-
-        while (--max_tokens && tmp) {
-            size_t len = tmp - remainder;
-
-            if (VIR_RESIZE_N(tokens, maxtokens, ntokens, 1) < 0)
-                goto error;
-
-            if (VIR_STRNDUP(tokens[ntokens], remainder, len) < 0)
-                goto error;
-            ntokens++;
-            remainder = tmp + delimlen;
-            tmp = strstr(remainder, delim);
-        }
-    }
-    if (*string) {
-        if (VIR_RESIZE_N(tokens, maxtokens, ntokens, 1) < 0)
-            goto error;
-
-        if (VIR_STRDUP(tokens[ntokens], remainder) < 0)
-            goto error;
-        ntokens++;
-    }
-
-    if (VIR_RESIZE_N(tokens, maxtokens, ntokens, 1) < 0)
-        goto error;
-    tokens[ntokens++] = NULL;
-
-    if (tokcount)
-        *tokcount = ntokens - 1;
-
-    return tokens;
-
- error:
-    for (i = 0; i < ntokens; i++)
-        VIR_FREE(tokens[i]);
-    VIR_FREE(tokens);
-    return NULL;
-}
-
-
-char **
-virStringSplit(const char *string,
-               const char *delim,
-               size_t max_tokens)
-{
-    return virStringSplitCount(string, delim, max_tokens, NULL);
-}
-
-
-/**
- * virStringListJoin:
- * @strings: a NULL-terminated array of strings to join
- * @delim: a string to insert between each of the strings
- *
- * Joins a number of strings together to form one long string, with the
- * @delim inserted between each of them. The returned string
- * should be freed with VIR_FREE().
- *
- * Returns: a newly-allocated string containing all of the strings joined
- *     together, with @delim between them
- */
-char *virStringListJoin(const char **strings,
-                        const char *delim)
-{
-    char *ret;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
-    while (*strings) {
-        virBufferAdd(&buf, *strings, -1);
-        if (*(strings+1))
-            virBufferAdd(&buf, delim, -1);
-        strings++;
-    }
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-    ret = virBufferContentAndReset(&buf);
-    if (!ret)
-        ignore_value(VIR_STRDUP(ret, ""));
-    return ret;
-}
-
-
-/**
- * virStringListAdd:
- * @strings: a NULL-terminated array of strings
- * @item: string to add
- *
- * Appends @item into string list @strings. If *@strings is not
- * allocated yet new string list is created.
- *
- * Returns: 0 on success,
- *         -1 otherwise
- */
-int
-virStringListAdd(char ***strings,
-                 const char *item)
-{
-    size_t i = virStringListLength((const char **) *strings);
-
-    if (VIR_EXPAND_N(*strings, i, 2) < 0 ||
-        VIR_STRDUP((*strings)[i - 2], item) < 0)
-        return -1;
-
-    return 0;
-}
-
-
-/**
- * virStringListRemove:
- * @strings: a NULL-terminated array of strings
- * @item: string to remove
- *
- * Remove every occurrence of @item in list of @strings.
- */
-void
-virStringListRemove(char ***strings,
-                    const char *item)
-{
-    size_t r, w = 0;
-
-    if (!strings || !*strings)
-        return;
-
-    for (r = 0; (*strings)[r]; r++) {
-        if (STREQ((*strings)[r], item)) {
-            VIR_FREE((*strings)[r]);
-            continue;
-        }
-        if (r != w)
-            (*strings)[w] = (*strings)[r];
-        w++;
-    }
-
-    if (w == 0) {
-        VIR_FREE(*strings);
-    } else {
-        (*strings)[w] = NULL;
-        ignore_value(VIR_REALLOC_N(*strings, w + 1));
-    }
-}
-
 
 /**
  * virStringListMerge:
@@ -245,86 +55,18 @@ virStringListMerge(char ***dst,
     if (!src || !*src)
         return 0;
 
-    dst_len = virStringListLength((const char **) *dst);
-    src_len = virStringListLength((const char **) *src);
+    dst_len = g_strv_length(*dst);
+    src_len = g_strv_length(*src);
 
-    if (VIR_REALLOC_N(*dst, dst_len + src_len + 1) < 0)
-        return -1;
+    VIR_REALLOC_N(*dst, dst_len + src_len + 1);
 
     for (i = 0; i <= src_len; i++)
         (*dst)[i + dst_len] = (*src)[i];
 
-    /* Don't call virStringListFree() as it would free strings in
+    /* Don't call g_strfreev() as it would free strings in
      * @src. */
     VIR_FREE(*src);
     return 0;
-}
-
-
-/**
- * virStringListCopy:
- * @dst: where to store the copy of @strings
- * @src: a NULL-terminated array of strings
- *
- * Makes a deep copy of the @src string list and stores it in @dst. Callers
- * are responsible for freeing @dst.
- *
- * Returns 0 on success, -1 on error.
- */
-int
-virStringListCopy(char ***dst,
-                  const char **src)
-{
-    char **copy = NULL;
-    size_t i;
-
-    *dst = NULL;
-
-    if (!src)
-        return 0;
-
-    if (VIR_ALLOC_N(copy, virStringListLength(src) + 1) < 0)
-        goto error;
-
-    for (i = 0; src[i]; i++) {
-        if (VIR_STRDUP(copy[i], src[i]) < 0)
-            goto error;
-    }
-
-    *dst = copy;
-    return 0;
-
- error:
-    virStringListFree(copy);
-    return -1;
-}
-
-
-/**
- * virStringListFree:
- * @strings: a NULL-terminated array of strings to free
- *
- * Frees a NULL-terminated array of strings, and the array itself.
- * If called on a NULL value, virStringListFree() simply returns.
- */
-void virStringListFree(char **strings)
-{
-    char **tmp = strings;
-    while (tmp && *tmp) {
-        VIR_FREE(*tmp);
-        tmp++;
-    }
-    VIR_FREE(strings);
-}
-
-
-void virStringListAutoFree(char ***strings)
-{
-    if (!*strings)
-        return;
-
-    virStringListFree(*strings);
-    *strings = NULL;
 }
 
 
@@ -345,46 +87,11 @@ virStringListFreeCount(char **strings,
         return;
 
     for (i = 0; i < count; i++)
-        VIR_FREE(strings[i]);
+        g_free(strings[i]);
 
-    VIR_FREE(strings);
+    g_free(strings);
 }
 
-
-bool
-virStringListHasString(const char **strings,
-                       const char *needle)
-{
-    size_t i = 0;
-
-    if (!strings)
-        return false;
-
-    while (strings[i]) {
-        if (STREQ(strings[i++], needle))
-            return true;
-    }
-
-    return false;
-}
-
-char *
-virStringListGetFirstWithPrefix(char **strings,
-                                const char *prefix)
-{
-    size_t i = 0;
-
-    if (!strings)
-        return NULL;
-
-    while (strings[i]) {
-        if (STRPREFIX(strings[i], prefix))
-            return strings[i] + strlen(prefix);
-        i++;
-    }
-
-    return NULL;
-}
 
 /* Like strtol, but produce an "int" result, and check more carefully.
    Return 0 upon success;  return -1 to indicate failure.
@@ -590,7 +297,7 @@ virStrToLong_ullp(char const *s, char **end_ptr, int base,
 }
 
 /* In case thread-safe locales are available */
-#if HAVE_NEWLOCALE
+#if WITH_NEWLOCALE
 
 typedef locale_t virLocale;
 static virLocale virLocaleRaw;
@@ -630,22 +337,22 @@ virLocaleRevert(virLocale *oldlocale)
 }
 
 static void
-virLocaleFixupRadix(char **strp ATTRIBUTE_UNUSED)
+virLocaleFixupRadix(char **strp G_GNUC_UNUSED)
 {
 }
 
-#else /* !HAVE_NEWLOCALE */
+#else /* !WITH_NEWLOCALE */
 
 typedef int virLocale;
 
 static int
-virLocaleSetRaw(virLocale *oldlocale ATTRIBUTE_UNUSED)
+virLocaleSetRaw(virLocale *oldlocale G_GNUC_UNUSED)
 {
     return 0;
 }
 
 static void
-virLocaleRevert(virLocale *oldlocale ATTRIBUTE_UNUSED)
+virLocaleRevert(virLocale *oldlocale G_GNUC_UNUSED)
 {
 }
 
@@ -665,7 +372,7 @@ virLocaleFixupRadix(char **strp)
     }
 }
 
-#endif /* !HAVE_NEWLOCALE */
+#endif /* !WITH_NEWLOCALE */
 
 
 /**
@@ -705,108 +412,24 @@ virStrToDouble(char const *s,
  *
  * converts double to string with C locale (thread-safe).
  *
- * Returns -1 on error, size of the string otherwise.
+ * Returns: 0 on success, -1 otherwise.
  */
 int
 virDoubleToStr(char **strp, double number)
 {
     virLocale oldlocale;
-    int ret = -1;
 
     if (virLocaleSetRaw(&oldlocale) < 0)
         return -1;
 
-    ret = virAsprintf(strp, "%lf", number);
+    *strp = g_strdup_printf("%lf", number);
 
     virLocaleRevert(&oldlocale);
     virLocaleFixupRadix(strp);
 
-    return ret;
-}
-
-
-int
-virVasprintfInternal(bool report,
-                     int domcode,
-                     const char *filename,
-                     const char *funcname,
-                     size_t linenr,
-                     char **strp,
-                     const char *fmt,
-                     va_list list)
-{
-    int ret;
-
-    if ((ret = vasprintf(strp, fmt, list)) == -1) {
-        if (report)
-            virReportOOMErrorFull(domcode, filename, funcname, linenr);
-        *strp = NULL;
-    }
-    return ret;
-}
-
-int
-virAsprintfInternal(bool report,
-                    int domcode,
-                    const char *filename,
-                    const char *funcname,
-                    size_t linenr,
-                    char **strp,
-                    const char *fmt, ...)
-{
-    va_list ap;
-    int ret;
-
-    va_start(ap, fmt);
-    ret = virVasprintfInternal(report, domcode, filename,
-                               funcname, linenr, strp, fmt, ap);
-    va_end(ap);
-    return ret;
-}
-
-/**
- * virStrncpy:
- *
- * @dest: destination buffer
- * @src: source buffer
- * @n: number of bytes to copy
- * @destbytes: number of bytes the destination can accommodate
- *
- * Copies the first @n bytes of @src to @dest.
- *
- * @src must be NULL-terminated; if successful, @dest is guaranteed to
- * be NULL-terminated as well.
- *
- * @n must be a reasonable value, that is, it must not exceed either
- * the length of @src or the size of @dest. For the latter constraint,
- * the fact that @dest needs to accommodate a NULL byte in addition to
- * the bytes copied from @src must be taken into account.
- *
- * If you want to copy *all* of @src to @dest, use virStrcpy() or
- * virStrcpyStatic() instead.
- *
- * Returns: 0 on success, <0 on failure.
- */
-int
-virStrncpy(char *dest, const char *src, size_t n, size_t destbytes)
-{
-    size_t src_len = strlen(src);
-
-    /* As a special case, -1 means "copy the entire string".
-     *
-     * This is to avoid calling strlen() twice, once in the virStrcpy()
-     * wrapper and once here for bound checking purposes. */
-    if (n == -1)
-        n = src_len;
-
-    if (n <= 0 || n > src_len || n > (destbytes - 1))
-        return -1;
-
-    memcpy(dest, src, n);
-    dest[n] = '\0';
-
     return 0;
 }
+
 
 /**
  * virStrcpy:
@@ -815,16 +438,18 @@ virStrncpy(char *dest, const char *src, size_t n, size_t destbytes)
  * @src: source buffer
  * @destbytes: number of bytes the destination can accommodate
  *
- * Copies @src to @dest.
+ * Copies @src to @dest. @dest is guaranteed to be 'nul' terminated if
+ * destbytes is 1 or more.
  *
- * See virStrncpy() for more information.
- *
- * Returns: 0 on success, <0 on failure.
+ * Returns: 0 on success, -1 if @src doesn't fit into @dest and was truncated.
  */
 int
 virStrcpy(char *dest, const char *src, size_t destbytes)
 {
-    return virStrncpy(dest, src, -1, destbytes);
+    if (g_strlcpy(dest, src, destbytes) >= destbytes)
+        return -1;
+
+    return 0;
 }
 
 /**
@@ -839,7 +464,7 @@ virSkipSpaces(const char **str)
 {
     const char *cur = *str;
 
-    while (c_isspace(*cur))
+    while (g_ascii_isspace(*cur))
         cur++;
     *str = cur;
 }
@@ -856,10 +481,28 @@ virSkipSpacesAndBackslash(const char **str)
 {
     const char *cur = *str;
 
-    while (c_isspace(*cur) || *cur == '\\')
+    while (g_ascii_isspace(*cur) || *cur == '\\')
         cur++;
     *str = cur;
 }
+
+
+/**
+ * virSkipToDigit:
+ * @str: pointer to the char pointer used
+ *
+ * Skip over any character that is not 0-9
+ */
+void
+virSkipToDigit(const char **str)
+{
+    const char *cur = *str;
+
+    while (*cur && !g_ascii_isdigit(*cur))
+        cur++;
+    *str = cur;
+}
+
 
 /**
  * virTrimSpaces:
@@ -885,7 +528,7 @@ virTrimSpaces(char *str, char **endp)
         end = str + strlen(str);
     else
         end = *endp;
-    while (end > str && c_isspace(end[-1]))
+    while (end > str && g_ascii_isspace(end[-1]))
         end--;
     if (endp) {
         if (!*endp)
@@ -933,102 +576,6 @@ virStringIsEmpty(const char *str)
     return str[0] == '\0';
 }
 
-/**
- * virStrdup:
- * @dest: where to store duplicated string
- * @src: the source string to duplicate
- * @report: whether to report OOM error, if there is one
- * @domcode: error domain code
- * @filename: caller's filename
- * @funcname: caller's funcname
- * @linenr: caller's line number
- *
- * Wrapper over strdup, which reports OOM error if told so,
- * in which case callers wants to pass @domcode, @filename,
- * @funcname and @linenr which should represent location in
- * caller's body where virStrdup is called from. Consider
- * using VIR_STRDUP which sets these automatically.
- *
- * Returns: 0 for NULL src, 1 on successful copy, -1 otherwise.
- */
-int
-virStrdup(char **dest,
-          const char *src,
-          bool report,
-          int domcode,
-          const char *filename,
-          const char *funcname,
-          size_t linenr)
-{
-    *dest = NULL;
-    if (!src)
-        return 0;
-    if (!(*dest = strdup(src))) {
-        if (report)
-            virReportOOMErrorFull(domcode, filename, funcname, linenr);
-        return -1;
-    }
-
-    return 1;
-}
-
-/**
- * virStrndup:
- * @dest: where to store duplicated string
- * @src: the source string to duplicate
- * @n: how many bytes to copy
- * @report: whether to report OOM error, if there is one
- * @domcode: error domain code
- * @filename: caller's filename
- * @funcname: caller's funcname
- * @linenr: caller's line number
- *
- * Wrapper over strndup, which reports OOM error if told so,
- * in which case callers wants to pass @domcode, @filename,
- * @funcname and @linenr which should represent location in
- * caller's body where virStrndup is called from. Consider
- * using VIR_STRNDUP which sets these automatically.
- *
- * In case @n is smaller than zero, the whole @src string is
- * copied.
- *
- * Returns: 0 for NULL src, 1 on successful copy, -1 otherwise.
- */
-int
-virStrndup(char **dest,
-           const char *src,
-           ssize_t n,
-           bool report,
-           int domcode,
-           const char *filename,
-           const char *funcname,
-           size_t linenr)
-{
-    *dest = NULL;
-    if (!src)
-        return 0;
-    if (n < 0)
-        n = strlen(src);
-    if (!(*dest = strndup(src, n))) {
-        if (report)
-            virReportOOMErrorFull(domcode, filename, funcname, linenr);
-        return -1;
-    }
-
-   return 1;
-}
-
-
-size_t virStringListLength(const char * const *strings)
-{
-    size_t i = 0;
-
-    while (strings && strings[i])
-        i++;
-
-    return i;
-}
-
 
 /**
  * virStringSortCompare:
@@ -1066,7 +613,7 @@ int virStringSortRevCompare(const void *a, const void *b)
  * @matches: pointer to an array to be filled with NULL terminated list of matches
  *
  * Performs a POSIX extended regex search against a string and return all matching substrings.
- * The @matches value should be freed with virStringListFree() when no longer
+ * The @matches value should be freed with g_strfreev() when no longer
  * required.
  *
  * @code
@@ -1086,7 +633,7 @@ int virStringSortRevCompare(const void *a, const void *b)
  *  // matches[2] == "bbb3c75c-d60f-43b0-b802-fd56b84a4222"
  *  // matches[3] == NULL;
  *
- *  virStringListFree(matches);
+ *  g_strfreev(matches);
  * @endcode
  *
  * Returns: -1 on error, or number of matches
@@ -1097,64 +644,59 @@ virStringSearch(const char *str,
                 size_t max_matches,
                 char ***matches)
 {
-    regex_t re;
-    regmatch_t rem;
+    g_autoptr(GRegex) regex = NULL;
+    g_autoptr(GError) err = NULL;
     size_t nmatches = 0;
     ssize_t ret = -1;
-    int rv = -1;
 
     *matches = NULL;
 
     VIR_DEBUG("search '%s' for '%s'", str, regexp);
 
-    if ((rv = regcomp(&re, regexp, REG_EXTENDED)) != 0) {
-        char error[100];
-        regerror(rv, &re, error, sizeof(error));
+    regex = g_regex_new(regexp, 0, 0, &err);
+    if (!regex) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Error while compiling regular expression '%s': %s"),
-                       regexp, error);
+                       _("Failed to compile regex %s"), err->message);
         return -1;
     }
 
-    if (re.re_nsub != 1) {
+    if (g_regex_get_capture_count(regex) != 1) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Regular expression '%s' must have exactly 1 match group, not %zu"),
-                       regexp, re.re_nsub);
+                       _("Regular expression '%s' must have exactly 1 match group, not %d"),
+                       regexp, g_regex_get_capture_count(regex));
         goto cleanup;
     }
 
     /* '*matches' must always be NULL terminated in every iteration
      * of the loop, so start by allocating 1 element
      */
-    if (VIR_EXPAND_N(*matches, nmatches, 1) < 0)
-        goto cleanup;
+    VIR_EXPAND_N(*matches, nmatches, 1);
 
     while ((nmatches - 1) < max_matches) {
+        g_autoptr(GMatchInfo) info = NULL;
         char *match;
+        int endpos;
 
-        if (regexec(&re, str, 1, &rem, 0) != 0)
+        if (!g_regex_match(regex, str, 0, &info))
             break;
 
-        if (VIR_EXPAND_N(*matches, nmatches, 1) < 0)
-            goto cleanup;
+        VIR_EXPAND_N(*matches, nmatches, 1);
 
-        if (VIR_STRNDUP(match, str + rem.rm_so,
-                        rem.rm_eo - rem.rm_so) < 0)
-            goto cleanup;
+        match = g_match_info_fetch(info, 1);
 
         VIR_DEBUG("Got '%s'", match);
 
         (*matches)[nmatches-2] = match;
 
-        str = str + rem.rm_eo;
+        g_match_info_fetch_pos(info, 1, NULL, &endpos);
+        str += endpos;
     }
 
     ret = nmatches - 1; /* don't count the trailing null */
 
  cleanup:
-    regfree(&re);
     if (ret < 0) {
-        virStringListFree(*matches);
+        g_strfreev(*matches);
         *matches = NULL;
     }
     return ret;
@@ -1172,24 +714,18 @@ bool
 virStringMatch(const char *str,
                const char *regexp)
 {
-    regex_t re;
-    int rv;
+    g_autoptr(GRegex) regex = NULL;
+    g_autoptr(GError) err = NULL;
 
     VIR_DEBUG("match '%s' for '%s'", str, regexp);
 
-    if ((rv = regcomp(&re, regexp, REG_EXTENDED | REG_NOSUB)) != 0) {
-        char error[100];
-        regerror(rv, &re, error, sizeof(error));
-        VIR_WARN("error while compiling regular expression '%s': %s",
-                 regexp, error);
+    regex = g_regex_new(regexp, 0, 0, &err);
+    if (!regex) {
+        VIR_WARN("Failed to compile regex %s", err->message);
         return false;
     }
 
-    rv = regexec(&re, str, 0, NULL, 0);
-
-    regfree(&re);
-
-    return rv == 0;
+    return g_regex_match(regex, str, 0, NULL);
 }
 
 /**
@@ -1207,7 +743,7 @@ virStringReplace(const char *haystack,
                  const char *oldneedle,
                  const char *newneedle)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     const char *tmp1, *tmp2;
     size_t oldneedlelen = strlen(oldneedle);
     size_t newneedlelen = strlen(newneedle);
@@ -1228,9 +764,6 @@ virStringReplace(const char *haystack,
 
         tmp1 = tmp2;
     }
-
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
 
     return virBufferContentAndReset(&buf);
 }
@@ -1350,9 +883,6 @@ virStringHasControlChars(const char *str)
 }
 
 
-VIR_WARNINGS_NO_WLOGICALOP_STRCHR
-
-
 /**
  * virStringStripControlChars:
  * @str: the string to strip
@@ -1421,11 +951,10 @@ virStringToUpper(char **dst, const char *src)
     if (!src)
         return 0;
 
-    if (VIR_ALLOC_N(cap, strlen(src) + 1) < 0)
-        return -1;
+    cap = g_new0(char, strlen(src) + 1);
 
     for (i = 0; src[i]; i++) {
-        cap[i] = c_toupper(src[i]);
+        cap[i] = g_ascii_toupper(src[i]);
         if (cap[i] == '-')
             cap[i] = '_';
     }
@@ -1446,7 +975,7 @@ virStringIsPrintable(const char *str)
     size_t i;
 
     for (i = 0; str[i]; i++)
-        if (!c_isprint(str[i]))
+        if (!g_ascii_isprint(str[i]))
             return false;
 
     return true;
@@ -1465,34 +994,12 @@ virStringBufferIsPrintable(const uint8_t *buf,
     size_t i;
 
     for (i = 0; i < buflen; i++)
-        if (!c_isprint(buf[i]))
+        if (!g_ascii_isprint(buf[i]))
             return false;
 
     return true;
 }
 
-
-/**
- * virStringEncodeBase64:
- * @buf: buffer of bytes to encode
- * @buflen: number of bytes to encode
- *
- * Encodes @buf to base 64 and returns the resulting string. The caller is
- * responsible for freeing the result.
- */
-char *
-virStringEncodeBase64(const uint8_t *buf, size_t buflen)
-{
-    char *ret;
-
-    base64_encode_alloc((const char *) buf, buflen, &ret);
-    if (!ret) {
-        virReportOOMError();
-        return NULL;
-    }
-
-    return ret;
-}
 
 /**
  * virStringTrimOptionalNewline:

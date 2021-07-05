@@ -38,21 +38,23 @@
 #include "virbuffer.h"
 #include "remote_driver.h"
 #include "remote_protocol.h"
+#include "remote_sockets.h"
 #include "lxc_protocol.h"
 #include "qemu_protocol.h"
 #include "viralloc.h"
 #include "virfile.h"
 #include "vircommand.h"
-#include "intprops.h"
 #include "virtypedparam.h"
 #include "viruri.h"
 #include "virauth.h"
 #include "virauthconfig.h"
 #include "virstring.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_REMOTE
 
 VIR_LOG_INIT("remote.remote_driver");
+
 
 #if SIZEOF_LONG < 8
 # define HYPER_TO_TYPE(_type, _to, _from) \
@@ -77,16 +79,14 @@ static bool inside_daemon;
 struct private_data {
     virMutex lock;
 
-    virNetClientPtr client;
-    virNetClientProgramPtr remoteProgram;
-    virNetClientProgramPtr qemuProgram;
-    virNetClientProgramPtr lxcProgram;
+    virNetClient *client;
+    virNetClientProgram *remoteProgram;
+    virNetClientProgram *qemuProgram;
+    virNetClientProgram *lxcProgram;
 
     int counter; /* Serial number for RPC */
 
-#ifdef WITH_GNUTLS
-    virNetTLSContextPtr tls;
-#endif
+    virNetTLSContext *tls;
 
     int is_secure;              /* Secure if TLS or SASL or UNIX sockets */
     char *type;                 /* Cached return from remoteType. */
@@ -96,8 +96,8 @@ struct private_data {
     bool serverEventFilter;     /* Does server support modern event filtering */
     bool serverCloseCallback;   /* Does server support driver close callback */
 
-    virObjectEventStatePtr eventState;
-    virConnectCloseCallbackDataPtr closeCallback;
+    virObjectEventState *eventState;
+    virConnectCloseCallbackData *closeCallback;
 };
 
 enum {
@@ -138,6 +138,7 @@ static int remoteAuthPolkit(virConnectPtr conn, struct private_data *priv,
 
 static virDomainPtr get_nonnull_domain(virConnectPtr conn, remote_nonnull_domain domain);
 static virNetworkPtr get_nonnull_network(virConnectPtr conn, remote_nonnull_network network);
+static virNetworkPortPtr get_nonnull_network_port(virConnectPtr conn, remote_nonnull_network_port port);
 static virNWFilterPtr get_nonnull_nwfilter(virConnectPtr conn, remote_nonnull_nwfilter nwfilter);
 static virNWFilterBindingPtr get_nonnull_nwfilter_binding(virConnectPtr conn, remote_nonnull_nwfilter_binding binding);
 static virInterfacePtr get_nonnull_interface(virConnectPtr conn, remote_nonnull_interface iface);
@@ -145,9 +146,11 @@ static virStoragePoolPtr get_nonnull_storage_pool(virConnectPtr conn, remote_non
 static virStorageVolPtr get_nonnull_storage_vol(virConnectPtr conn, remote_nonnull_storage_vol vol);
 static virNodeDevicePtr get_nonnull_node_device(virConnectPtr conn, remote_nonnull_node_device dev);
 static virSecretPtr get_nonnull_secret(virConnectPtr conn, remote_nonnull_secret secret);
+static virDomainCheckpointPtr get_nonnull_domain_checkpoint(virDomainPtr domain, remote_nonnull_domain_checkpoint checkpoint);
 static virDomainSnapshotPtr get_nonnull_domain_snapshot(virDomainPtr domain, remote_nonnull_domain_snapshot snapshot);
 static void make_nonnull_domain(remote_nonnull_domain *dom_dst, virDomainPtr dom_src);
 static void make_nonnull_network(remote_nonnull_network *net_dst, virNetworkPtr net_src);
+static void make_nonnull_network_port(remote_nonnull_network_port *port_dst, virNetworkPortPtr port_src);
 static void make_nonnull_interface(remote_nonnull_interface *interface_dst, virInterfacePtr interface_src);
 static void make_nonnull_storage_pool(remote_nonnull_storage_pool *pool_dst, virStoragePoolPtr vol_src);
 static void make_nonnull_storage_vol(remote_nonnull_storage_vol *vol_dst, virStorageVolPtr vol_src);
@@ -156,271 +159,259 @@ make_nonnull_node_device(remote_nonnull_node_device *dev_dst, virNodeDevicePtr d
 static void make_nonnull_secret(remote_nonnull_secret *secret_dst, virSecretPtr secret_src);
 static void make_nonnull_nwfilter(remote_nonnull_nwfilter *nwfilter_dst, virNWFilterPtr nwfilter_src);
 static void make_nonnull_nwfilter_binding(remote_nonnull_nwfilter_binding *binding_dst, virNWFilterBindingPtr binding_src);
+static void make_nonnull_domain_checkpoint(remote_nonnull_domain_checkpoint *checkpoint_dst, virDomainCheckpointPtr checkpoint_src);
 static void make_nonnull_domain_snapshot(remote_nonnull_domain_snapshot *snapshot_dst, virDomainSnapshotPtr snapshot_src);
 
 /*----------------------------------------------------------------------*/
 
 /* Helper functions for remoteOpen. */
-static int remoteSplitURIScheme(virURIPtr uri,
-                                char **driver,
-                                char **transport)
-{
-    char *p = strchr(uri->scheme, '+');
-
-    *driver = *transport = NULL;
-
-    if (VIR_STRNDUP(*driver, uri->scheme, p ? p - uri->scheme : -1) < 0)
-        return -1;
-
-    if (p &&
-        VIR_STRDUP(*transport, p + 1) < 0) {
-        VIR_FREE(*driver);
-        return -1;
-    }
-
-    return 0;
-}
 
 
 static int
-remoteStateInitialize(bool privileged ATTRIBUTE_UNUSED,
-                      virStateInhibitCallback callback ATTRIBUTE_UNUSED,
-                      void *opaque ATTRIBUTE_UNUSED)
+remoteStateInitialize(bool privileged G_GNUC_UNUSED,
+                      const char *root G_GNUC_UNUSED,
+                      virStateInhibitCallback callback G_GNUC_UNUSED,
+                      void *opaque G_GNUC_UNUSED)
 {
     /* Mark that we're inside the daemon so we can avoid
      * re-entering ourselves
      */
     inside_daemon = true;
-    return 0;
+    return VIR_DRV_STATE_INIT_COMPLETE;
 }
 
 
 static void
-remoteDomainBuildEventLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventLifecycle(virNetClientProgram *prog G_GNUC_UNUSED,
+                                virNetClient *client G_GNUC_UNUSED,
                                 void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                        virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackLifecycle(virNetClientProgram *prog G_GNUC_UNUSED,
+                                        virNetClient *client G_GNUC_UNUSED,
                                         void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventReboot(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                             virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventReboot(virNetClientProgram *prog G_GNUC_UNUSED,
+                             virNetClient *client G_GNUC_UNUSED,
                              void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackReboot(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                     virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackReboot(virNetClientProgram *prog G_GNUC_UNUSED,
+                                     virNetClient *client G_GNUC_UNUSED,
                                      void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventRTCChange(virNetClientProgramPtr prog,
-                                virNetClientPtr client,
+remoteDomainBuildEventRTCChange(virNetClientProgram *prog,
+                                virNetClient *client,
                                 void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackRTCChange(virNetClientProgramPtr prog,
-                                        virNetClientPtr client,
+remoteDomainBuildEventCallbackRTCChange(virNetClientProgram *prog,
+                                        virNetClient *client,
                                         void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventWatchdog(virNetClientProgramPtr prog,
-                               virNetClientPtr client,
+remoteDomainBuildEventWatchdog(virNetClientProgram *prog,
+                               virNetClient *client,
                                void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackWatchdog(virNetClientProgramPtr prog,
-                                       virNetClientPtr client,
+remoteDomainBuildEventCallbackWatchdog(virNetClientProgram *prog,
+                                       virNetClient *client,
                                        void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventIOError(virNetClientProgramPtr prog,
-                              virNetClientPtr client,
+remoteDomainBuildEventIOError(virNetClientProgram *prog,
+                              virNetClient *client,
                               void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackIOError(virNetClientProgramPtr prog,
-                                      virNetClientPtr client,
+remoteDomainBuildEventCallbackIOError(virNetClientProgram *prog,
+                                      virNetClient *client,
                                       void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventIOErrorReason(virNetClientProgramPtr prog,
-                                    virNetClientPtr client,
+remoteDomainBuildEventIOErrorReason(virNetClientProgram *prog,
+                                    virNetClient *client,
                                     void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackIOErrorReason(virNetClientProgramPtr prog,
-                                            virNetClientPtr client,
+remoteDomainBuildEventCallbackIOErrorReason(virNetClientProgram *prog,
+                                            virNetClient *client,
                                             void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventGraphics(virNetClientProgramPtr prog,
-                               virNetClientPtr client,
+remoteDomainBuildEventGraphics(virNetClientProgram *prog,
+                               virNetClient *client,
                                void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackGraphics(virNetClientProgramPtr prog,
-                                       virNetClientPtr client,
+remoteDomainBuildEventCallbackGraphics(virNetClientProgram *prog,
+                                       virNetClient *client,
                                        void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventControlError(virNetClientProgramPtr prog,
-                                   virNetClientPtr client,
+remoteDomainBuildEventControlError(virNetClientProgram *prog,
+                                   virNetClient *client,
                                    void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackControlError(virNetClientProgramPtr prog,
-                                           virNetClientPtr client,
+remoteDomainBuildEventCallbackControlError(virNetClientProgram *prog,
+                                           virNetClient *client,
                                            void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventBlockJob(virNetClientProgramPtr prog,
-                               virNetClientPtr client,
+remoteDomainBuildEventBlockJob(virNetClientProgram *prog,
+                               virNetClient *client,
                                void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackBlockJob(virNetClientProgramPtr prog,
-                                       virNetClientPtr client,
+remoteDomainBuildEventCallbackBlockJob(virNetClientProgram *prog,
+                                       virNetClient *client,
                                        void *evdata, void *opaque);
 
 
 static void
-remoteDomainBuildEventDiskChange(virNetClientProgramPtr prog,
-                                 virNetClientPtr client,
+remoteDomainBuildEventDiskChange(virNetClientProgram *prog,
+                                 virNetClient *client,
                                  void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackDiskChange(virNetClientProgramPtr prog,
-                                         virNetClientPtr client,
+remoteDomainBuildEventCallbackDiskChange(virNetClientProgram *prog,
+                                         virNetClient *client,
                                          void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventTrayChange(virNetClientProgramPtr prog,
-                                 virNetClientPtr client,
+remoteDomainBuildEventTrayChange(virNetClientProgram *prog,
+                                 virNetClient *client,
                                  void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackTrayChange(virNetClientProgramPtr prog,
-                                         virNetClientPtr client,
+remoteDomainBuildEventCallbackTrayChange(virNetClientProgram *prog,
+                                         virNetClient *client,
                                          void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventPMWakeup(virNetClientProgramPtr prog,
-                               virNetClientPtr client,
+remoteDomainBuildEventPMWakeup(virNetClientProgram *prog,
+                               virNetClient *client,
                                void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackPMWakeup(virNetClientProgramPtr prog,
-                                       virNetClientPtr client,
+remoteDomainBuildEventCallbackPMWakeup(virNetClientProgram *prog,
+                                       virNetClient *client,
                                        void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventPMSuspend(virNetClientProgramPtr prog,
-                                virNetClientPtr client,
+remoteDomainBuildEventPMSuspend(virNetClientProgram *prog,
+                                virNetClient *client,
                                 void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackPMSuspend(virNetClientProgramPtr prog,
-                                        virNetClientPtr client,
+remoteDomainBuildEventCallbackPMSuspend(virNetClientProgram *prog,
+                                        virNetClient *client,
                                         void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventBalloonChange(virNetClientProgramPtr prog,
-                                    virNetClientPtr client,
+remoteDomainBuildEventBalloonChange(virNetClientProgram *prog,
+                                    virNetClient *client,
                                     void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackBalloonChange(virNetClientProgramPtr prog,
-                                            virNetClientPtr client,
+remoteDomainBuildEventCallbackBalloonChange(virNetClientProgram *prog,
+                                            virNetClient *client,
                                             void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventPMSuspendDisk(virNetClientProgramPtr prog,
-                                  virNetClientPtr client,
+remoteDomainBuildEventPMSuspendDisk(virNetClientProgram *prog,
+                                  virNetClient *client,
                                   void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackPMSuspendDisk(virNetClientProgramPtr prog,
-                                            virNetClientPtr client,
+remoteDomainBuildEventCallbackPMSuspendDisk(virNetClientProgram *prog,
+                                            virNetClient *client,
                                             void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventDeviceRemoved(virNetClientProgramPtr prog,
-                                    virNetClientPtr client,
+remoteDomainBuildEventDeviceRemoved(virNetClientProgram *prog,
+                                    virNetClient *client,
                                     void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackDeviceRemoved(virNetClientProgramPtr prog,
-                                            virNetClientPtr client,
+remoteDomainBuildEventCallbackDeviceRemoved(virNetClientProgram *prog,
+                                            virNetClient *client,
                                             void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackDeviceAdded(virNetClientProgramPtr prog,
-                                          virNetClientPtr client,
+remoteDomainBuildEventCallbackDeviceAdded(virNetClientProgram *prog,
+                                          virNetClient *client,
                                           void *evdata, void *opaque);
 static void
-remoteDomainBuildEventCallbackDeviceRemovalFailed(virNetClientProgramPtr prog,
-                                                  virNetClientPtr client,
+remoteDomainBuildEventCallbackDeviceRemovalFailed(virNetClientProgram *prog,
+                                                  virNetClient *client,
                                                   void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventBlockJob2(virNetClientProgramPtr prog,
-                                virNetClientPtr client,
+remoteDomainBuildEventBlockJob2(virNetClientProgram *prog,
+                                virNetClient *client,
                                 void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventCallbackTunable(virNetClientProgramPtr prog,
-                                      virNetClientPtr client,
+remoteDomainBuildEventCallbackTunable(virNetClientProgram *prog,
+                                      virNetClient *client,
                                       void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventCallbackAgentLifecycle(virNetClientProgramPtr prog,
-                                             virNetClientPtr client,
+remoteDomainBuildEventCallbackAgentLifecycle(virNetClientProgram *prog,
+                                             virNetClient *client,
                                              void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventCallbackMigrationIteration(virNetClientProgramPtr prog,
-                                                 virNetClientPtr client,
+remoteDomainBuildEventCallbackMigrationIteration(virNetClientProgram *prog,
+                                                 virNetClient *client,
                                                  void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventCallbackJobCompleted(virNetClientProgramPtr prog,
-                                           virNetClientPtr client,
+remoteDomainBuildEventCallbackJobCompleted(virNetClientProgram *prog,
+                                           virNetClient *client,
                                            void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventCallbackMetadataChange(virNetClientProgramPtr prog,
-                                             virNetClientPtr client,
+remoteDomainBuildEventCallbackMetadataChange(virNetClientProgram *prog,
+                                             virNetClient *client,
                                              void *evdata, void *opaque);
 
 static void
-remoteNetworkBuildEventLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                 virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteNetworkBuildEventLifecycle(virNetClientProgram *prog G_GNUC_UNUSED,
+                                 virNetClient *client G_GNUC_UNUSED,
                                  void *evdata, void *opaque);
 
 static void
-remoteStoragePoolBuildEventLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                     virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteStoragePoolBuildEventLifecycle(virNetClientProgram *prog G_GNUC_UNUSED,
+                                     virNetClient *client G_GNUC_UNUSED,
                                      void *evdata, void *opaque);
 
 static void
-remoteStoragePoolBuildEventRefresh(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                   virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteStoragePoolBuildEventRefresh(virNetClientProgram *prog G_GNUC_UNUSED,
+                                   virNetClient *client G_GNUC_UNUSED,
                                    void *evdata, void *opaque);
 
 static void
-remoteNodeDeviceBuildEventLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                    virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteNodeDeviceBuildEventLifecycle(virNetClientProgram *prog G_GNUC_UNUSED,
+                                    virNetClient *client G_GNUC_UNUSED,
                                     void *evdata, void *opaque);
 
 static void
-remoteNodeDeviceBuildEventUpdate(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                 virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteNodeDeviceBuildEventUpdate(virNetClientProgram *prog G_GNUC_UNUSED,
+                                 virNetClient *client G_GNUC_UNUSED,
                                  void *evdata, void *opaque);
 
 static void
-remoteSecretBuildEventLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteSecretBuildEventLifecycle(virNetClientProgram *prog G_GNUC_UNUSED,
+                                virNetClient *client G_GNUC_UNUSED,
                                 void *evdata, void *opaque);
 
 static void
-remoteSecretBuildEventValueChanged(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                   virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteSecretBuildEventValueChanged(virNetClientProgram *prog G_GNUC_UNUSED,
+                                   virNetClient *client G_GNUC_UNUSED,
                                    void *evdata, void *opaque);
 
 static void
-remoteDomainBuildEventBlockThreshold(virNetClientProgramPtr prog,
-                                     virNetClientPtr client,
+remoteDomainBuildEventBlockThreshold(virNetClientProgram *prog,
+                                     virNetClient *client,
                                      void *evdata, void *opaque);
 
 static void
-remoteConnectNotifyEventConnectionClosed(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                         virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventMemoryFailure(virNetClientProgram *prog,
+                                    virNetClient *client,
+                                    void *evdata, void *opaque);
+
+static void
+remoteConnectNotifyEventConnectionClosed(virNetClientProgram *prog G_GNUC_UNUSED,
+                                         virNetClient *client G_GNUC_UNUSED,
                                          void *evdata, void *opaque);
 
 static virNetClientProgramEvent remoteEvents[] = {
@@ -629,11 +620,15 @@ static virNetClientProgramEvent remoteEvents[] = {
       remoteDomainBuildEventBlockThreshold,
       sizeof(remote_domain_event_block_threshold_msg),
       (xdrproc_t)xdr_remote_domain_event_block_threshold_msg },
+    { REMOTE_PROC_DOMAIN_EVENT_MEMORY_FAILURE,
+      remoteDomainBuildEventMemoryFailure,
+      sizeof(remote_domain_event_memory_failure_msg),
+      (xdrproc_t)xdr_remote_domain_event_memory_failure_msg },
 };
 
 static void
-remoteConnectNotifyEventConnectionClosed(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                         virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteConnectNotifyEventConnectionClosed(virNetClientProgram *prog G_GNUC_UNUSED,
+                                         virNetClient *client G_GNUC_UNUSED,
                                          void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -644,8 +639,8 @@ remoteConnectNotifyEventConnectionClosed(virNetClientProgramPtr prog ATTRIBUTE_U
 }
 
 static void
-remoteDomainBuildQemuMonitorEvent(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                  virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildQemuMonitorEvent(virNetClientProgram *prog G_GNUC_UNUSED,
+                                  virNetClient *client G_GNUC_UNUSED,
                                   void *evdata, void *opaque);
 
 static virNetClientProgramEvent qemuEvents[] = {
@@ -655,19 +650,13 @@ static virNetClientProgramEvent qemuEvents[] = {
       (xdrproc_t)xdr_qemu_domain_monitor_event_msg },
 };
 
-enum virDrvOpenRemoteFlags {
-    VIR_DRV_OPEN_REMOTE_RO = (1 << 0),
-    VIR_DRV_OPEN_REMOTE_USER      = (1 << 1), /* Use the per-user socket path */
-    VIR_DRV_OPEN_REMOTE_AUTOSTART = (1 << 2), /* Autostart a per-user daemon */
-};
-
 
 static void
-remoteClientCloseFunc(virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteClientCloseFunc(virNetClient *client G_GNUC_UNUSED,
                       int reason,
                       void *opaque)
 {
-    virConnectCloseCallbackDataCall((virConnectCloseCallbackDataPtr)opaque,
+    virConnectCloseCallbackDataCall((virConnectCloseCallbackData *)opaque,
                                     reason);
 }
 
@@ -691,8 +680,7 @@ remoteConnectSupportsFeatureUnlocked(virConnectPtr conn,
 #define EXTRACT_URI_ARG_STR(ARG_NAME, ARG_VAR) \
     if (STRCASEEQ(var->name, ARG_NAME)) { \
         VIR_FREE(ARG_VAR); \
-        if (VIR_STRDUP(ARG_VAR, var->value) < 0) \
-            goto failed; \
+        ARG_VAR = g_strdup(var->value); \
         var->ignore = 1; \
         continue; \
     }
@@ -711,39 +699,6 @@ remoteConnectSupportsFeatureUnlocked(virConnectPtr conn,
         continue; \
     }
 
-
-#ifndef WIN32
-static char *remoteGetUNIXSocketNonRoot(void)
-{
-    char *sockname = NULL;
-    char *userdir = virGetUserRuntimeDirectory();
-
-    if (!userdir)
-        return NULL;
-
-    if (virAsprintf(&sockname, "%s/" LIBVIRTD_USER_UNIX_SOCKET, userdir) < 0) {
-        VIR_FREE(userdir);
-        return NULL;
-    }
-    VIR_FREE(userdir);
-
-    VIR_DEBUG("Chosen UNIX sockname %s", sockname);
-    return sockname;
-}
-#endif /* WIN32 */
-
-static char *remoteGetUNIXSocketRoot(unsigned int flags)
-{
-    char *sockname = NULL;
-
-    if (VIR_STRDUP(sockname,
-                   flags & VIR_DRV_OPEN_REMOTE_RO ?
-                   LIBVIRTD_PRIV_UNIX_SOCKET_RO : LIBVIRTD_PRIV_UNIX_SOCKET) < 0)
-        return NULL;
-
-    VIR_DEBUG("Chosen UNIX sockname %s", sockname);
-    return sockname;
-}
 
 /*
  * URIs that this driver needs to handle:
@@ -769,126 +724,61 @@ static int
 doRemoteOpen(virConnectPtr conn,
              struct private_data *priv,
              const char *driver_str,
-             const char *transport_str,
-             virConnectAuthPtr auth ATTRIBUTE_UNUSED,
-             virConfPtr conf,
+             remoteDriverTransport transport,
+             virConnectAuthPtr auth G_GNUC_UNUSED,
+             virConf *conf,
              unsigned int flags)
 {
-    enum {
-        trans_tls,
-        trans_unix,
-        trans_ssh,
-        trans_libssh2,
-        trans_ext,
-        trans_tcp,
-        trans_libssh,
-    } transport;
+    g_autofree char *tls_priority = NULL;
+    g_autofree char *name = NULL;
+    g_autofree char *command = NULL;
+    g_autofree char *sockname = NULL;
+    g_autofree char *netcat = NULL;
+    g_autofree char *port = NULL;
+    g_autofree char *authtype = NULL;
+    g_autofree char *username = NULL;
+    g_autofree char *pkipath = NULL;
+    g_autofree char *keyfile = NULL;
+    g_autofree char *sshauth = NULL;
+    g_autofree char *knownHostsVerify = NULL;
+    g_autofree char *knownHosts = NULL;
+    g_autofree char *mode_str = NULL;
+    g_autofree char *daemon_path = NULL;
+    g_autofree char *proxy_str = NULL;
+    bool sanity = true;
+    bool verify = true;
 #ifndef WIN32
-    char *daemonPath = NULL;
+    bool tty = true;
 #endif
-    char *tls_priority = NULL;
+    int mode;
+    size_t i;
+    int proxy;
 
     /* We handle *ALL* URIs here. The caller has rejected any
      * URIs we don't care about */
 
-    if (conn->uri) {
-        if (!transport_str) {
-            if (conn->uri->server)
-                transport = trans_tls;
-            else
-                transport = trans_unix;
-        } else {
-            if (STRCASEEQ(transport_str, "tls")) {
-                transport = trans_tls;
-            } else if (STRCASEEQ(transport_str, "unix")) {
-                if (conn->uri->server) {
-                    virReportError(VIR_ERR_INVALID_ARG,
-                                   _("using unix socket and remote "
-                                     "server '%s' is not supported."),
-                                   conn->uri->server);
-                    return VIR_DRV_OPEN_ERROR;
-                } else {
-                    transport = trans_unix;
-                }
-            } else if (STRCASEEQ(transport_str, "ssh")) {
-                transport = trans_ssh;
-            } else if (STRCASEEQ(transport_str, "libssh2")) {
-                transport = trans_libssh2;
-            } else if (STRCASEEQ(transport_str, "ext")) {
-                transport = trans_ext;
-            } else if (STRCASEEQ(transport_str, "tcp")) {
-                transport = trans_tcp;
-            } else if (STRCASEEQ(transport_str, "libssh")) {
-                transport = trans_libssh;
-            } else {
-                virReportError(VIR_ERR_INVALID_ARG, "%s",
-                               _("remote_open: transport in URL not recognised "
-                                 "(should be tls|unix|ssh|ext|tcp|libssh2)"));
-                return VIR_DRV_OPEN_ERROR;
-            }
-        }
-    } else {
-        /* No URI, then must be probing so use UNIX socket */
-        transport = trans_unix;
-    }
-
-    /*
-     * We don't want to be executing external programs in setuid mode,
-     * so this rules out 'ext' and 'ssh' transports. Exclude libssh
-     * and tls too, since we're not confident the libraries are safe
-     * for setuid usage. Just allow UNIX sockets, since that does
-     * not require any external libraries or command execution
-     */
-    if (virIsSUID() &&
-        transport != trans_unix) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Only Unix socket URI transport is allowed in setuid mode"));
-        return VIR_DRV_OPEN_ERROR;
-    }
-
-    /* Local variables which we will initialize. These can
-     * get freed in the failed: path.
-     */
-    char *name = NULL, *command = NULL, *sockname = NULL, *netcat = NULL;
-    char *port = NULL, *authtype = NULL, *username = NULL;
-    bool sanity = true, verify = true, tty ATTRIBUTE_UNUSED = true;
-    char *pkipath = NULL, *keyfile = NULL, *sshauth = NULL;
-
-    char *knownHostsVerify = NULL,  *knownHosts = NULL;
-
-    /* Return code from this function, and the private data. */
-    int retcode = VIR_DRV_OPEN_ERROR;
-
     /* Remote server defaults to "localhost" if not specified. */
     if (conn->uri && conn->uri->port != 0) {
-        if (virAsprintf(&port, "%d", conn->uri->port) < 0)
-            goto failed;
-    } else if (transport == trans_tls) {
-        if (VIR_STRDUP(port, LIBVIRTD_TLS_PORT) < 0)
-            goto failed;
-    } else if (transport == trans_tcp) {
-        if (VIR_STRDUP(port, LIBVIRTD_TCP_PORT) < 0)
-            goto failed;
+        port = g_strdup_printf("%d", conn->uri->port);
+    } else if (transport == REMOTE_DRIVER_TRANSPORT_TLS) {
+        port = g_strdup(LIBVIRTD_TLS_PORT);
+    } else if (transport == REMOTE_DRIVER_TRANSPORT_TCP) {
+        port = g_strdup(LIBVIRTD_TCP_PORT);
     } /* Port not used for unix, ext., default for ssh */
 
-    if (VIR_STRDUP(priv->hostname,
-                   conn->uri && conn->uri->server ?
-                   conn->uri->server : "localhost") < 0)
-        goto failed;
+    priv->hostname = g_strdup(conn->uri && conn->uri->server ? conn->uri->server : "localhost");
 
-    if (conn->uri && VIR_STRDUP(username, conn->uri->user) < 0)
-        goto failed;
+    if (conn->uri)
+        username = g_strdup(conn->uri->user);
 
     /* Get the variables from the query string.
      * Then we need to reconstruct the query string (because
      * feasibly it might contain variables needed by the real driver,
      * although that won't be the case for now).
      */
-    size_t i;
-
     if (conn->uri) {
         for (i = 0; i < conn->uri->paramsCount; i++) {
-            virURIParamPtr var = &conn->uri->params[i];
+            virURIParam *var = &conn->uri->params[i];
             EXTRACT_URI_ARG_STR("name", name);
             EXTRACT_URI_ARG_STR("command", command);
             EXTRACT_URI_ARG_STR("socket", sockname);
@@ -900,10 +790,13 @@ doRemoteOpen(virConnectPtr conn,
             EXTRACT_URI_ARG_STR("known_hosts", knownHosts);
             EXTRACT_URI_ARG_STR("known_hosts_verify", knownHostsVerify);
             EXTRACT_URI_ARG_STR("tls_priority", tls_priority);
-
+            EXTRACT_URI_ARG_STR("mode", mode_str);
+            EXTRACT_URI_ARG_STR("proxy", proxy_str);
             EXTRACT_URI_ARG_BOOL("no_sanity", sanity);
             EXTRACT_URI_ARG_BOOL("no_verify", verify);
+#ifndef WIN32
             EXTRACT_URI_ARG_BOOL("no_tty", tty);
+#endif
 
             if (STRCASEEQ(var->name, "authfile")) {
                 /* Strip this param, used by virauth.c */
@@ -921,8 +814,7 @@ doRemoteOpen(virConnectPtr conn,
                 (STREQ(conn->uri->scheme, "remote") ||
                  STRPREFIX(conn->uri->scheme, "remote+"))) {
                 /* Allow remote serve to probe */
-                if (VIR_STRDUP(name, "") < 0)
-                    goto failed;
+                name = g_strdup("");
             } else {
                 virURI tmpuri = {
                     .scheme = (char *)driver_str,
@@ -941,75 +833,142 @@ doRemoteOpen(virConnectPtr conn,
         }
     } else {
         /* Probe URI server side */
-        if (VIR_STRDUP(name, "") < 0)
+        name = g_strdup("");
+    }
+
+    if (conf && !mode_str &&
+        virConfGetValueString(conf, "remote_mode", &mode_str) < 0)
+        goto failed;
+
+    if (mode_str) {
+        if ((mode = remoteDriverModeTypeFromString(mode_str)) < 0) {
+            virReportError(VIR_ERR_INVALID_ARG,
+                           _("Unknown remote mode '%s'"), mode_str);
             goto failed;
+        }
+    } else {
+        if (inside_daemon && !conn->uri->server) {
+            mode = REMOTE_DRIVER_MODE_DIRECT;
+        } else {
+            mode = REMOTE_DRIVER_MODE_AUTO;
+        }
+    }
+
+    if (conf && !proxy_str &&
+        virConfGetValueString(conf, "remote_proxy", &proxy_str) < 0)
+        goto failed;
+
+    if (proxy_str) {
+        if ((proxy = virNetClientProxyTypeFromString(proxy_str)) < 0) {
+            virReportError(VIR_ERR_INVALID_ARG,
+                           _("Unnkown proxy type '%s'"), proxy_str);
+            goto failed;
+        }
+    } else {
+        /*
+         * Goal is to maximise usage of virt-ssh-helper
+         *
+         * Historically tunnelling access for the session mode
+         * daemon did not automatically work, since we can't
+         * construct the accurate path remotely. Users could,
+         * however, specify the 'socket' URI parameter explicitly.
+         *
+         * If we see a 'socket' path we must always use netcat,
+         * since virt-ssh-helper won't handle an explicit socket.
+         * Autostart won't work for session mode, so we assume
+         * user started it manually on the remote host in this
+         * case.
+         *
+         * If we have a 'session' URI without explicit socket,
+         * we can just assume the use of virt-ssh-helper, since
+         * logic for constructing socket paths relies on env
+         * envs whose values have no guarantee of matching those
+         * on the remote host. It was explicitly blocked with an
+         * error check before virt-ssh-helper was introduced.
+         *
+         * For 'system' URIs, we need to try virt-ssh-helper but
+         * with fallback to netcat for back compat.
+         */
+        if (sockname)
+            proxy = VIR_NET_CLIENT_PROXY_NETCAT;
+        else if (flags & REMOTE_DRIVER_OPEN_USER)
+            proxy = VIR_NET_CLIENT_PROXY_NATIVE;
+        else
+            proxy = VIR_NET_CLIENT_PROXY_AUTO;
+    }
+
+    /* Sanity check that nothing requested !direct mode by mistake */
+    if (inside_daemon && !conn->uri->server && mode != REMOTE_DRIVER_MODE_DIRECT) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("Connections from inside daemon must be direct"));
+        return VIR_DRV_OPEN_ERROR;
     }
 
     VIR_DEBUG("proceeding with name = %s", name);
 
     /* For ext transport, command is required. */
-    if (transport == trans_ext && !command) {
+    if (transport == REMOTE_DRIVER_TRANSPORT_EXT && !command) {
         virReportError(VIR_ERR_INVALID_ARG, "%s",
                        _("remote_open: for 'ext' transport, command is required"));
         goto failed;
     }
 
     VIR_DEBUG("Connecting with transport %d", transport);
+
+    switch ((remoteDriverTransport)transport) {
+    case REMOTE_DRIVER_TRANSPORT_UNIX:
+    case REMOTE_DRIVER_TRANSPORT_SSH:
+    case REMOTE_DRIVER_TRANSPORT_LIBSSH:
+    case REMOTE_DRIVER_TRANSPORT_LIBSSH2:
+        if (!sockname &&
+            !(sockname = remoteGetUNIXSocket(transport, mode, driver_str,
+                                             flags, &daemon_path)))
+            goto failed;
+        break;
+
+    case REMOTE_DRIVER_TRANSPORT_TCP:
+    case REMOTE_DRIVER_TRANSPORT_TLS:
+    case REMOTE_DRIVER_TRANSPORT_EXT:
+        break;
+
+    case REMOTE_DRIVER_TRANSPORT_LAST:
+    default:
+        virReportEnumRangeError(remoteDriverTransport, transport);
+        goto failed;
+    }
+
+    VIR_DEBUG("Chosen UNIX socket %s", NULLSTR(sockname));
+
     /* Connect to the remote service. */
-    switch (transport) {
-    case trans_tls:
+    switch ((remoteDriverTransport)transport) {
+    case REMOTE_DRIVER_TRANSPORT_TLS:
         if (conf && !tls_priority &&
             virConfGetValueString(conf, "tls_priority", &tls_priority) < 0)
             goto failed;
 
-#ifdef WITH_GNUTLS
         priv->tls = virNetTLSContextNewClientPath(pkipath,
-                                                  geteuid() != 0 ? true : false,
+                                                  geteuid() != 0,
                                                   tls_priority,
                                                   sanity, verify);
         if (!priv->tls)
             goto failed;
         priv->is_secure = 1;
-        ATTRIBUTE_FALLTHROUGH;
-#else
-        (void)tls_priority;
-        (void)sanity;
-        (void)verify;
-        virReportError(VIR_ERR_INVALID_ARG, "%s",
-                       _("GNUTLS support not available in this build"));
-        goto failed;
-#endif
+        G_GNUC_FALLTHROUGH;
 
-    case trans_tcp:
+    case REMOTE_DRIVER_TRANSPORT_TCP:
         priv->client = virNetClientNewTCP(priv->hostname, port, AF_UNSPEC);
         if (!priv->client)
             goto failed;
 
-#ifdef WITH_GNUTLS
         if (priv->tls) {
             VIR_DEBUG("Starting TLS session");
             if (virNetClientSetTLSSession(priv->client, priv->tls) < 0)
                 goto failed;
         }
-#endif
 
         break;
 
-    case trans_libssh2:
-        if (!sockname) {
-            /* Right now we don't support default session connections */
-            if (STREQ_NULLABLE(conn->uri->path, "/session")) {
-                virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
-                               _("Connecting to session instance without "
-                                 "socket path is not supported by the libssh2 "
-                                 "connection driver"));
-                goto failed;
-            }
-
-            if (!(sockname = remoteGetUNIXSocketRoot(flags)))
-                goto failed;
-        }
-
+    case REMOTE_DRIVER_TRANSPORT_LIBSSH2:
         VIR_DEBUG("Starting LibSSH2 session");
 
         priv->client = virNetClientNewLibSSH2(priv->hostname,
@@ -1020,8 +979,11 @@ doRemoteOpen(virConnectPtr conn,
                                               knownHosts,
                                               knownHostsVerify,
                                               sshauth,
+                                              proxy,
                                               netcat,
                                               sockname,
+                                              name,
+                                              flags & REMOTE_DRIVER_OPEN_RO,
                                               auth,
                                               conn->uri);
         if (!priv->client)
@@ -1030,21 +992,7 @@ doRemoteOpen(virConnectPtr conn,
         priv->is_secure = 1;
         break;
 
-    case trans_libssh:
-        if (!sockname) {
-            /* Right now we don't support default session connections */
-            if (STREQ_NULLABLE(conn->uri->path, "/session")) {
-                virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
-                               _("Connecting to session instance without "
-                                 "socket path is not supported by the libssh "
-                                 "connection driver"));
-                goto failed;
-            }
-
-            if (!(sockname = remoteGetUNIXSocketRoot(flags)))
-                goto failed;
-        }
-
+    case REMOTE_DRIVER_TRANSPORT_LIBSSH:
         VIR_DEBUG("Starting libssh session");
 
         priv->client = virNetClientNewLibssh(priv->hostname,
@@ -1055,8 +1003,11 @@ doRemoteOpen(virConnectPtr conn,
                                              knownHosts,
                                              knownHostsVerify,
                                              sshauth,
+                                             proxy,
                                              netcat,
                                              sockname,
+                                             name,
+                                             flags & REMOTE_DRIVER_OPEN_RO,
                                              auth,
                                              conn->uri);
         if (!priv->client)
@@ -1066,49 +1017,17 @@ doRemoteOpen(virConnectPtr conn,
         break;
 
 #ifndef WIN32
-    case trans_unix:
-        if (!sockname) {
-            if (flags & VIR_DRV_OPEN_REMOTE_USER)
-                sockname = remoteGetUNIXSocketNonRoot();
-            else
-                sockname = remoteGetUNIXSocketRoot(flags);
-            if (!sockname)
-                goto failed;
-        }
-
-        if ((flags & VIR_DRV_OPEN_REMOTE_AUTOSTART) &&
-            !(daemonPath = virFileFindResourceFull("libvirtd",
-                                                   NULL, NULL,
-                                                   abs_top_builddir "/src",
-                                                   SBINDIR,
-                                                   "LIBVIRTD_PATH")))
-            goto failed;
-
+    case REMOTE_DRIVER_TRANSPORT_UNIX:
         if (!(priv->client = virNetClientNewUNIX(sockname,
-                                                 flags & VIR_DRV_OPEN_REMOTE_AUTOSTART,
-                                                 daemonPath)))
+                                                 daemon_path)))
             goto failed;
 
         priv->is_secure = 1;
         break;
 
-    case trans_ssh:
-        if (!command && VIR_STRDUP(command, "ssh") < 0)
-            goto failed;
-
-        if (!sockname) {
-            /* Right now we don't support default session connections */
-            if (STREQ_NULLABLE(conn->uri->path, "/session")) {
-                virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
-                               _("Connecting to session instance without "
-                                 "socket path is not supported by the ssh "
-                                 "connection driver"));
-                goto failed;
-            }
-
-            if (!(sockname = remoteGetUNIXSocketRoot(flags)))
-                goto failed;
-        }
+    case REMOTE_DRIVER_TRANSPORT_SSH:
+        if (!command)
+            command = g_strdup("ssh");
 
         if (!(priv->client = virNetClientNewSSH(priv->hostname,
                                                 port,
@@ -1116,15 +1035,18 @@ doRemoteOpen(virConnectPtr conn,
                                                 username,
                                                 !tty,
                                                 !verify,
-                                                netcat ? netcat : "nc",
                                                 keyfile,
-                                                sockname)))
+                                                proxy,
+                                                netcat,
+                                                sockname,
+                                                name,
+                                                flags & REMOTE_DRIVER_OPEN_RO)))
             goto failed;
 
         priv->is_secure = 1;
         break;
 
-    case trans_ext: {
+    case REMOTE_DRIVER_TRANSPORT_EXT: {
         char const *cmd_argv[] = { command, NULL };
         if (!(priv->client = virNetClientNewExternal(cmd_argv)))
             goto failed;
@@ -1136,15 +1058,20 @@ doRemoteOpen(virConnectPtr conn,
 
 #else /* WIN32 */
 
-    case trans_unix:
-    case trans_ssh:
-    case trans_ext:
+    case REMOTE_DRIVER_TRANSPORT_UNIX:
+    case REMOTE_DRIVER_TRANSPORT_SSH:
+    case REMOTE_DRIVER_TRANSPORT_EXT:
         virReportError(VIR_ERR_INVALID_ARG, "%s",
                        _("transport methods unix, ssh and ext are not supported "
                          "under Windows"));
         goto failed;
 
 #endif /* WIN32 */
+
+    case REMOTE_DRIVER_TRANSPORT_LAST:
+    default:
+        virReportEnumRangeError(remoteDriverTransport, transport);
+        goto failed;
     } /* switch (transport) */
 
 
@@ -1168,7 +1095,7 @@ doRemoteOpen(virConnectPtr conn,
     if (!(priv->remoteProgram = virNetClientProgramNew(REMOTE_PROGRAM,
                                                        REMOTE_PROTOCOL_VERSION,
                                                        remoteEvents,
-                                                       ARRAY_CARDINALITY(remoteEvents),
+                                                       G_N_ELEMENTS(remoteEvents),
                                                        conn)))
         goto failed;
     if (!(priv->lxcProgram = virNetClientProgramNew(LXC_PROGRAM,
@@ -1180,7 +1107,7 @@ doRemoteOpen(virConnectPtr conn,
     if (!(priv->qemuProgram = virNetClientProgramNew(QEMU_PROGRAM,
                                                      QEMU_PROTOCOL_VERSION,
                                                      qemuEvents,
-                                                     ARRAY_CARDINALITY(qemuEvents),
+                                                     G_N_ELEMENTS(qemuEvents),
                                                      conn)))
         goto failed;
 
@@ -1207,7 +1134,7 @@ doRemoteOpen(virConnectPtr conn,
     {
         remote_connect_open_args args = { &name, flags };
 
-        VIR_DEBUG("Trying to open URI %s", name);
+        VIR_DEBUG("Trying to open URI '%s'", name);
         if (call(conn, priv, 0, REMOTE_PROC_CONNECT_OPEN,
                  (xdrproc_t) xdr_remote_connect_open_args, (char *) &args,
                  (xdrproc_t) xdr_void, (char *) NULL) == -1)
@@ -1251,29 +1178,7 @@ doRemoteOpen(virConnectPtr conn,
                  "by the remote side.");
     }
 
-    /* Successful. */
-    retcode = VIR_DRV_OPEN_SUCCESS;
-
- cleanup:
-    /* Free up the URL and strings. */
-    VIR_FREE(name);
-    VIR_FREE(command);
-    VIR_FREE(sockname);
-    VIR_FREE(authtype);
-    VIR_FREE(netcat);
-    VIR_FREE(sshauth);
-    VIR_FREE(keyfile);
-    VIR_FREE(username);
-    VIR_FREE(port);
-    VIR_FREE(pkipath);
-    VIR_FREE(tls_priority);
-    VIR_FREE(knownHostsVerify);
-    VIR_FREE(knownHosts);
-#ifndef WIN32
-    VIR_FREE(daemonPath);
-#endif
-
-    return retcode;
+    return VIR_DRV_OPEN_SUCCESS;
 
  failed:
     virObjectUnref(priv->remoteProgram);
@@ -1284,13 +1189,11 @@ doRemoteOpen(virConnectPtr conn,
     priv->client = NULL;
     virObjectUnref(priv->closeCallback);
     priv->closeCallback = NULL;
-#ifdef WITH_GNUTLS
     virObjectUnref(priv->tls);
     priv->tls = NULL;
-#endif
 
     VIR_FREE(priv->hostname);
-    goto cleanup;
+    return VIR_DRV_OPEN_ERROR;
 }
 #undef EXTRACT_URI_ARG_STR
 #undef EXTRACT_URI_ARG_BOOL
@@ -1299,8 +1202,7 @@ static struct private_data *
 remoteAllocPrivateData(void)
 {
     struct private_data *priv;
-    if (VIR_ALLOC(priv) < 0)
-        return NULL;
+    priv = g_new0(struct private_data, 1);
 
     if (virMutexInit(&priv->lock) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -1317,68 +1219,51 @@ remoteAllocPrivateData(void)
 static virDrvOpenStatus
 remoteConnectOpen(virConnectPtr conn,
                   virConnectAuthPtr auth,
-                  virConfPtr conf,
+                  virConf *conf,
                   unsigned int flags)
 {
     struct private_data *priv;
     int ret = VIR_DRV_OPEN_ERROR;
-    int rflags = 0;
-    const char *autostart = virGetEnvBlockSUID("LIBVIRT_AUTOSTART");
+    unsigned int rflags = 0;
     char *driver = NULL;
-    char *transport = NULL;
+    remoteDriverTransport transport;
 
-    if (conn->uri &&
-        remoteSplitURIScheme(conn->uri, &driver, &transport) < 0)
-        goto cleanup;
+    if (conn->uri) {
+        if (remoteSplitURIScheme(conn->uri, &driver, &transport) < 0)
+            goto cleanup;
+    } else {
+        /* No URI, then must be probing so use UNIX socket */
+        transport = REMOTE_DRIVER_TRANSPORT_UNIX;
+    }
 
-    if (inside_daemon && (!conn->uri || !conn->uri->server)) {
-        ret = VIR_DRV_OPEN_DECLINED;
-        goto cleanup;
+
+    if (inside_daemon) {
+        if (!conn->uri) {
+            ret = VIR_DRV_OPEN_DECLINED;
+            goto cleanup;
+        }
+
+        /* If there's a driver registered we must defer to that.
+         * If there isn't a driver, we must connect in "direct"
+         * mode - see doRemoteOpen.
+         * One exception is if we are trying to connect to an
+         * unknown socket path as that might be proxied to remote
+         * host */
+        if (!conn->uri->server &&
+            virHasDriverForURIScheme(driver) &&
+            !virURICheckUnixSocket(conn->uri)) {
+            ret = VIR_DRV_OPEN_DECLINED;
+            goto cleanup;
+        }
     }
 
     if (!(priv = remoteAllocPrivateData()))
         goto cleanup;
 
+
+    remoteGetURIDaemonInfo(conn->uri, transport, &rflags);
     if (flags & VIR_CONNECT_RO)
-        rflags |= VIR_DRV_OPEN_REMOTE_RO;
-
-    /*
-     * If no servername is given, and no +XXX
-     * transport is listed, or transport is unix,
-     * and path is /session, and uid is unprivileged
-     * then auto-spawn a daemon.
-     */
-    if (conn->uri &&
-        !conn->uri->server &&
-        conn->uri->path &&
-        conn->uri->scheme &&
-        (transport == NULL || STREQ(transport, "unix")) &&
-        (STREQ(conn->uri->path, "/session") ||
-         STRPREFIX(conn->uri->scheme, "test+")) &&
-        geteuid() > 0) {
-        VIR_DEBUG("Auto-spawn user daemon instance");
-        rflags |= VIR_DRV_OPEN_REMOTE_USER;
-        if (!virIsSUID() &&
-            (!autostart ||
-             STRNEQ(autostart, "0")))
-            rflags |= VIR_DRV_OPEN_REMOTE_AUTOSTART;
-    }
-
-    /*
-     * If URI is NULL, then do a UNIX connection possibly auto-spawning
-     * unprivileged server and probe remote server for URI.
-     */
-    if (!conn->uri) {
-        VIR_DEBUG("Auto-probe remote URI");
-        if (geteuid() > 0) {
-            VIR_DEBUG("Auto-spawn user daemon instance");
-            rflags |= VIR_DRV_OPEN_REMOTE_USER;
-            if (!virIsSUID() &&
-                (!autostart ||
-                 STRNEQ(autostart, "0")))
-                rflags |= VIR_DRV_OPEN_REMOTE_AUTOSTART;
-        }
-    }
+        rflags |= REMOTE_DRIVER_OPEN_RO;
 
     ret = doRemoteOpen(conn, priv, driver, transport, auth, conf, rflags);
     if (ret != VIR_DRV_OPEN_SUCCESS) {
@@ -1392,7 +1277,6 @@ remoteConnectOpen(virConnectPtr conn,
 
  cleanup:
     VIR_FREE(driver);
-    VIR_FREE(transport);
     return ret;
 }
 
@@ -1410,10 +1294,8 @@ doRemoteClose(virConnectPtr conn, struct private_data *priv)
              (xdrproc_t) xdr_void, (char *) NULL) == -1)
         ret = -1;
 
-#ifdef WITH_GNUTLS
     virObjectUnref(priv->tls);
     priv->tls = NULL;
-#endif
 
     virNetClientSetCloseCallback(priv->client,
                                  NULL,
@@ -1469,7 +1351,7 @@ remoteConnectClose(virConnectPtr conn)
  * private data, and free it when we close the connection.
  *
  * See also:
- * http://www.redhat.com/archives/libvir-list/2007-February/msg00096.html
+ * https://www.redhat.com/archives/libvir-list/2007-February/msg00096.html
  */
 static const char *
 remoteConnectGetType(virConnectPtr conn)
@@ -1792,8 +1674,7 @@ remoteDeserializeDomainDiskErrors(remote_domain_disk_error *ret_errors_val,
     }
 
     for (i = 0; i < ret_errors_len; i++) {
-        if (VIR_STRDUP(errors[i].disk, ret_errors_val[i].disk) < 0)
-            goto error;
+        errors[i].disk = g_strdup(ret_errors_val[i].disk);
         errors[i].error = ret_errors_val[i].error;
     }
 
@@ -1801,7 +1682,7 @@ remoteDeserializeDomainDiskErrors(remote_domain_disk_error *ret_errors_val,
 
  error:
     for (j = 0; j < i; j++)
-        VIR_FREE(errors[i].disk);
+        VIR_FREE(errors[j].disk);
 
     return -1;
 }
@@ -1852,7 +1733,7 @@ remoteDomainBlockStatsFlags(virDomainPtr domain,
     *nparams = ret.params.params_len;
 
     /* Deserialize the result. */
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) ret.params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) ret.params.params_val,
                                   ret.params.params_len,
                                   REMOTE_DOMAIN_BLOCK_STATS_PARAMETERS_MAX,
                                   &params,
@@ -1900,7 +1781,7 @@ remoteDomainGetMemoryParameters(virDomainPtr domain,
         goto cleanup;
     }
 
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) ret.params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) ret.params.params_val,
                                   ret.params.params_len,
                                   REMOTE_DOMAIN_MEMORY_PARAMETERS_MAX,
                                   &params,
@@ -1948,7 +1829,7 @@ remoteDomainGetNumaParameters(virDomainPtr domain,
         goto cleanup;
     }
 
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) ret.params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) ret.params.params_val,
                                   ret.params.params_len,
                                   REMOTE_DOMAIN_NUMA_PARAMETERS_MAX,
                                   &params,
@@ -1987,7 +1868,7 @@ remoteDomainGetLaunchSecurityInfo(virDomainPtr domain,
              (xdrproc_t) xdr_remote_domain_get_launch_security_info_ret, (char *) &ret) == -1)
         goto done;
 
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) ret.params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) ret.params.params_val,
                                   ret.params.params_len,
                                   REMOTE_DOMAIN_LAUNCH_SECURITY_INFO_PARAMS_MAX,
                                   params,
@@ -2026,7 +1907,7 @@ remoteDomainGetPerfEvents(virDomainPtr domain,
              (xdrproc_t) xdr_remote_domain_get_perf_events_ret, (char *) &ret) == -1)
         goto done;
 
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) ret.params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) ret.params.params_val,
                                   ret.params.params_len,
                                   REMOTE_DOMAIN_PERF_EVENTS_MAX,
                                   params,
@@ -2074,7 +1955,7 @@ remoteDomainGetBlkioParameters(virDomainPtr domain,
         goto cleanup;
     }
 
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) ret.params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) ret.params.params_val,
                                   ret.params.params_len,
                                   REMOTE_DOMAIN_BLKIO_PARAMETERS_MAX,
                                   &params,
@@ -2113,7 +1994,7 @@ remoteDomainGetVcpuPinInfo(virDomainPtr domain,
         goto done;
     }
 
-    if (INT_MULTIPLY_OVERFLOW(ncpumaps, maplen) ||
+    if (VIR_INT_MULTIPLY_OVERFLOW(ncpumaps, maplen) ||
         ncpumaps * maplen > REMOTE_CPUMAPS_MAX) {
         virReportError(VIR_ERR_RPC,
                        _("vCPU map buffer length exceeds maximum: %d > %d"),
@@ -2282,7 +2163,7 @@ remoteDomainGetVcpus(virDomainPtr domain,
                        maxinfo, REMOTE_VCPUINFO_MAX);
         goto done;
     }
-    if (INT_MULTIPLY_OVERFLOW(maxinfo, maplen) ||
+    if (VIR_INT_MULTIPLY_OVERFLOW(maxinfo, maplen) ||
         maxinfo * maplen > REMOTE_CPUMAPS_MAX) {
         virReportError(VIR_ERR_RPC,
                        _("vCPU map buffer length exceeds maximum: %d > %d"),
@@ -2347,7 +2228,6 @@ remoteDomainGetIOThreadInfo(virDomainPtr dom,
     remote_domain_get_iothread_info_args args;
     remote_domain_get_iothread_info_ret ret;
     remote_domain_iothread_info *src;
-    virDomainIOThreadInfoPtr *info_ret = NULL;
 
     remoteDriverLock(priv);
 
@@ -2372,40 +2252,33 @@ remoteDomainGetIOThreadInfo(virDomainPtr dom,
     }
 
     if (info) {
+        virDomainIOThreadInfoPtr *info_ret = NULL;
+
         if (!ret.info.info_len) {
             *info = NULL;
             rv = ret.ret;
             goto cleanup;
         }
 
-        if (VIR_ALLOC_N(info_ret, ret.info.info_len) < 0)
-            goto cleanup;
+        info_ret = g_new0(virDomainIOThreadInfoPtr, ret.info.info_len);
 
         for (i = 0; i < ret.info.info_len; i++) {
             src = &ret.info.info_val[i];
 
-            if (VIR_ALLOC(info_ret[i]) < 0)
-                goto cleanup;
+            info_ret[i] = g_new0(virDomainIOThreadInfo, 1);
 
             info_ret[i]->iothread_id = src->iothread_id;
-            if (VIR_ALLOC_N(info_ret[i]->cpumap, src->cpumap.cpumap_len) < 0)
-                goto cleanup;
+            info_ret[i]->cpumap = g_new0(unsigned char, src->cpumap.cpumap_len);
             memcpy(info_ret[i]->cpumap, src->cpumap.cpumap_val,
                    src->cpumap.cpumap_len);
             info_ret[i]->cpumaplen = src->cpumap.cpumap_len;
         }
         *info = info_ret;
-        info_ret = NULL;
     }
 
     rv = ret.ret;
 
  cleanup:
-    if (info_ret) {
-        for (i = 0; i < ret.info.info_len; i++)
-            virDomainIOThreadInfoFree(info_ret[i]);
-        VIR_FREE(info_ret);
-    }
     xdr_free((xdrproc_t)xdr_remote_domain_get_iothread_info_ret,
              (char *) &ret);
 
@@ -2435,12 +2308,11 @@ remoteDomainGetSecurityLabel(virDomainPtr domain, virSecurityLabelPtr seclabel)
     }
 
     if (ret.label.label_val != NULL) {
-        if (strlen(ret.label.label_val) >= sizeof(seclabel->label)) {
+        if (virStrcpyStatic(seclabel->label, ret.label.label_val) < 0) {
             virReportError(VIR_ERR_RPC, _("security label exceeds maximum: %zu"),
                            sizeof(seclabel->label) - 1);
             goto cleanup;
         }
-        strcpy(seclabel->label, ret.label.label_val);
         seclabel->enforcing = ret.enforcing;
     }
 
@@ -2474,19 +2346,17 @@ remoteDomainGetSecurityLabelList(virDomainPtr domain, virSecurityLabelPtr* secla
         goto done;
     }
 
-    if (VIR_ALLOC_N(*seclabels, ret.labels.labels_len) < 0)
-        goto cleanup;
+    *seclabels = g_new0(virSecurityLabel, ret.labels.labels_len);
 
     for (i = 0; i < ret.labels.labels_len; i++) {
         remote_domain_get_security_label_ret *cur = &ret.labels.labels_val[i];
         if (cur->label.label_val != NULL) {
-            if (strlen(cur->label.label_val) >= sizeof((*seclabels)->label)) {
+            if (virStrcpyStatic((*seclabels)[i].label, cur->label.label_val) < 0) {
                 virReportError(VIR_ERR_RPC, _("security label exceeds maximum: %zd"),
                                sizeof((*seclabels)->label) - 1);
                 VIR_FREE(*seclabels);
                 goto cleanup;
             }
-            strcpy((*seclabels)[i].label, cur->label.label_val);
             (*seclabels)[i].enforcing = cur->enforcing;
         }
     }
@@ -2552,21 +2422,19 @@ remoteNodeGetSecurityModel(virConnectPtr conn, virSecurityModelPtr secmodel)
     }
 
     if (ret.model.model_val != NULL) {
-        if (strlen(ret.model.model_val) >= sizeof(secmodel->model)) {
+        if (virStrcpyStatic(secmodel->model, ret.model.model_val) < 0) {
             virReportError(VIR_ERR_RPC, _("security model exceeds maximum: %zu"),
                            sizeof(secmodel->model) - 1);
             goto cleanup;
         }
-        strcpy(secmodel->model, ret.model.model_val);
     }
 
     if (ret.doi.doi_val != NULL) {
-        if (strlen(ret.doi.doi_val) >= sizeof(secmodel->doi)) {
+        if (virStrcpyStatic(secmodel->doi, ret.doi.doi_val) < 0) {
             virReportError(VIR_ERR_RPC, _("security doi exceeds maximum: %zu"),
                            sizeof(secmodel->doi) - 1);
             goto cleanup;
         }
-        strcpy(secmodel->doi, ret.doi.doi_val);
     }
 
     rv = 0;
@@ -2969,7 +2837,7 @@ static int remoteDomainGetBlockIoTune(virDomainPtr domain,
         goto cleanup;
     }
 
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) ret.params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) ret.params.params_val,
                                   ret.params.params_len,
                                   REMOTE_DOMAIN_BLOCK_IO_TUNE_PARAMETERS_MAX,
                                   &params,
@@ -3059,7 +2927,7 @@ static int remoteDomainGetCPUStats(virDomainPtr domain,
         virTypedParameterPtr cpu_params = &params[cpu * nparams];
         remote_typed_param *stride = &ret.params.params_val[cpu * ret.nparams];
 
-        if (virTypedParamsDeserialize((virTypedParameterRemotePtr) stride,
+        if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) stride,
                                       ret.nparams,
                                       REMOTE_NODE_CPU_STATS_MAX,
                                       &cpu_params, &tmp) < 0)
@@ -3584,8 +3452,7 @@ remoteConnectFindStoragePoolSources(virConnectPtr conn,
              (xdrproc_t) xdr_remote_connect_find_storage_pool_sources_ret, (char *) &ret) == -1)
         goto done;
 
-    rv = ret.xml;
-    ret.xml = NULL; /* To stop xdr_free free'ing it */
+    rv = g_steal_pointer(&ret.xml); /* To stop xdr_free free'ing it */
 
     xdr_free((xdrproc_t) xdr_remote_connect_find_storage_pool_sources_ret, (char *) &ret);
 
@@ -3699,7 +3566,7 @@ remoteNodeDeviceReset(virNodeDevicePtr dev)
 
 static int
 remoteAuthenticate(virConnectPtr conn, struct private_data *priv,
-                   virConnectAuthPtr auth ATTRIBUTE_UNUSED,
+                   virConnectAuthPtr auth G_GNUC_UNUSED,
                    const char *authtype)
 {
     struct remote_auth_list_ret ret;
@@ -3873,8 +3740,7 @@ static sasl_callback_t *remoteAuthMakeCallbacks(int *credtype, int ncredtype)
     sasl_callback_t *cbs;
     size_t i;
     int n;
-    if (VIR_ALLOC_N(cbs, ncredtype+1) < 0)
-        return NULL;
+    cbs = g_new0(sasl_callback_t, ncredtype + 1);
 
     for (i = 0, n = 0; i < ncredtype; i++) {
         int id = remoteAuthCredVir2SASL(credtype[i]);
@@ -3911,8 +3777,7 @@ static int remoteAuthMakeCredentials(sasl_interact_t *interact,
         (*ncred)++;
     }
 
-    if (VIR_ALLOC_N(*cred, *ncred) < 0)
-        return -1;
+    *cred = g_new0(virConnectCredential, *ncred);
 
     for (ninteract = 0, *ncred = 0; interact[ninteract].id != 0; ninteract++) {
         if (interact[ninteract].result)
@@ -3962,7 +3827,7 @@ struct remoteAuthInteractState {
     sasl_interact_t *interact;
     virConnectCredentialPtr cred;
     size_t ncred;
-    virAuthConfigPtr config;
+    virAuthConfig *config;
 };
 
 
@@ -3990,7 +3855,7 @@ static int remoteAuthFillFromConfig(virConnectPtr conn,
     }
 
     for (ninteract = 0; state->interact[ninteract].id != 0; ninteract++) {
-        const char *value = NULL;
+        char *value = NULL;
 
         switch (state->interact[ninteract].id) {
         case SASL_CB_USER:
@@ -4053,20 +3918,18 @@ static int remoteAuthInteract(virConnectPtr conn,
                               struct remoteAuthInteractState *state,
                               virConnectAuthPtr auth)
 {
-    int ret = -1;
-
     VIR_DEBUG("Starting SASL interaction");
     remoteAuthInteractStateClear(state, false);
 
     /* Fills state->interact with any values from the auth config file */
     if (remoteAuthFillFromConfig(conn, state) < 0)
-        goto cleanup;
+        return -1;
 
     /* Populates state->cred for anything not found in the auth config */
     if (remoteAuthMakeCredentials(state->interact, &state->cred, &state->ncred) < 0) {
         virReportError(VIR_ERR_AUTH_FAILED, "%s",
                        _("Failed to make auth credentials"));
-        goto cleanup;
+        return -1;
     }
 
     /* If there was anything not in the auth config, we need to
@@ -4077,13 +3940,13 @@ static int remoteAuthInteract(virConnectPtr conn,
         if (!auth || !auth->cb) {
             virReportError(VIR_ERR_AUTH_FAILED, "%s",
                            _("No authentication callback available"));
-            goto cleanup;
+            return -1;
         }
 
         if ((*(auth->cb))(state->cred, state->ncred, auth->cbdata) < 0) {
             virReportError(VIR_ERR_AUTH_FAILED, "%s",
                            _("Failed to collect auth credentials"));
-            goto cleanup;
+            return -1;
         }
 
         /* Copy user's responses from cred into interact */
@@ -4098,10 +3961,7 @@ static int remoteAuthInteract(virConnectPtr conn,
      * of this method, rather than the end.
      */
 
-    ret = 0;
-
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -4125,8 +3985,8 @@ remoteAuthSASL(virConnectPtr conn, struct private_data *priv,
     sasl_callback_t *saslcb = NULL;
     int ret = -1;
     const char *mechlist;
-    virNetSASLContextPtr saslCtxt;
-    virNetSASLSessionPtr sasl = NULL;
+    virNetSASLContext *saslCtxt;
+    virNetSASLSession *sasl = NULL;
     struct remoteAuthInteractState state;
 
     memset(&state, 0, sizeof(state));
@@ -4154,7 +4014,6 @@ remoteAuthSASL(virConnectPtr conn, struct private_data *priv,
     /* saslcb is now owned by sasl */
     saslcb = NULL;
 
-# ifdef WITH_GNUTLS
     /* Initialize some connection props we care about */
     if (priv->tls) {
         if ((ssf = virNetClientGetTLSKeySize(priv->client)) < 0)
@@ -4166,7 +4025,6 @@ remoteAuthSASL(virConnectPtr conn, struct private_data *priv,
         if (virNetSASLSessionExtKeySize(sasl, ssf) < 0)
             goto cleanup;
     }
-# endif
 
     /* If we've got a secure channel (TLS or UNIX sock), we don't care about SSF */
     /* If we're not secure, then forbid any anonymous or trivially crackable auth */
@@ -4343,7 +4201,7 @@ remoteAuthSASL(virConnectPtr conn, struct private_data *priv,
 
 static int
 remoteAuthPolkit(virConnectPtr conn, struct private_data *priv,
-                 virConnectAuthPtr auth ATTRIBUTE_UNUSED)
+                 virConnectAuthPtr auth G_GNUC_UNUSED)
 {
     remote_auth_polkit_ret ret;
     VIR_DEBUG("Client initialize PolicyKit authentication");
@@ -4477,7 +4335,7 @@ remoteDomainBuildEventLifecycleHelper(virConnectPtr conn,
 {
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -4489,8 +4347,8 @@ remoteDomainBuildEventLifecycleHelper(virConnectPtr conn,
     virObjectEventStateQueueRemote(priv->eventState, event, callbackID);
 }
 static void
-remoteDomainBuildEventLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventLifecycle(virNetClientProgram *prog G_GNUC_UNUSED,
+                                virNetClient *client G_GNUC_UNUSED,
                                 void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4498,8 +4356,8 @@ remoteDomainBuildEventLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
     remoteDomainBuildEventLifecycleHelper(conn, msg, -1);
 }
 static void
-remoteDomainBuildEventCallbackLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                        virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackLifecycle(virNetClientProgram *prog G_GNUC_UNUSED,
+                                        virNetClient *client G_GNUC_UNUSED,
                                         void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4515,7 +4373,7 @@ remoteDomainBuildEventRebootHelper(virConnectPtr conn,
 {
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -4527,8 +4385,8 @@ remoteDomainBuildEventRebootHelper(virConnectPtr conn,
     virObjectEventStateQueueRemote(priv->eventState, event, callbackID);
 }
 static void
-remoteDomainBuildEventReboot(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                             virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventReboot(virNetClientProgram *prog G_GNUC_UNUSED,
+                             virNetClient *client G_GNUC_UNUSED,
                              void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4536,8 +4394,8 @@ remoteDomainBuildEventReboot(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
     remoteDomainBuildEventRebootHelper(conn, msg, -1);
 }
 static void
-remoteDomainBuildEventCallbackReboot(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                     virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackReboot(virNetClientProgram *prog G_GNUC_UNUSED,
+                                     virNetClient *client G_GNUC_UNUSED,
                                      void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4552,7 +4410,7 @@ remoteDomainBuildEventRTCChangeHelper(virConnectPtr conn,
 {
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -4564,8 +4422,8 @@ remoteDomainBuildEventRTCChangeHelper(virConnectPtr conn,
     virObjectEventStateQueueRemote(priv->eventState, event, callbackID);
 }
 static void
-remoteDomainBuildEventRTCChange(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventRTCChange(virNetClientProgram *prog G_GNUC_UNUSED,
+                                virNetClient *client G_GNUC_UNUSED,
                                 void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4573,8 +4431,8 @@ remoteDomainBuildEventRTCChange(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
     remoteDomainBuildEventRTCChangeHelper(conn, msg, -1);
 }
 static void
-remoteDomainBuildEventCallbackRTCChange(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                        virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackRTCChange(virNetClientProgram *prog G_GNUC_UNUSED,
+                                        virNetClient *client G_GNUC_UNUSED,
                                         void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4589,7 +4447,7 @@ remoteDomainBuildEventWatchdogHelper(virConnectPtr conn,
 {
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -4601,8 +4459,8 @@ remoteDomainBuildEventWatchdogHelper(virConnectPtr conn,
     virObjectEventStateQueueRemote(priv->eventState, event, callbackID);
 }
 static void
-remoteDomainBuildEventWatchdog(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                               virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventWatchdog(virNetClientProgram *prog G_GNUC_UNUSED,
+                               virNetClient *client G_GNUC_UNUSED,
                                void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4610,8 +4468,8 @@ remoteDomainBuildEventWatchdog(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
     remoteDomainBuildEventWatchdogHelper(conn, msg, -1);
 }
 static void
-remoteDomainBuildEventCallbackWatchdog(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                       virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackWatchdog(virNetClientProgram *prog G_GNUC_UNUSED,
+                                       virNetClient *client G_GNUC_UNUSED,
                                        void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4626,7 +4484,7 @@ remoteDomainBuildEventIOErrorHelper(virConnectPtr conn,
 {
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -4641,8 +4499,8 @@ remoteDomainBuildEventIOErrorHelper(virConnectPtr conn,
     virObjectEventStateQueueRemote(priv->eventState, event, callbackID);
 }
 static void
-remoteDomainBuildEventIOError(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                              virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventIOError(virNetClientProgram *prog G_GNUC_UNUSED,
+                              virNetClient *client G_GNUC_UNUSED,
                               void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4650,8 +4508,8 @@ remoteDomainBuildEventIOError(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
     remoteDomainBuildEventIOErrorHelper(conn, msg, -1);
 }
 static void
-remoteDomainBuildEventCallbackIOError(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                      virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackIOError(virNetClientProgram *prog G_GNUC_UNUSED,
+                                      virNetClient *client G_GNUC_UNUSED,
                                       void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4666,7 +4524,7 @@ remoteDomainBuildEventIOErrorReasonHelper(virConnectPtr conn,
 {
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -4683,8 +4541,8 @@ remoteDomainBuildEventIOErrorReasonHelper(virConnectPtr conn,
     virObjectEventStateQueueRemote(priv->eventState, event, callbackID);
 }
 static void
-remoteDomainBuildEventIOErrorReason(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                    virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventIOErrorReason(virNetClientProgram *prog G_GNUC_UNUSED,
+                                    virNetClient *client G_GNUC_UNUSED,
                                     void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4692,8 +4550,8 @@ remoteDomainBuildEventIOErrorReason(virNetClientProgramPtr prog ATTRIBUTE_UNUSED
     remoteDomainBuildEventIOErrorReasonHelper(conn, msg, -1);
 }
 static void
-remoteDomainBuildEventCallbackIOErrorReason(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                            virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackIOErrorReason(virNetClientProgram *prog G_GNUC_UNUSED,
+                                            virNetClient *client G_GNUC_UNUSED,
                                             void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4708,7 +4566,7 @@ remoteDomainBuildEventBlockJobHelper(virConnectPtr conn,
 {
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -4722,8 +4580,8 @@ remoteDomainBuildEventBlockJobHelper(virConnectPtr conn,
     virObjectEventStateQueueRemote(priv->eventState, event, callbackID);
 }
 static void
-remoteDomainBuildEventBlockJob(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                               virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventBlockJob(virNetClientProgram *prog G_GNUC_UNUSED,
+                               virNetClient *client G_GNUC_UNUSED,
                                void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4731,8 +4589,8 @@ remoteDomainBuildEventBlockJob(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
     remoteDomainBuildEventBlockJobHelper(conn, msg, -1);
 }
 static void
-remoteDomainBuildEventCallbackBlockJob(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                       virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackBlockJob(virNetClientProgram *prog G_GNUC_UNUSED,
+                                       virNetClient *client G_GNUC_UNUSED,
                                        void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4740,15 +4598,15 @@ remoteDomainBuildEventCallbackBlockJob(virNetClientProgramPtr prog ATTRIBUTE_UNU
     remoteDomainBuildEventBlockJobHelper(conn, &msg->msg, msg->callbackID);
 }
 static void
-remoteDomainBuildEventBlockJob2(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventBlockJob2(virNetClientProgram *prog G_GNUC_UNUSED,
+                                virNetClient *client G_GNUC_UNUSED,
                                 void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
     remote_domain_event_block_job_2_msg *msg = evdata;
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -4769,7 +4627,7 @@ remoteDomainBuildEventGraphicsHelper(virConnectPtr conn,
 {
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
     virDomainEventGraphicsAddressPtr localAddr = NULL;
     virDomainEventGraphicsAddressPtr remoteAddr = NULL;
     virDomainEventGraphicsSubjectPtr subject = NULL;
@@ -4779,29 +4637,22 @@ remoteDomainBuildEventGraphicsHelper(virConnectPtr conn,
     if (!dom)
         return;
 
-    if (VIR_ALLOC(localAddr) < 0)
-        goto error;
+    localAddr = g_new0(virDomainEventGraphicsAddress, 1);
     localAddr->family = msg->local.family;
-    if (VIR_STRDUP(localAddr->service, msg->local.service) < 0 ||
-        VIR_STRDUP(localAddr->node, msg->local.node) < 0)
-        goto error;
+    localAddr->service = g_strdup(msg->local.service);
+    localAddr->node = g_strdup(msg->local.node);
 
-    if (VIR_ALLOC(remoteAddr) < 0)
-        goto error;
+    remoteAddr = g_new0(virDomainEventGraphicsAddress, 1);
     remoteAddr->family = msg->remote.family;
-    if (VIR_STRDUP(remoteAddr->service, msg->remote.service) < 0 ||
-        VIR_STRDUP(remoteAddr->node, msg->remote.node) < 0)
-        goto error;
+    remoteAddr->service = g_strdup(msg->remote.service);
+    remoteAddr->node = g_strdup(msg->remote.node);
 
-    if (VIR_ALLOC(subject) < 0)
-        goto error;
-    if (VIR_ALLOC_N(subject->identities, msg->subject.subject_len) < 0)
-        goto error;
+    subject = g_new0(virDomainEventGraphicsSubject, 1);
+    subject->identities = g_new0(virDomainEventGraphicsSubjectIdentity, msg->subject.subject_len);
     subject->nidentity = msg->subject.subject_len;
     for (i = 0; i < subject->nidentity; i++) {
-        if (VIR_STRDUP(subject->identities[i].type, msg->subject.subject_val[i].type) < 0 ||
-            VIR_STRDUP(subject->identities[i].name, msg->subject.subject_val[i].name) < 0)
-            goto error;
+        subject->identities[i].type = g_strdup(msg->subject.subject_val[i].type);
+        subject->identities[i].name = g_strdup(msg->subject.subject_val[i].name);
     }
 
     event = virDomainEventGraphicsNewFromDom(dom,
@@ -4815,32 +4666,10 @@ remoteDomainBuildEventGraphicsHelper(virConnectPtr conn,
 
     virObjectEventStateQueueRemote(priv->eventState, event, callbackID);
     return;
-
- error:
-    if (localAddr) {
-        VIR_FREE(localAddr->service);
-        VIR_FREE(localAddr->node);
-        VIR_FREE(localAddr);
-    }
-    if (remoteAddr) {
-        VIR_FREE(remoteAddr->service);
-        VIR_FREE(remoteAddr->node);
-        VIR_FREE(remoteAddr);
-    }
-    if (subject) {
-        for (i = 0; i < subject->nidentity; i++) {
-            VIR_FREE(subject->identities[i].type);
-            VIR_FREE(subject->identities[i].name);
-        }
-        VIR_FREE(subject->identities);
-        VIR_FREE(subject);
-    }
-    virObjectUnref(dom);
-    return;
 }
 static void
-remoteDomainBuildEventGraphics(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                               virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventGraphics(virNetClientProgram *prog G_GNUC_UNUSED,
+                               virNetClient *client G_GNUC_UNUSED,
                                void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4848,8 +4677,8 @@ remoteDomainBuildEventGraphics(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
     remoteDomainBuildEventGraphicsHelper(conn, msg, -1);
 }
 static void
-remoteDomainBuildEventCallbackGraphics(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                       virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackGraphics(virNetClientProgram *prog G_GNUC_UNUSED,
+                                       virNetClient *client G_GNUC_UNUSED,
                                        void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4864,7 +4693,7 @@ remoteDomainBuildEventControlErrorHelper(virConnectPtr conn,
 {
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -4877,8 +4706,8 @@ remoteDomainBuildEventControlErrorHelper(virConnectPtr conn,
     virObjectEventStateQueueRemote(priv->eventState, event, callbackID);
 }
 static void
-remoteDomainBuildEventControlError(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                   virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventControlError(virNetClientProgram *prog G_GNUC_UNUSED,
+                                   virNetClient *client G_GNUC_UNUSED,
                                    void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4886,8 +4715,8 @@ remoteDomainBuildEventControlError(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
     remoteDomainBuildEventControlErrorHelper(conn, msg, -1);
 }
 static void
-remoteDomainBuildEventCallbackControlError(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                           virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackControlError(virNetClientProgram *prog G_GNUC_UNUSED,
+                                           virNetClient *client G_GNUC_UNUSED,
                                            void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4903,7 +4732,7 @@ remoteDomainBuildEventDiskChangeHelper(virConnectPtr conn,
 {
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -4920,8 +4749,8 @@ remoteDomainBuildEventDiskChangeHelper(virConnectPtr conn,
     virObjectEventStateQueueRemote(priv->eventState, event, callbackID);
 }
 static void
-remoteDomainBuildEventDiskChange(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                 virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventDiskChange(virNetClientProgram *prog G_GNUC_UNUSED,
+                                 virNetClient *client G_GNUC_UNUSED,
                                  void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4929,8 +4758,8 @@ remoteDomainBuildEventDiskChange(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
     remoteDomainBuildEventDiskChangeHelper(conn, msg, -1);
 }
 static void
-remoteDomainBuildEventCallbackDiskChange(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                         virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackDiskChange(virNetClientProgram *prog G_GNUC_UNUSED,
+                                         virNetClient *client G_GNUC_UNUSED,
                                          void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4946,7 +4775,7 @@ remoteDomainBuildEventTrayChangeHelper(virConnectPtr conn,
 {
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -4961,8 +4790,8 @@ remoteDomainBuildEventTrayChangeHelper(virConnectPtr conn,
     virObjectEventStateQueueRemote(priv->eventState, event, callbackID);
 }
 static void
-remoteDomainBuildEventTrayChange(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                 virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventTrayChange(virNetClientProgram *prog G_GNUC_UNUSED,
+                                 virNetClient *client G_GNUC_UNUSED,
                                  void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4970,8 +4799,8 @@ remoteDomainBuildEventTrayChange(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
     remoteDomainBuildEventTrayChangeHelper(conn, msg, -1);
 }
 static void
-remoteDomainBuildEventCallbackTrayChange(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                         virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackTrayChange(virNetClientProgram *prog G_GNUC_UNUSED,
+                                         virNetClient *client G_GNUC_UNUSED,
                                          void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -4987,7 +4816,7 @@ remoteDomainBuildEventPMWakeupHelper(virConnectPtr conn,
 {
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -5000,8 +4829,8 @@ remoteDomainBuildEventPMWakeupHelper(virConnectPtr conn,
     virObjectEventStateQueueRemote(priv->eventState, event, callbackID);
 }
 static void
-remoteDomainBuildEventPMWakeup(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                               virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventPMWakeup(virNetClientProgram *prog G_GNUC_UNUSED,
+                               virNetClient *client G_GNUC_UNUSED,
                                void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -5009,8 +4838,8 @@ remoteDomainBuildEventPMWakeup(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
     remoteDomainBuildEventPMWakeupHelper(conn, msg, -1, 0);
 }
 static void
-remoteDomainBuildEventCallbackPMWakeup(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                       virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackPMWakeup(virNetClientProgram *prog G_GNUC_UNUSED,
+                                       virNetClient *client G_GNUC_UNUSED,
                                        void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -5027,7 +4856,7 @@ remoteDomainBuildEventPMSuspendHelper(virConnectPtr conn,
 {
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -5040,8 +4869,8 @@ remoteDomainBuildEventPMSuspendHelper(virConnectPtr conn,
     virObjectEventStateQueueRemote(priv->eventState, event, callbackID);
 }
 static void
-remoteDomainBuildEventPMSuspend(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventPMSuspend(virNetClientProgram *prog G_GNUC_UNUSED,
+                                virNetClient *client G_GNUC_UNUSED,
                                 void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -5049,8 +4878,8 @@ remoteDomainBuildEventPMSuspend(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
     remoteDomainBuildEventPMSuspendHelper(conn, msg, -1, 0);
 }
 static void
-remoteDomainBuildEventCallbackPMSuspend(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                        virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackPMSuspend(virNetClientProgram *prog G_GNUC_UNUSED,
+                                        virNetClient *client G_GNUC_UNUSED,
                                         void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -5067,7 +4896,7 @@ remoteDomainBuildEventBalloonChangeHelper(virConnectPtr conn,
 {
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -5079,8 +4908,8 @@ remoteDomainBuildEventBalloonChangeHelper(virConnectPtr conn,
     virObjectEventStateQueueRemote(priv->eventState, event, callbackID);
 }
 static void
-remoteDomainBuildEventBalloonChange(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                    virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventBalloonChange(virNetClientProgram *prog G_GNUC_UNUSED,
+                                    virNetClient *client G_GNUC_UNUSED,
                                     void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -5088,8 +4917,8 @@ remoteDomainBuildEventBalloonChange(virNetClientProgramPtr prog ATTRIBUTE_UNUSED
     remoteDomainBuildEventBalloonChangeHelper(conn, msg, -1);
 }
 static void
-remoteDomainBuildEventCallbackBalloonChange(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                            virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackBalloonChange(virNetClientProgram *prog G_GNUC_UNUSED,
+                                            virNetClient *client G_GNUC_UNUSED,
                                             void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -5106,7 +4935,7 @@ remoteDomainBuildEventPMSuspendDiskHelper(virConnectPtr conn,
 {
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -5119,8 +4948,8 @@ remoteDomainBuildEventPMSuspendDiskHelper(virConnectPtr conn,
     virObjectEventStateQueueRemote(priv->eventState, event, callbackID);
 }
 static void
-remoteDomainBuildEventPMSuspendDisk(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                    virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventPMSuspendDisk(virNetClientProgram *prog G_GNUC_UNUSED,
+                                    virNetClient *client G_GNUC_UNUSED,
                                     void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -5128,8 +4957,8 @@ remoteDomainBuildEventPMSuspendDisk(virNetClientProgramPtr prog ATTRIBUTE_UNUSED
     remoteDomainBuildEventPMSuspendDiskHelper(conn, msg, -1, 0);
 }
 static void
-remoteDomainBuildEventCallbackPMSuspendDisk(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                            virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackPMSuspendDisk(virNetClientProgram *prog G_GNUC_UNUSED,
+                                            virNetClient *client G_GNUC_UNUSED,
                                             void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -5146,7 +4975,7 @@ remoteDomainBuildEventDeviceRemovedHelper(virConnectPtr conn,
 {
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -5159,8 +4988,8 @@ remoteDomainBuildEventDeviceRemovedHelper(virConnectPtr conn,
     virObjectEventStateQueueRemote(priv->eventState, event, callbackID);
 }
 static void
-remoteDomainBuildEventDeviceRemoved(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                    virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventDeviceRemoved(virNetClientProgram *prog G_GNUC_UNUSED,
+                                    virNetClient *client G_GNUC_UNUSED,
                                     void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -5168,8 +4997,8 @@ remoteDomainBuildEventDeviceRemoved(virNetClientProgramPtr prog ATTRIBUTE_UNUSED
     remoteDomainBuildEventDeviceRemovedHelper(conn, msg, -1);
 }
 static void
-remoteDomainBuildEventCallbackDeviceRemoved(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                            virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackDeviceRemoved(virNetClientProgram *prog G_GNUC_UNUSED,
+                                            virNetClient *client G_GNUC_UNUSED,
                                             void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -5178,15 +5007,15 @@ remoteDomainBuildEventCallbackDeviceRemoved(virNetClientProgramPtr prog ATTRIBUT
 }
 
 static void
-remoteDomainBuildEventCallbackDeviceAdded(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                          virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackDeviceAdded(virNetClientProgram *prog G_GNUC_UNUSED,
+                                          virNetClient *client G_GNUC_UNUSED,
                                           void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
     remote_domain_event_callback_device_added_msg *msg = evdata;
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -5201,15 +5030,15 @@ remoteDomainBuildEventCallbackDeviceAdded(virNetClientProgramPtr prog ATTRIBUTE_
 
 
 static void
-remoteDomainBuildEventCallbackDeviceRemovalFailed(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                                  virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackDeviceRemovalFailed(virNetClientProgram *prog G_GNUC_UNUSED,
+                                                  virNetClient *client G_GNUC_UNUSED,
                                                   void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
     remote_domain_event_callback_device_removal_failed_msg *msg = evdata;
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     if (!(dom = get_nonnull_domain(conn, msg->dom)))
         return;
@@ -5222,8 +5051,8 @@ remoteDomainBuildEventCallbackDeviceRemovalFailed(virNetClientProgramPtr prog AT
 }
 
 static void
-remoteDomainBuildEventCallbackTunable(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                      virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackTunable(virNetClientProgram *prog G_GNUC_UNUSED,
+                                      virNetClient *client G_GNUC_UNUSED,
                                       void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
@@ -5232,9 +5061,9 @@ remoteDomainBuildEventCallbackTunable(virNetClientProgramPtr prog ATTRIBUTE_UNUS
     virDomainPtr dom;
     virTypedParameterPtr params = NULL;
     int nparams = 0;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) msg->params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) msg->params.params_val,
                                   msg->params.params_len,
                                   REMOTE_DOMAIN_EVENT_TUNABLE_MAX,
                                   &params, &nparams) < 0)
@@ -5255,15 +5084,15 @@ remoteDomainBuildEventCallbackTunable(virNetClientProgramPtr prog ATTRIBUTE_UNUS
 
 
 static void
-remoteDomainBuildEventCallbackAgentLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                             virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackAgentLifecycle(virNetClientProgram *prog G_GNUC_UNUSED,
+                                             virNetClient *client G_GNUC_UNUSED,
                                              void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
     remote_domain_event_callback_agent_lifecycle_msg *msg = evdata;
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     if (!(dom = get_nonnull_domain(conn, msg->dom)))
         return;
@@ -5278,8 +5107,8 @@ remoteDomainBuildEventCallbackAgentLifecycle(virNetClientProgramPtr prog ATTRIBU
 
 
 static void
-remoteDomainBuildEventCallbackMigrationIteration(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                                 virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackMigrationIteration(virNetClientProgram *prog G_GNUC_UNUSED,
+                                                 virNetClient *client G_GNUC_UNUSED,
                                                  void *evdata,
                                                  void *opaque)
 {
@@ -5287,7 +5116,7 @@ remoteDomainBuildEventCallbackMigrationIteration(virNetClientProgramPtr prog ATT
     remote_domain_event_callback_migration_iteration_msg *msg = evdata;
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     if (!(dom = get_nonnull_domain(conn, msg->dom)))
         return;
@@ -5301,8 +5130,8 @@ remoteDomainBuildEventCallbackMigrationIteration(virNetClientProgramPtr prog ATT
 
 
 static void
-remoteDomainBuildEventCallbackJobCompleted(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                           virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackJobCompleted(virNetClientProgram *prog G_GNUC_UNUSED,
+                                           virNetClient *client G_GNUC_UNUSED,
                                            void *evdata,
                                            void *opaque)
 {
@@ -5310,11 +5139,11 @@ remoteDomainBuildEventCallbackJobCompleted(virNetClientProgramPtr prog ATTRIBUTE
     remote_domain_event_callback_job_completed_msg *msg = evdata;
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
     virTypedParameterPtr params = NULL;
     int nparams = 0;
 
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) msg->params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) msg->params.params_val,
                                   msg->params.params_len,
                                   REMOTE_DOMAIN_JOB_STATS_MAX,
                                   &params, &nparams) < 0)
@@ -5334,15 +5163,15 @@ remoteDomainBuildEventCallbackJobCompleted(virNetClientProgramPtr prog ATTRIBUTE
 
 
 static void
-remoteDomainBuildEventCallbackMetadataChange(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                             virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventCallbackMetadataChange(virNetClientProgram *prog G_GNUC_UNUSED,
+                                             virNetClient *client G_GNUC_UNUSED,
                                              void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
     remote_domain_event_callback_metadata_change_msg *msg = evdata;
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     if (!(dom = get_nonnull_domain(conn, msg->dom)))
         return;
@@ -5356,15 +5185,15 @@ remoteDomainBuildEventCallbackMetadataChange(virNetClientProgramPtr prog ATTRIBU
 
 
 static void
-remoteNetworkBuildEventLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                 virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteNetworkBuildEventLifecycle(virNetClientProgram *prog G_GNUC_UNUSED,
+                                 virNetClient *client G_GNUC_UNUSED,
                                  void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
     struct private_data *priv = conn->privateData;
     remote_network_event_lifecycle_msg *msg = evdata;
     virNetworkPtr net;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     net = get_nonnull_network(conn, msg->net);
     if (!net)
@@ -5378,15 +5207,15 @@ remoteNetworkBuildEventLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
 }
 
 static void
-remoteStoragePoolBuildEventLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                     virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteStoragePoolBuildEventLifecycle(virNetClientProgram *prog G_GNUC_UNUSED,
+                                     virNetClient *client G_GNUC_UNUSED,
                                      void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
     struct private_data *priv = conn->privateData;
     remote_storage_pool_event_lifecycle_msg *msg = evdata;
     virStoragePoolPtr pool;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     pool = get_nonnull_storage_pool(conn, msg->pool);
     if (!pool)
@@ -5400,15 +5229,15 @@ remoteStoragePoolBuildEventLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSE
 }
 
 static void
-remoteStoragePoolBuildEventRefresh(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                   virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteStoragePoolBuildEventRefresh(virNetClientProgram *prog G_GNUC_UNUSED,
+                                   virNetClient *client G_GNUC_UNUSED,
                                    void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
     struct private_data *priv = conn->privateData;
     remote_storage_pool_event_refresh_msg *msg = evdata;
     virStoragePoolPtr pool;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     pool = get_nonnull_storage_pool(conn, msg->pool);
     if (!pool)
@@ -5421,15 +5250,15 @@ remoteStoragePoolBuildEventRefresh(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
 }
 
 static void
-remoteNodeDeviceBuildEventLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                    virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteNodeDeviceBuildEventLifecycle(virNetClientProgram *prog G_GNUC_UNUSED,
+                                    virNetClient *client G_GNUC_UNUSED,
                                     void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
     struct private_data *priv = conn->privateData;
     remote_node_device_event_lifecycle_msg *msg = evdata;
     virNodeDevicePtr dev;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dev = get_nonnull_node_device(conn, msg->dev);
     if (!dev)
@@ -5443,15 +5272,15 @@ remoteNodeDeviceBuildEventLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSED
 }
 
 static void
-remoteNodeDeviceBuildEventUpdate(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                 virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteNodeDeviceBuildEventUpdate(virNetClientProgram *prog G_GNUC_UNUSED,
+                                 virNetClient *client G_GNUC_UNUSED,
                                  void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
     struct private_data *priv = conn->privateData;
     remote_node_device_event_update_msg *msg = evdata;
     virNodeDevicePtr dev;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dev = get_nonnull_node_device(conn, msg->dev);
     if (!dev)
@@ -5464,15 +5293,15 @@ remoteNodeDeviceBuildEventUpdate(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
 }
 
 static void
-remoteSecretBuildEventLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteSecretBuildEventLifecycle(virNetClientProgram *prog G_GNUC_UNUSED,
+                                virNetClient *client G_GNUC_UNUSED,
                                 void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
     struct private_data *priv = conn->privateData;
     remote_secret_event_lifecycle_msg *msg = evdata;
     virSecretPtr secret;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     secret = get_nonnull_secret(conn, msg->secret);
     if (!secret)
@@ -5486,15 +5315,15 @@ remoteSecretBuildEventLifecycle(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
 }
 
 static void
-remoteSecretBuildEventValueChanged(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                   virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteSecretBuildEventValueChanged(virNetClientProgram *prog G_GNUC_UNUSED,
+                                   virNetClient *client G_GNUC_UNUSED,
                                    void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
     struct private_data *priv = conn->privateData;
     remote_secret_event_value_changed_msg *msg = evdata;
     virSecretPtr secret;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     secret = get_nonnull_secret(conn, msg->secret);
     if (!secret)
@@ -5507,15 +5336,15 @@ remoteSecretBuildEventValueChanged(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
 }
 
 static void
-remoteDomainBuildQemuMonitorEvent(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                  virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildQemuMonitorEvent(virNetClientProgram *prog G_GNUC_UNUSED,
+                                  virNetClient *client G_GNUC_UNUSED,
                                   void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
     struct private_data *priv = conn->privateData;
     qemu_domain_monitor_event_msg *msg = evdata;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     dom = get_nonnull_domain(conn, msg->dom);
     if (!dom)
@@ -5533,7 +5362,7 @@ remoteDomainBuildQemuMonitorEvent(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
 
 static unsigned char *
 remoteSecretGetValue(virSecretPtr secret, size_t *value_size,
-                     unsigned int flags, unsigned int internalFlags)
+                     unsigned int flags)
 {
     unsigned char *rv = NULL;
     remote_secret_get_value_args args;
@@ -5541,12 +5370,6 @@ remoteSecretGetValue(virSecretPtr secret, size_t *value_size,
     struct private_data *priv = secret->conn->privateData;
 
     remoteDriverLock(priv);
-
-    /* internalFlags intentionally do not go over the wire */
-    if (internalFlags) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("no internalFlags support"));
-        goto done;
-    }
 
     make_nonnull_secret(&args.secret, secret);
     args.flags = flags;
@@ -5567,15 +5390,15 @@ remoteSecretGetValue(virSecretPtr secret, size_t *value_size,
 
 
 static void
-remoteDomainBuildEventBlockThreshold(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                                     virNetClientPtr client ATTRIBUTE_UNUSED,
+remoteDomainBuildEventBlockThreshold(virNetClientProgram *prog G_GNUC_UNUSED,
+                                     virNetClient *client G_GNUC_UNUSED,
                                      void *evdata, void *opaque)
 {
     virConnectPtr conn = opaque;
     remote_domain_event_block_threshold_msg *msg = evdata;
     struct private_data *priv = conn->privateData;
     virDomainPtr dom;
-    virObjectEventPtr event = NULL;
+    virObjectEvent *event = NULL;
 
     if (!(dom = get_nonnull_domain(conn, msg->dom)))
         return;
@@ -5590,15 +5413,39 @@ remoteDomainBuildEventBlockThreshold(virNetClientProgramPtr prog ATTRIBUTE_UNUSE
 }
 
 
+static void
+remoteDomainBuildEventMemoryFailure(virNetClientProgram *prog G_GNUC_UNUSED,
+                                    virNetClient *client G_GNUC_UNUSED,
+                                    void *evdata, void *opaque)
+{
+    virConnectPtr conn = opaque;
+    remote_domain_event_memory_failure_msg *msg = evdata;
+    struct private_data *priv = conn->privateData;
+    virDomainPtr dom;
+    virObjectEvent *event = NULL;
+
+    if (!(dom = get_nonnull_domain(conn, msg->dom)))
+        return;
+
+    event = virDomainEventMemoryFailureNewFromDom(dom, msg->recipient,
+                                                  msg->action, msg->flags);
+
+    virObjectUnref(dom);
+
+    virObjectEventStateQueueRemote(priv->eventState, event, msg->callbackID);
+}
+
+
 static int
 remoteStreamSend(virStreamPtr st,
                  const char *data,
                  size_t nbytes)
 {
-    VIR_DEBUG("st=%p data=%p nbytes=%zu", st, data, nbytes);
     struct private_data *priv = st->conn->privateData;
-    virNetClientStreamPtr privst = st->privateData;
+    virNetClientStream *privst = st->privateData;
     int rv;
+
+    VIR_DEBUG("st=%p data=%p nbytes=%zu", st, data, nbytes);
 
     remoteDriverLock(priv);
     priv->localUses++;
@@ -5623,11 +5470,12 @@ remoteStreamRecvFlags(virStreamPtr st,
                       size_t nbytes,
                       unsigned int flags)
 {
+    struct private_data *priv = st->conn->privateData;
+    virNetClientStream *privst = st->privateData;
+    int rv;
+
     VIR_DEBUG("st=%p data=%p nbytes=%zu flags=0x%x",
               st, data, nbytes, flags);
-    struct private_data *priv = st->conn->privateData;
-    virNetClientStreamPtr privst = st->privateData;
-    int rv;
 
     virCheckFlags(VIR_STREAM_RECV_STOP_AT_HOLE, -1);
 
@@ -5664,11 +5512,12 @@ remoteStreamSendHole(virStreamPtr st,
                      long long length,
                      unsigned int flags)
 {
+    struct private_data *priv = st->conn->privateData;
+    virNetClientStream *privst = st->privateData;
+    int rv;
+
     VIR_DEBUG("st=%p length=%lld flags=0x%x",
               st, length, flags);
-    struct private_data *priv = st->conn->privateData;
-    virNetClientStreamPtr privst = st->privateData;
-    int rv;
 
     remoteDriverLock(priv);
     priv->localUses++;
@@ -5692,7 +5541,7 @@ remoteStreamRecvHole(virStreamPtr st,
                      unsigned int flags)
 {
     struct private_data *priv = st->conn->privateData;
-    virNetClientStreamPtr privst = st->privateData;
+    virNetClientStream *privst = st->privateData;
     int rv;
 
     VIR_DEBUG("st=%p length=%p flags=0x%x",
@@ -5720,7 +5569,7 @@ struct remoteStreamCallbackData {
     virFreeCallback ff;
 };
 
-static void remoteStreamEventCallback(virNetClientStreamPtr stream ATTRIBUTE_UNUSED,
+static void remoteStreamEventCallback(virNetClientStream *stream G_GNUC_UNUSED,
                                       int events,
                                       void *opaque)
 {
@@ -5738,7 +5587,7 @@ static void remoteStreamCallbackFree(void *opaque)
         (cbdata->ff)(cbdata->opaque);
 
     virObjectUnref(cbdata->st);
-    VIR_FREE(opaque);
+    g_free(opaque);
 }
 
 
@@ -5750,12 +5599,11 @@ remoteStreamEventAddCallback(virStreamPtr st,
                              virFreeCallback ff)
 {
     struct private_data *priv = st->conn->privateData;
-    virNetClientStreamPtr privst = st->privateData;
+    virNetClientStream *privst = st->privateData;
     int ret = -1;
     struct remoteStreamCallbackData *cbdata;
 
-    if (VIR_ALLOC(cbdata) < 0)
-        return -1;
+    cbdata = g_new0(struct remoteStreamCallbackData, 1);
     cbdata->cb = cb;
     cbdata->opaque = opaque;
     cbdata->ff = ff;
@@ -5775,7 +5623,6 @@ remoteStreamEventAddCallback(virStreamPtr st,
 
  cleanup:
     remoteDriverUnlock(priv);
-    /* coverity[leaked_storage] - cbdata is not leaked */
     return ret;
 }
 
@@ -5785,7 +5632,7 @@ remoteStreamEventUpdateCallback(virStreamPtr st,
                                 int events)
 {
     struct private_data *priv = st->conn->privateData;
-    virNetClientStreamPtr privst = st->privateData;
+    virNetClientStream *privst = st->privateData;
     int ret = -1;
 
     remoteDriverLock(priv);
@@ -5801,7 +5648,7 @@ static int
 remoteStreamEventRemoveCallback(virStreamPtr st)
 {
     struct private_data *priv = st->conn->privateData;
-    virNetClientStreamPtr privst = st->privateData;
+    virNetClientStream *privst = st->privateData;
     int ret = -1;
 
     remoteDriverLock(priv);
@@ -5817,7 +5664,7 @@ static int
 remoteStreamCloseInt(virStreamPtr st, bool streamAbort)
 {
     struct private_data *priv = st->conn->privateData;
-    virNetClientStreamPtr privst = st->privateData;
+    virNetClientStream *privst = st->privateData;
     int ret = -1;
 
     remoteDriverLock(priv);
@@ -6016,12 +5863,10 @@ remoteDomainQemuMonitorCommand(virDomainPtr domain, const char *cmd,
              (xdrproc_t) xdr_qemu_domain_monitor_command_ret, (char *) &ret) == -1)
         goto done;
 
-    if (VIR_STRDUP(*result, ret.result) < 0)
-        goto cleanup;
+    *result = g_strdup(ret.result);
 
     rv = 0;
 
- cleanup:
     xdr_free((xdrproc_t) xdr_qemu_domain_monitor_command_ret, (char *) &ret);
 
  done:
@@ -6167,7 +6012,7 @@ remoteDomainMigratePrepareTunnel3(virConnectPtr dconn,
     int rv = -1;
     remote_domain_migrate_prepare_tunnel3_args args;
     remote_domain_migrate_prepare_tunnel3_ret ret;
-    virNetClientStreamPtr netst;
+    virNetClientStream *netst;
 
     remoteDriverLock(priv);
 
@@ -6330,9 +6175,8 @@ remoteDomainMigrateFinish3(virConnectPtr dconn,
                            _("caller ignores cookieout or cookieoutlen"));
             goto error;
         }
-        *cookieout = ret.cookie_out.cookie_out_val; /* Caller frees. */
+        *cookieout = g_steal_pointer(&ret.cookie_out.cookie_out_val); /* Caller frees. */
         *cookieoutlen = ret.cookie_out.cookie_out_len;
-        ret.cookie_out.cookie_out_val = NULL;
         ret.cookie_out.cookie_out_len = 0;
     }
 
@@ -6420,21 +6264,18 @@ remoteConnectGetCPUModelNames(virConnectPtr conn,
     }
 
     if (models) {
-        if (VIR_ALLOC_N(retmodels, ret.models.models_len + 1) < 0)
-            goto cleanup;
+        retmodels = g_new0(char *, ret.models.models_len + 1);
 
         for (i = 0; i < ret.models.models_len; i++) {
-            retmodels[i] = ret.models.models_val[i];
-            ret.models.models_val[i] = NULL;
+            retmodels[i] = g_steal_pointer(&ret.models.models_val[i]);
         }
-        *models = retmodels;
-        retmodels = NULL;
+        *models = g_steal_pointer(&retmodels);
     }
 
     rv = ret.ret;
 
  cleanup:
-    virStringListFree(retmodels);
+    g_strfreev(retmodels);
 
     xdr_free((xdrproc_t) xdr_remote_connect_get_cpu_model_names_ret, (char *) &ret);
 
@@ -6454,7 +6295,7 @@ remoteDomainOpenGraphics(virDomainPtr dom,
     remote_domain_open_graphics_args args;
     struct private_data *priv = dom->conn->privateData;
     int fdin[] = { fd };
-    size_t fdinlen = ARRAY_CARDINALITY(fdin);
+    size_t fdinlen = G_N_ELEMENTS(fdin);
 
     remoteDriverLock(priv);
 
@@ -6627,7 +6468,7 @@ remoteDomainGetDiskErrors(virDomainPtr dom,
  * send that to the server and wait for reply
  */
 static int
-callFull(virConnectPtr conn ATTRIBUTE_UNUSED,
+callFull(virConnectPtr conn G_GNUC_UNUSED,
          struct private_data *priv,
          unsigned int flags,
          int *fdin,
@@ -6639,9 +6480,9 @@ callFull(virConnectPtr conn ATTRIBUTE_UNUSED,
          xdrproc_t ret_filter, char *ret)
 {
     int rv;
-    virNetClientProgramPtr prog;
+    virNetClientProgram *prog;
     int counter = priv->counter++;
-    virNetClientPtr client = priv->client;
+    virNetClient *client = priv->client;
     priv->localUses++;
 
     if (flags & REMOTE_CALL_QEMU)
@@ -6720,7 +6561,7 @@ remoteDomainGetInterfaceParameters(virDomainPtr domain,
         goto cleanup;
     }
 
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) ret.params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) ret.params.params_val,
                                   ret.params.params_len,
                                   REMOTE_DOMAIN_INTERFACE_PARAMETERS_MAX,
                                   &params,
@@ -6769,7 +6610,7 @@ remoteNodeGetMemoryParameters(virConnectPtr conn,
         goto cleanup;
     }
 
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) ret.params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) ret.params.params_val,
                                   ret.params.params_len,
                                   REMOTE_NODE_MEMORY_PARAMETERS_MAX,
                                   &params,
@@ -6808,7 +6649,7 @@ remoteNodeGetSEVInfo(virConnectPtr conn,
              (xdrproc_t) xdr_remote_node_get_sev_info_ret, (char *) &ret) == -1)
         goto done;
 
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) ret.params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) ret.params.params_val,
                                   ret.params.params_len,
                                   REMOTE_NODE_SEV_INFO_MAX,
                                   params,
@@ -6854,8 +6695,7 @@ remoteNodeGetCPUMap(virConnectPtr conn,
         goto cleanup;
 
     if (cpumap) {
-        if (VIR_ALLOC_N(*cpumap, ret.cpumap.cpumap_len) < 0)
-            goto cleanup;
+        *cpumap = g_new0(unsigned char, ret.cpumap.cpumap_len);
         memcpy(*cpumap, ret.cpumap.cpumap_val, ret.cpumap.cpumap_len);
     }
 
@@ -6929,7 +6769,7 @@ remoteDomainGetJobStats(virDomainPtr domain,
 
     *type = ret.type;
 
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) ret.params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) ret.params.params_val,
                                   ret.params.params_len,
                                   REMOTE_DOMAIN_JOB_STATS_MAX,
                                   params, nparams) < 0)
@@ -6967,15 +6807,9 @@ remoteDomainMigrateBegin3Params(virDomainPtr domain,
     make_nonnull_domain(&args.dom, domain);
     args.flags = flags;
 
-    if (nparams > REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX) {
-        virReportError(VIR_ERR_RPC,
-                       _("Too many migration parameters '%d' for limit '%d'"),
-                       nparams, REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX);
-        goto cleanup;
-    }
-
     if (virTypedParamsSerialize(params, nparams,
-                                (virTypedParameterRemotePtr *) &args.params.params_val,
+                                REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX,
+                                (struct _virTypedParameterRemote **) &args.params.params_val,
                                 &args.params.params_len,
                                 VIR_TYPED_PARAM_STRING_OKAY) < 0) {
         xdr_free((xdrproc_t) xdr_remote_domain_migrate_begin3_params_args,
@@ -7003,7 +6837,7 @@ remoteDomainMigrateBegin3Params(virDomainPtr domain,
     rv = ret.xml; /* caller frees */
 
  cleanup:
-    virTypedParamsRemoteFree((virTypedParameterRemotePtr) args.params.params_val,
+    virTypedParamsRemoteFree((struct _virTypedParameterRemote *) args.params.params_val,
                              args.params.params_len);
     remoteDriverUnlock(priv);
     return rv;
@@ -7035,15 +6869,9 @@ remoteDomainMigratePrepare3Params(virConnectPtr dconn,
     memset(&args, 0, sizeof(args));
     memset(&ret, 0, sizeof(ret));
 
-    if (nparams > REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX) {
-        virReportError(VIR_ERR_RPC,
-                       _("Too many migration parameters '%d' for limit '%d'"),
-                       nparams, REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX);
-        goto cleanup;
-    }
-
     if (virTypedParamsSerialize(params, nparams,
-                                (virTypedParameterRemotePtr *) &args.params.params_val,
+                                REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX,
+                                (struct _virTypedParameterRemote **) &args.params.params_val,
                                 &args.params.params_len,
                                 VIR_TYPED_PARAM_STRING_OKAY) < 0) {
         xdr_free((xdrproc_t) xdr_remote_domain_migrate_prepare3_params_args,
@@ -7083,7 +6911,7 @@ remoteDomainMigratePrepare3Params(virConnectPtr dconn,
     rv = 0;
 
  cleanup:
-    virTypedParamsRemoteFree((virTypedParameterRemotePtr) args.params.params_val,
+    virTypedParamsRemoteFree((struct _virTypedParameterRemote *) args.params.params_val,
                              args.params.params_len);
     VIR_FREE(ret.uri_out);
     remoteDriverUnlock(priv);
@@ -7112,26 +6940,20 @@ remoteDomainMigratePrepareTunnel3Params(virConnectPtr dconn,
     int rv = -1;
     remote_domain_migrate_prepare_tunnel3_params_args args;
     remote_domain_migrate_prepare_tunnel3_params_ret ret;
-    virNetClientStreamPtr netst;
+    virNetClientStream *netst;
 
     remoteDriverLock(priv);
 
     memset(&args, 0, sizeof(args));
     memset(&ret, 0, sizeof(ret));
 
-    if (nparams > REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX) {
-        virReportError(VIR_ERR_RPC,
-                       _("Too many migration parameters '%d' for limit '%d'"),
-                       nparams, REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX);
-        goto cleanup;
-    }
-
     args.cookie_in.cookie_in_val = (char *)cookiein;
     args.cookie_in.cookie_in_len = cookieinlen;
     args.flags = flags;
 
     if (virTypedParamsSerialize(params, nparams,
-                                (virTypedParameterRemotePtr *) &args.params.params_val,
+                                REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX,
+                                (struct _virTypedParameterRemote **) &args.params.params_val,
                                 &args.params.params_len,
                                 VIR_TYPED_PARAM_STRING_OKAY) < 0) {
         xdr_free((xdrproc_t) xdr_remote_domain_migrate_prepare_tunnel3_params_args,
@@ -7177,7 +6999,7 @@ remoteDomainMigratePrepareTunnel3Params(virConnectPtr dconn,
     rv = 0;
 
  cleanup:
-    virTypedParamsRemoteFree((virTypedParameterRemotePtr) args.params.params_val,
+    virTypedParamsRemoteFree((struct _virTypedParameterRemote *) args.params.params_val,
                              args.params.params_len);
     remoteDriverUnlock(priv);
     return rv;
@@ -7209,13 +7031,6 @@ remoteDomainMigratePerform3Params(virDomainPtr dom,
     memset(&args, 0, sizeof(args));
     memset(&ret, 0, sizeof(ret));
 
-    if (nparams > REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX) {
-        virReportError(VIR_ERR_RPC,
-                       _("Too many migration parameters '%d' for limit '%d'"),
-                       nparams, REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX);
-        goto cleanup;
-    }
-
     make_nonnull_domain(&args.dom, dom);
     args.dconnuri = dconnuri == NULL ? NULL : (char **) &dconnuri;
     args.cookie_in.cookie_in_val = (char *)cookiein;
@@ -7223,7 +7038,8 @@ remoteDomainMigratePerform3Params(virDomainPtr dom,
     args.flags = flags;
 
     if (virTypedParamsSerialize(params, nparams,
-                                (virTypedParameterRemotePtr *) &args.params.params_val,
+                                REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX,
+                                (struct _virTypedParameterRemote **) &args.params.params_val,
                                 &args.params.params_len,
                                 VIR_TYPED_PARAM_STRING_OKAY) < 0) {
         xdr_free((xdrproc_t) xdr_remote_domain_migrate_perform3_params_args,
@@ -7251,7 +7067,7 @@ remoteDomainMigratePerform3Params(virDomainPtr dom,
     rv = 0;
 
  cleanup:
-    virTypedParamsRemoteFree((virTypedParameterRemotePtr) args.params.params_val,
+    virTypedParamsRemoteFree((struct _virTypedParameterRemote *) args.params.params_val,
                              args.params.params_len);
     remoteDriverUnlock(priv);
     return rv;
@@ -7283,20 +7099,14 @@ remoteDomainMigrateFinish3Params(virConnectPtr dconn,
     memset(&args, 0, sizeof(args));
     memset(&ret, 0, sizeof(ret));
 
-    if (nparams > REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX) {
-        virReportError(VIR_ERR_RPC,
-                       _("Too many migration parameters '%d' for limit '%d'"),
-                       nparams, REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX);
-        goto cleanup;
-    }
-
     args.cookie_in.cookie_in_val = (char *)cookiein;
     args.cookie_in.cookie_in_len = cookieinlen;
     args.flags = flags;
     args.cancelled = cancelled;
 
     if (virTypedParamsSerialize(params, nparams,
-                                (virTypedParameterRemotePtr *) &args.params.params_val,
+                                REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX,
+                                (struct _virTypedParameterRemote **) &args.params.params_val,
                                 &args.params.params_len,
                                 VIR_TYPED_PARAM_STRING_OKAY) < 0) {
         xdr_free((xdrproc_t) xdr_remote_domain_migrate_finish3_params_args,
@@ -7319,9 +7129,8 @@ remoteDomainMigrateFinish3Params(virConnectPtr dconn,
                            _("caller ignores cookieout or cookieoutlen"));
             goto error;
         }
-        *cookieout = ret.cookie_out.cookie_out_val; /* Caller frees. */
+        *cookieout = g_steal_pointer(&ret.cookie_out.cookie_out_val); /* Caller frees. */
         *cookieoutlen = ret.cookie_out.cookie_out_len;
-        ret.cookie_out.cookie_out_val = NULL;
         ret.cookie_out.cookie_out_len = 0;
     }
 
@@ -7329,7 +7138,7 @@ remoteDomainMigrateFinish3Params(virConnectPtr dconn,
              (char *) &ret);
 
  cleanup:
-    virTypedParamsRemoteFree((virTypedParameterRemotePtr) args.params.params_val,
+    virTypedParamsRemoteFree((struct _virTypedParameterRemote *) args.params.params_val,
                              args.params.params_len);
     remoteDriverUnlock(priv);
     return rv;
@@ -7357,13 +7166,6 @@ remoteDomainMigrateConfirm3Params(virDomainPtr domain,
 
     memset(&args, 0, sizeof(args));
 
-    if (nparams > REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX) {
-        virReportError(VIR_ERR_RPC,
-                       _("Too many migration parameters '%d' for limit '%d'"),
-                       nparams, REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX);
-        goto cleanup;
-    }
-
     make_nonnull_domain(&args.dom, domain);
     args.cookie_in.cookie_in_len = cookieinlen;
     args.cookie_in.cookie_in_val = (char *) cookiein;
@@ -7371,7 +7173,8 @@ remoteDomainMigrateConfirm3Params(virDomainPtr domain,
     args.cancelled = cancelled;
 
     if (virTypedParamsSerialize(params, nparams,
-                                (virTypedParameterRemotePtr *) &args.params.params_val,
+                                REMOTE_DOMAIN_MIGRATE_PARAM_LIST_MAX,
+                                (struct _virTypedParameterRemote **) &args.params.params_val,
                                 &args.params.params_len,
                                 VIR_TYPED_PARAM_STRING_OKAY) < 0) {
         xdr_free((xdrproc_t) xdr_remote_domain_migrate_confirm3_params_args,
@@ -7387,7 +7190,7 @@ remoteDomainMigrateConfirm3Params(virDomainPtr domain,
     rv = 0;
 
  cleanup:
-    virTypedParamsRemoteFree((virTypedParameterRemotePtr) args.params.params_val,
+    virTypedParamsRemoteFree((struct _virTypedParameterRemote *) args.params.params_val,
                              args.params.params_len);
     remoteDriverUnlock(priv);
     return rv;
@@ -7552,45 +7355,35 @@ remoteSerializeDHCPLease(virNetworkDHCPLeasePtr lease_dst, remote_network_dhcp_l
     lease_dst->type = lease_src->type;
     lease_dst->prefix = lease_src->prefix;
 
-    if (VIR_STRDUP(lease_dst->iface, lease_src->iface) < 0)
-        goto error;
+    lease_dst->iface = g_strdup(lease_src->iface);
 
-    if (VIR_STRDUP(lease_dst->ipaddr, lease_src->ipaddr) < 0)
-        goto error;
+    lease_dst->ipaddr = g_strdup(lease_src->ipaddr);
 
     if (lease_src->mac) {
-        if (VIR_STRDUP(lease_dst->mac, *lease_src->mac) < 0)
-            goto error;
+        lease_dst->mac = g_strdup(*lease_src->mac);
     } else {
         lease_src->mac = NULL;
     }
 
     if (lease_src->iaid) {
-        if (VIR_STRDUP(lease_dst->iaid, *lease_src->iaid) < 0)
-            goto error;
+        lease_dst->iaid = g_strdup(*lease_src->iaid);
     } else {
         lease_src->iaid = NULL;
     }
 
     if (lease_src->hostname) {
-        if (VIR_STRDUP(lease_dst->hostname, *lease_src->hostname) < 0)
-            goto error;
+        lease_dst->hostname = g_strdup(*lease_src->hostname);
     } else {
         lease_src->hostname = NULL;
     }
 
     if (lease_src->clientid) {
-        if (VIR_STRDUP(lease_dst->clientid, *lease_src->clientid) < 0)
-            goto error;
+        lease_dst->clientid = g_strdup(*lease_src->clientid);
     } else {
         lease_src->clientid = NULL;
     }
 
     return 0;
-
- error:
-    virNetworkDHCPLeaseFree(lease_dst);
-    return -1;
 }
 
 
@@ -7629,20 +7422,17 @@ remoteNetworkGetDHCPLeases(virNetworkPtr net,
     }
 
     if (leases) {
-        if (ret.leases.leases_len &&
-            VIR_ALLOC_N(leases_ret, ret.leases.leases_len + 1) < 0)
-            goto cleanup;
+        if (ret.leases.leases_len)
+            leases_ret = g_new0(virNetworkDHCPLeasePtr, ret.leases.leases_len + 1);
 
         for (i = 0; i < ret.leases.leases_len; i++) {
-            if (VIR_ALLOC(leases_ret[i]) < 0)
-                goto cleanup;
+            leases_ret[i] = g_new0(virNetworkDHCPLease, 1);
 
             if (remoteSerializeDHCPLease(leases_ret[i], &ret.leases.leases_val[i]) < 0)
                 goto cleanup;
         }
 
-        *leases = leases_ret;
-        leases_ret = NULL;
+        *leases = g_steal_pointer(&leases_ret);
     }
 
     rv = ret.ret;
@@ -7681,8 +7471,7 @@ remoteConnectGetAllDomainStats(virConnectPtr conn,
     memset(&args, 0, sizeof(args));
 
     if (ndoms) {
-        if (VIR_ALLOC_N(args.doms.doms_val, ndoms) < 0)
-            goto cleanup;
+        args.doms.doms_val = g_new0(remote_nonnull_domain, ndoms);
 
         for (i = 0; i < ndoms; i++)
             make_nonnull_domain(args.doms.doms_val + i, doms[i]);
@@ -7712,31 +7501,27 @@ remoteConnectGetAllDomainStats(virConnectPtr conn,
 
     *retStats = NULL;
 
-    if (VIR_ALLOC_N(tmpret, ret.retStats.retStats_len + 1) < 0)
-        goto cleanup;
+    tmpret = g_new0(virDomainStatsRecordPtr, ret.retStats.retStats_len + 1);
 
     for (i = 0; i < ret.retStats.retStats_len; i++) {
         remote_domain_stats_record *rec = ret.retStats.retStats_val + i;
 
-        if (VIR_ALLOC(elem) < 0)
-            goto cleanup;
+        elem = g_new0(virDomainStatsRecord, 1);
 
         if (!(elem->dom = get_nonnull_domain(conn, rec->dom)))
             goto cleanup;
 
-        if (virTypedParamsDeserialize((virTypedParameterRemotePtr) rec->params.params_val,
+        if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) rec->params.params_val,
                                       rec->params.params_len,
                                       REMOTE_CONNECT_GET_ALL_DOMAIN_STATS_MAX,
                                       &elem->params,
                                       &elem->nparams))
             goto cleanup;
 
-        tmpret[i] = elem;
-        elem = NULL;
+        tmpret[i] = g_steal_pointer(&elem);
     }
 
-    *retStats = tmpret;
-    tmpret = NULL;
+    *retStats = g_steal_pointer(&tmpret);
     rv = ret.retStats.retStats_len;
 
  cleanup:
@@ -7809,7 +7594,6 @@ remoteDomainGetFSInfo(virDomainPtr dom,
     remote_domain_get_fsinfo_args args;
     remote_domain_get_fsinfo_ret ret;
     remote_domain_fsinfo *src;
-    virDomainFSInfoPtr *info_ret = NULL;
 
     remoteDriverLock(priv);
 
@@ -7832,55 +7616,42 @@ remoteDomainGetFSInfo(virDomainPtr dom,
     }
 
     if (info) {
+        virDomainFSInfoPtr *info_ret = NULL;
+
         if (!ret.info.info_len) {
             *info = NULL;
             rv = ret.ret;
             goto cleanup;
         }
 
-        if (VIR_ALLOC_N(info_ret, ret.info.info_len) < 0)
-            goto cleanup;
+        info_ret = g_new0(virDomainFSInfoPtr, ret.info.info_len);
 
         for (i = 0; i < ret.info.info_len; i++) {
             src = &ret.info.info_val[i];
 
-            if (VIR_ALLOC(info_ret[i]) < 0)
-                goto cleanup;
+            info_ret[i] = g_new0(virDomainFSInfo, 1);
 
-            if (VIR_STRDUP(info_ret[i]->mountpoint, src->mountpoint) < 0)
-                goto cleanup;
+            info_ret[i]->mountpoint = g_strdup(src->mountpoint);
 
-            if (VIR_STRDUP(info_ret[i]->name, src->name) < 0)
-                goto cleanup;
+            info_ret[i]->name = g_strdup(src->name);
 
-            if (VIR_STRDUP(info_ret[i]->fstype, src->fstype) < 0)
-                goto cleanup;
+            info_ret[i]->fstype = g_strdup(src->fstype);
 
             len = src->dev_aliases.dev_aliases_len;
             info_ret[i]->ndevAlias = len;
-            if (len &&
-                VIR_ALLOC_N(info_ret[i]->devAlias, len) < 0)
-                goto cleanup;
+            if (len)
+                info_ret[i]->devAlias = g_new0(char *, len);
 
-            for (j = 0; j < len; j++) {
-                if (VIR_STRDUP(info_ret[i]->devAlias[j],
-                               src->dev_aliases.dev_aliases_val[j]) < 0)
-                    goto cleanup;
-            }
+            for (j = 0; j < len; j++)
+                info_ret[i]->devAlias[j] = g_strdup(src->dev_aliases.dev_aliases_val[j]);
         }
 
         *info = info_ret;
-        info_ret = NULL;
     }
 
     rv = ret.ret;
 
  cleanup:
-    if (info_ret) {
-        for (i = 0; i < ret.info.info_len; i++)
-            virDomainFSInfoFree(info_ret[i]);
-        VIR_FREE(info_ret);
-    }
     xdr_free((xdrproc_t)xdr_remote_domain_get_fsinfo_ret,
              (char *) &ret);
 
@@ -7928,25 +7699,21 @@ remoteDomainInterfaceAddresses(virDomainPtr dom,
         goto cleanup;
     }
 
-    if (ret.ifaces.ifaces_len &&
-        VIR_ALLOC_N(ifaces_ret, ret.ifaces.ifaces_len) < 0)
-        goto cleanup;
+    if (ret.ifaces.ifaces_len)
+        ifaces_ret = g_new0(virDomainInterfacePtr, ret.ifaces.ifaces_len);
 
     for (i = 0; i < ret.ifaces.ifaces_len; i++) {
         virDomainInterfacePtr iface;
         remote_domain_interface *iface_ret = &(ret.ifaces.ifaces_val[i]);
 
-        if (VIR_ALLOC(ifaces_ret[i]) < 0)
-            goto cleanup;
+        ifaces_ret[i] = g_new0(virDomainInterface, 1);
 
         iface = ifaces_ret[i];
 
-        if (VIR_STRDUP(iface->name, iface_ret->name) < 0)
-            goto cleanup;
+        iface->name = g_strdup(iface_ret->name);
 
-        if (iface_ret->hwaddr &&
-            VIR_STRDUP(iface->hwaddr, *iface_ret->hwaddr) < 0)
-            goto cleanup;
+        if (iface_ret->hwaddr)
+            iface->hwaddr = g_strdup(*iface_ret->hwaddr);
 
         if (iface_ret->addrs.addrs_len > REMOTE_DOMAIN_IP_ADDR_MAX) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -7958,24 +7725,21 @@ remoteDomainInterfaceAddresses(virDomainPtr dom,
         iface->naddrs = iface_ret->addrs.addrs_len;
 
         if (iface->naddrs) {
-            if (VIR_ALLOC_N(iface->addrs, iface->naddrs) < 0)
-                goto cleanup;
+            iface->addrs = g_new0(virDomainIPAddress, iface->naddrs);
 
            for (j = 0; j < iface->naddrs; j++) {
                 virDomainIPAddressPtr ip_addr = &(iface->addrs[j]);
                 remote_domain_ip_addr *ip_addr_ret =
                     &(iface_ret->addrs.addrs_val[j]);
 
-                if (VIR_STRDUP(ip_addr->addr, ip_addr_ret->addr) < 0)
-                    goto cleanup;
+                ip_addr->addr = g_strdup(ip_addr_ret->addr);
 
                 ip_addr->prefix = ip_addr_ret->prefix;
                 ip_addr->type = ip_addr_ret->type;
             }
         }
     }
-    *ifaces = ifaces_ret;
-    ifaces_ret = NULL;
+    *ifaces = g_steal_pointer(&ifaces_ret);
 
     rv = ret.ifaces.ifaces_len;
 
@@ -8064,8 +7828,7 @@ remoteDomainRename(virDomainPtr dom, const char *new_name, unsigned int flags)
     remote_domain_rename_ret ret;
     char *tmp = NULL;
 
-    if (VIR_STRDUP(tmp, new_name) < 0)
-        return -1;
+    tmp = g_strdup(new_name);
 
     remoteDriverLock(priv);
 
@@ -8085,8 +7848,7 @@ remoteDomainRename(virDomainPtr dom, const char *new_name, unsigned int flags)
 
     if (rv == 0) {
         VIR_FREE(dom->name);
-        dom->name = tmp;
-        tmp = NULL;
+        dom->name = g_steal_pointer(&tmp);
     }
 
  done:
@@ -8132,6 +7894,216 @@ remoteStorageVolGetInfoFlags(virStorageVolPtr vol,
 }
 
 
+static int
+remoteNetworkPortGetParameters(virNetworkPortPtr port,
+                               virTypedParameterPtr *params,
+                               int *nparams,
+                               unsigned int flags)
+{
+    int rv = -1;
+    struct private_data *priv = port->net->conn->privateData;
+    remote_network_port_get_parameters_args args;
+    remote_network_port_get_parameters_ret ret;
+
+    remoteDriverLock(priv);
+
+    make_nonnull_network_port(&args.port, port);
+    args.flags = flags;
+
+    memset(&ret, 0, sizeof(ret));
+    if (call(port->net->conn, priv, 0, REMOTE_PROC_NETWORK_PORT_GET_PARAMETERS,
+             (xdrproc_t) xdr_remote_network_port_get_parameters_args, (char *) &args,
+             (xdrproc_t) xdr_remote_network_port_get_parameters_ret, (char *) &ret) == -1)
+        goto done;
+
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) ret.params.params_val,
+                                  ret.params.params_len,
+                                  REMOTE_NETWORK_PORT_PARAMETERS_MAX,
+                                  params,
+                                  nparams) < 0)
+        goto cleanup;
+
+    rv = 0;
+
+ cleanup:
+    xdr_free((xdrproc_t) xdr_remote_network_port_get_parameters_ret, (char *) &ret);
+ done:
+    remoteDriverUnlock(priv);
+    return rv;
+}
+
+static int
+remoteDomainGetGuestInfo(virDomainPtr dom,
+                         unsigned int types,
+                         virTypedParameterPtr *params,
+                         int *nparams,
+                         unsigned int flags)
+{
+    int rv = -1;
+    struct private_data *priv = dom->conn->privateData;
+    remote_domain_get_guest_info_args args;
+    remote_domain_get_guest_info_ret ret;
+
+    remoteDriverLock(priv);
+
+    make_nonnull_domain(&args.dom, dom);
+
+    args.types = types;
+    args.flags = flags;
+
+    memset(&ret, 0, sizeof(ret));
+
+    if (call(dom->conn, priv, 0, REMOTE_PROC_DOMAIN_GET_GUEST_INFO,
+             (xdrproc_t)xdr_remote_domain_get_guest_info_args, (char *)&args,
+             (xdrproc_t)xdr_remote_domain_get_guest_info_ret, (char *)&ret) == -1)
+        goto done;
+
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) ret.params.params_val,
+                                  ret.params.params_len,
+                                  REMOTE_DOMAIN_GUEST_INFO_PARAMS_MAX,
+                                  params,
+                                  nparams) < 0)
+        goto cleanup;
+
+    rv = 0;
+
+ cleanup:
+    xdr_free((xdrproc_t)xdr_remote_domain_get_guest_info_ret,
+             (char *) &ret);
+
+ done:
+    remoteDriverUnlock(priv);
+    return rv;
+}
+
+static int
+remoteDomainAuthorizedSSHKeysGet(virDomainPtr domain,
+                                 const char *user,
+                                 char ***keys,
+                                 unsigned int flags)
+{
+    int rv = -1;
+    size_t i;
+    struct private_data *priv = domain->conn->privateData;
+    remote_domain_authorized_ssh_keys_get_args args;
+    remote_domain_authorized_ssh_keys_get_ret ret;
+
+    remoteDriverLock(priv);
+
+    make_nonnull_domain(&args.dom, domain);
+    args.user = (char *) user;
+    args.flags = flags;
+    memset(&ret, 0, sizeof(ret));
+
+    if (call(domain->conn, priv, 0, REMOTE_PROC_DOMAIN_AUTHORIZED_SSH_KEYS_GET,
+             (xdrproc_t) xdr_remote_domain_authorized_ssh_keys_get_args, (char *)&args,
+             (xdrproc_t) xdr_remote_domain_authorized_ssh_keys_get_ret, (char *)&ret) == -1) {
+        goto cleanup;
+    }
+
+    if (ret.keys.keys_len > REMOTE_DOMAIN_AUTHORIZED_SSH_KEYS_MAX) {
+        virReportError(VIR_ERR_RPC, "%s",
+                       _("remoteDomainAuthorizedSSHKeysGet: "
+                         "returned number of keys exceeds limit"));
+        goto cleanup;
+    }
+
+    *keys = g_new0(char *, ret.keys.keys_len + 1);
+    for (i = 0; i < ret.keys.keys_len; i++)
+        (*keys)[i] = g_strdup(ret.keys.keys_val[i]);
+
+    rv = ret.keys.keys_len;
+
+ cleanup:
+    remoteDriverUnlock(priv);
+    xdr_free((xdrproc_t)xdr_remote_domain_authorized_ssh_keys_get_ret,
+             (char *) &ret);
+    return rv;
+}
+
+static int
+remoteDomainAuthorizedSSHKeysSet(virDomainPtr domain,
+                                 const char *user,
+                                 const char **keys,
+                                 unsigned int nkeys,
+                                 unsigned int flags)
+{
+    int rv = -1;
+    struct private_data *priv = domain->conn->privateData;
+    remote_domain_authorized_ssh_keys_set_args args;
+
+    remoteDriverLock(priv);
+
+    if (nkeys > REMOTE_DOMAIN_AUTHORIZED_SSH_KEYS_MAX) {
+        virReportError(VIR_ERR_RPC, "%s",
+                       _("remoteDomainAuthorizedSSHKeysSet: "
+                         "returned number of keys exceeds limit"));
+        goto cleanup;
+    }
+
+    make_nonnull_domain(&args.dom, domain);
+    args.user = (char *) user;
+    args.keys.keys_len = nkeys;
+    args.keys.keys_val = (char **) keys;
+    args.flags = flags;
+
+    if (call(domain->conn, priv, 0, REMOTE_PROC_DOMAIN_AUTHORIZED_SSH_KEYS_SET,
+             (xdrproc_t) xdr_remote_domain_authorized_ssh_keys_set_args, (char *)&args,
+             (xdrproc_t) xdr_void, (char *) NULL) == -1) {
+        goto cleanup;
+    }
+
+    rv = 0;
+
+ cleanup:
+    remoteDriverUnlock(priv);
+    return rv;
+}
+
+
+static int
+remoteDomainGetMessages(virDomainPtr domain,
+                        char ***msgs,
+                        unsigned int flags)
+{
+    int rv = -1;
+    size_t i;
+    struct private_data *priv = domain->conn->privateData;
+    remote_domain_get_messages_args args;
+    remote_domain_get_messages_ret ret;
+
+    remoteDriverLock(priv);
+
+    make_nonnull_domain(&args.dom, domain);
+    args.flags = flags;
+    memset(&ret, 0, sizeof(ret));
+
+    if (call(domain->conn, priv, 0, REMOTE_PROC_DOMAIN_GET_MESSAGES,
+             (xdrproc_t) xdr_remote_domain_get_messages_args, (char *)&args,
+             (xdrproc_t) xdr_remote_domain_get_messages_ret, (char *)&ret) == -1) {
+        goto cleanup;
+    }
+
+    if (ret.msgs.msgs_len > REMOTE_DOMAIN_MESSAGES_MAX) {
+        virReportError(VIR_ERR_RPC, "%s",
+                       _("remoteDomainGetMessages: "
+                         "returned number of msgs exceeds limit"));
+        goto cleanup;
+    }
+
+    *msgs = g_new0(char *, ret.msgs.msgs_len + 1);
+    for (i = 0; i < ret.msgs.msgs_len; i++)
+        (*msgs)[i] = g_strdup(ret.msgs.msgs_val[i]);
+
+    rv = ret.msgs.msgs_len;
+
+ cleanup:
+    remoteDriverUnlock(priv);
+    xdr_free((xdrproc_t)xdr_remote_domain_get_messages_ret,
+             (char *) &ret);
+    return rv;
+}
+
 /* get_nonnull_domain and get_nonnull_network turn an on-wire
  * (name, uuid) pair into virDomainPtr or virNetworkPtr object.
  * These can return NULL if underlying memory allocations fail,
@@ -8147,6 +8119,19 @@ static virNetworkPtr
 get_nonnull_network(virConnectPtr conn, remote_nonnull_network network)
 {
     return virGetNetwork(conn, network.name, BAD_CAST network.uuid);
+}
+
+static virNetworkPortPtr
+get_nonnull_network_port(virConnectPtr conn, remote_nonnull_network_port port)
+{
+    virNetworkPortPtr ret;
+    virNetworkPtr net;
+    net = virGetNetwork(conn, port.net.name, BAD_CAST port.net.uuid);
+    if (!net)
+        return NULL;
+    ret = virGetNetworkPort(net, BAD_CAST port.uuid);
+    virObjectUnref(net);
+    return ret;
 }
 
 static virInterfacePtr
@@ -8193,6 +8178,12 @@ get_nonnull_nwfilter_binding(virConnectPtr conn, remote_nonnull_nwfilter_binding
     return virGetNWFilterBinding(conn, binding.portdev, binding.filtername);
 }
 
+static virDomainCheckpointPtr
+get_nonnull_domain_checkpoint(virDomainPtr domain, remote_nonnull_domain_checkpoint checkpoint)
+{
+    return virGetDomainCheckpoint(domain, checkpoint.name);
+}
+
 static virDomainSnapshotPtr
 get_nonnull_domain_snapshot(virDomainPtr domain, remote_nonnull_domain_snapshot snapshot)
 {
@@ -8214,6 +8205,14 @@ make_nonnull_network(remote_nonnull_network *net_dst, virNetworkPtr net_src)
 {
     net_dst->name = net_src->name;
     memcpy(net_dst->uuid, net_src->uuid, VIR_UUID_BUFLEN);
+}
+
+static void
+make_nonnull_network_port(remote_nonnull_network_port *port_dst, virNetworkPortPtr port_src)
+{
+    port_dst->net.name = port_src->net->name;
+    memcpy(port_dst->net.uuid, port_src->net->uuid, VIR_UUID_BUFLEN);
+    memcpy(port_dst->uuid, port_src->uuid, VIR_UUID_BUFLEN);
 }
 
 static void
@@ -8268,6 +8267,13 @@ make_nonnull_nwfilter_binding(remote_nonnull_nwfilter_binding *binding_dst, virN
 }
 
 static void
+make_nonnull_domain_checkpoint(remote_nonnull_domain_checkpoint *checkpoint_dst, virDomainCheckpointPtr checkpoint_src)
+{
+    checkpoint_dst->name = checkpoint_src->name;
+    make_nonnull_domain(&checkpoint_dst->dom, checkpoint_src->domain);
+}
+
+static void
 make_nonnull_domain_snapshot(remote_nonnull_domain_snapshot *snapshot_dst, virDomainSnapshotPtr snapshot_src)
 {
     snapshot_dst->name = snapshot_src->name;
@@ -8285,6 +8291,7 @@ static virHypervisorDriver hypervisor_driver = {
     .name = "remote",
     .connectOpen = remoteConnectOpen, /* 0.3.0 */
     .connectClose = remoteConnectClose, /* 0.3.0 */
+    .connectSetIdentity = remoteConnectSetIdentity, /* 5.8.0 */
     .connectSupportsFeature = remoteConnectSupportsFeature, /* 0.3.0 */
     .connectGetType = remoteConnectGetType, /* 0.3.0 */
     .connectGetVersion = remoteConnectGetVersion, /* 0.3.0 */
@@ -8516,7 +8523,22 @@ static virHypervisorDriver hypervisor_driver = {
     .connectCompareHypervisorCPU = remoteConnectCompareHypervisorCPU, /* 4.4.0 */
     .connectBaselineHypervisorCPU = remoteConnectBaselineHypervisorCPU, /* 4.4.0 */
     .nodeGetSEVInfo = remoteNodeGetSEVInfo, /* 4.5.0 */
-    .domainGetLaunchSecurityInfo = remoteDomainGetLaunchSecurityInfo /* 4.5.0 */
+    .domainGetLaunchSecurityInfo = remoteDomainGetLaunchSecurityInfo, /* 4.5.0 */
+    .domainCheckpointCreateXML = remoteDomainCheckpointCreateXML, /* 5.6.0 */
+    .domainCheckpointGetXMLDesc = remoteDomainCheckpointGetXMLDesc, /* 5.6.0 */
+    .domainListAllCheckpoints = remoteDomainListAllCheckpoints, /* 5.6.0 */
+    .domainCheckpointListAllChildren = remoteDomainCheckpointListAllChildren, /* 5.6.0 */
+    .domainCheckpointLookupByName = remoteDomainCheckpointLookupByName, /* 5.6.0 */
+    .domainCheckpointGetParent = remoteDomainCheckpointGetParent, /* 5.6.0 */
+    .domainCheckpointDelete = remoteDomainCheckpointDelete, /* 5.6.0 */
+    .domainGetGuestInfo = remoteDomainGetGuestInfo, /* 5.7.0 */
+    .domainAgentSetResponseTimeout = remoteDomainAgentSetResponseTimeout, /* 5.10.0 */
+    .domainBackupBegin = remoteDomainBackupBegin, /* 6.0.0 */
+    .domainBackupGetXMLDesc = remoteDomainBackupGetXMLDesc, /* 6.0.0 */
+    .domainAuthorizedSSHKeysGet = remoteDomainAuthorizedSSHKeysGet, /* 6.10.0 */
+    .domainAuthorizedSSHKeysSet = remoteDomainAuthorizedSSHKeysSet, /* 6.10.0 */
+    .domainGetMessages = remoteDomainGetMessages, /* 7.1.0 */
+    .domainStartDirtyRateCalc = remoteDomainStartDirtyRateCalc, /* 7.2.0 */
 };
 
 static virNetworkDriver network_driver = {
@@ -8542,6 +8564,13 @@ static virNetworkDriver network_driver = {
     .networkIsActive = remoteNetworkIsActive, /* 0.7.3 */
     .networkIsPersistent = remoteNetworkIsPersistent, /* 0.7.3 */
     .networkGetDHCPLeases = remoteNetworkGetDHCPLeases, /* 1.2.6 */
+    .networkListAllPorts = remoteNetworkListAllPorts, /* 5.5.0 */
+    .networkPortLookupByUUID = remoteNetworkPortLookupByUUID, /* 5.5.0 */
+    .networkPortCreateXML = remoteNetworkPortCreateXML, /* 5.5.0 */
+    .networkPortGetXMLDesc = remoteNetworkPortGetXMLDesc, /* 5.5.0 */
+    .networkPortSetParameters = remoteNetworkPortSetParameters, /* 5.5.0 */
+    .networkPortGetParameters = remoteNetworkPortGetParameters, /* 5.5.0 */
+    .networkPortDelete = remoteNetworkPortDelete, /* 5.5.0 */
 };
 
 static virInterfaceDriver interface_driver = {
@@ -8640,6 +8669,9 @@ static virNodeDeviceDriver node_device_driver = {
     .nodeDeviceNumOfCaps = remoteNodeDeviceNumOfCaps, /* 0.5.0 */
     .nodeDeviceListCaps = remoteNodeDeviceListCaps, /* 0.5.0 */
     .nodeDeviceCreateXML = remoteNodeDeviceCreateXML, /* 0.6.3 */
+    .nodeDeviceCreate = remoteNodeDeviceCreate, /* 7.3.0 */
+    .nodeDeviceDefineXML = remoteNodeDeviceDefineXML, /* 7.3.0 */
+    .nodeDeviceUndefine = remoteNodeDeviceUndefine, /* 7.3.0 */
     .nodeDeviceDestroy = remoteNodeDeviceDestroy /* 0.6.3 */
 };
 

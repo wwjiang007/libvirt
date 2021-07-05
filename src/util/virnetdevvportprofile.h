@@ -16,16 +16,14 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRNETDEVVPORTPROFILE_H
-# define LIBVIRT_VIRNETDEVVPORTPROFILE_H
+#pragma once
 
-# include "internal.h"
-# include "viruuid.h"
-# include "virutil.h"
-# include "virmacaddr.h"
-# include "virenum.h"
+#include "internal.h"
+#include "viruuid.h"
+#include "virmacaddr.h"
+#include "virenum.h"
 
-# define LIBVIRT_IFLA_VF_PORT_PROFILE_MAX 40
+#define LIBVIRT_IFLA_VF_PORT_PROFILE_MAX 40
 
 typedef enum virNetDevVPortProfile {
     VIR_NETDEV_VPORT_PROFILE_NONE,
@@ -54,7 +52,6 @@ VIR_ENUM_DECL(virNetDevVPortProfileOp);
 
 /* profile data for macvtap (VEPA) and openvswitch */
 typedef struct _virNetDevVPortProfile virNetDevVPortProfile;
-typedef virNetDevVPortProfile *virNetDevVPortProfilePtr;
 struct _virNetDevVPortProfile {
     int           virtPortType; /* enum virNetDevVPortProfile */
     /* these members are used when virtPortType == 802.1Qbg */
@@ -78,19 +75,19 @@ struct _virNetDevVPortProfile {
 };
 
 
-bool virNetDevVPortProfileEqual(virNetDevVPortProfilePtr a,
-                                virNetDevVPortProfilePtr b);
-int virNetDevVPortProfileCopy(virNetDevVPortProfilePtr *dst,
+bool virNetDevVPortProfileEqual(const virNetDevVPortProfile *a,
+                                const virNetDevVPortProfile *b);
+int virNetDevVPortProfileCopy(virNetDevVPortProfile **dst,
                               const virNetDevVPortProfile *src);
 
-int virNetDevVPortProfileCheckComplete(virNetDevVPortProfilePtr virtport,
+int virNetDevVPortProfileCheckComplete(virNetDevVPortProfile *virtport,
                                        bool generateMissing);
-int virNetDevVPortProfileCheckNoExtras(virNetDevVPortProfilePtr virtport);
+int virNetDevVPortProfileCheckNoExtras(const virNetDevVPortProfile *virtport);
 
-int virNetDevVPortProfileMerge3(virNetDevVPortProfilePtr *result,
-                                virNetDevVPortProfilePtr fromInterface,
-                                virNetDevVPortProfilePtr fromNetwork,
-                                virNetDevVPortProfilePtr fromPortgroup);
+int virNetDevVPortProfileMerge3(virNetDevVPortProfile **result,
+                                const virNetDevVPortProfile *fromInterface,
+                                const virNetDevVPortProfile *fromNetwork,
+                                const virNetDevVPortProfile *fromPortgroup);
 
 int virNetDevVPortProfileAssociate(const char *ifname,
                                    const virNetDevVPortProfile *virtPort,
@@ -100,7 +97,7 @@ int virNetDevVPortProfileAssociate(const char *ifname,
                                    const unsigned char *vmuuid,
                                    virNetDevVPortProfileOp vmOp,
                                    bool setlink_only)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 
 int virNetDevVPortProfileDisassociate(const char *ifname,
                                       const virNetDevVPortProfile *virtPort,
@@ -108,7 +105,4 @@ int virNetDevVPortProfileDisassociate(const char *ifname,
                                       const char *linkdev,
                                       int vf,
                                       virNetDevVPortProfileOp vmOp)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
-
-
-#endif /* LIBVIRT_VIRNETDEVVPORTPROFILE_H */
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;

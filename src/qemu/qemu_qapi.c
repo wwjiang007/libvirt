@@ -25,8 +25,6 @@
 #include "virerror.h"
 #include "virlog.h"
 
-#include "c-ctype.h"
-
 #define VIR_FROM_THIS VIR_FROM_QEMU
 
 VIR_LOG_INIT("qemu.qemu_qapi");
@@ -42,14 +40,14 @@ VIR_LOG_INIT("qemu.qemu_qapi");
  * Helper that selects the type of a QMP schema object member or it's variant
  * member. Returns the QMP entry on success or NULL on error.
  */
-static virJSONValuePtr
+static virJSONValue *
 virQEMUQAPISchemaObjectGet(const char *field,
                            const char *name,
                            const char *namefield,
-                           virJSONValuePtr elem)
+                           virJSONValue *elem)
 {
-    virJSONValuePtr arr;
-    virJSONValuePtr cur;
+    virJSONValue *arr;
+    virJSONValue *cur;
     const char *curname;
     size_t i;
 
@@ -71,16 +69,30 @@ virQEMUQAPISchemaObjectGet(const char *field,
 
 struct virQEMUQAPISchemaTraverseContext {
     const char *prevquery;
-    virHashTablePtr schema;
+    GHashTable *schema;
     char **queries;
-    virJSONValuePtr returnType;
+    virJSONValue *returnType;
+    size_t depth;
 };
+
+
+static int
+virQEMUQAPISchemaTraverseContextValidateDepth(struct virQEMUQAPISchemaTraverseContext *ctxt)
+{
+    if (ctxt->depth++ > 1000) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("possible loop in QMP schema"));
+        return -1;
+    }
+
+    return 0;
+}
 
 
 static void
 virQEMUQAPISchemaTraverseContextInit(struct virQEMUQAPISchemaTraverseContext *ctxt,
                                      char **queries,
-                                     virHashTablePtr schema)
+                                     GHashTable *schema)
 {
     memset(ctxt, 0, sizeof(*ctxt));
     ctxt->schema = schema;
@@ -109,20 +121,61 @@ virQEMUQAPISchemaTraverse(const char *baseName,
                           struct virQEMUQAPISchemaTraverseContext *ctxt);
 
 
+/**
+ * @featurename: name of 'feature' field to select
+ * @elem: QAPI JSON entry for a type
+ *
+ * Looks for @featurename in the array of 'features' for given type passed in
+ * via @elem. Returns 1 if @featurename is present, 0 if it's not present
+ * (or @elem has no 'features') or -2 if the schema is malformed.
+ * (see virQEMUQAPISchemaTraverseFunc)
+ */
 static int
-virQEMUQAPISchemaTraverseObject(virJSONValuePtr cur,
+virQEMUQAPISchemaTraverseHasObjectFeature(const char *featurename,
+                                          virJSONValue *elem)
+{
+    virJSONValue *featuresarray;
+    virJSONValue *cur;
+    const char *curstr;
+    size_t i;
+
+    if (!(featuresarray = virJSONValueObjectGetArray(elem, "features")))
+        return 0;
+
+    for (i = 0; i < virJSONValueArraySize(featuresarray); i++) {
+        if (!(cur = virJSONValueArrayGet(featuresarray, i)) ||
+            !(curstr = virJSONValueGetString(cur)))
+            return -2;
+
+        if (STREQ(featurename, curstr))
+            return 1;
+    }
+
+    return 0;
+}
+
+
+static int
+virQEMUQAPISchemaTraverseObject(virJSONValue *cur,
                                 struct virQEMUQAPISchemaTraverseContext *ctxt)
 {
-    virJSONValuePtr obj;
+    virJSONValue *obj;
     const char *query = virQEMUQAPISchemaTraverseContextNextQuery(ctxt);
     char modifier = *query;
 
-    if (!c_isalpha(modifier))
+    if (!g_ascii_isalpha(modifier))
         query++;
 
-    /* exit on modifers for other types */
+    /* exit on modifiers for other types */
     if (modifier == '^' || modifier == '!')
         return 0;
+
+    if (modifier == '$') {
+        if (virQEMUQAPISchemaTraverseContextHasNextQuery(ctxt))
+            return -3;
+
+        return virQEMUQAPISchemaTraverseHasObjectFeature(query, cur);
+    }
 
     if (modifier == '+') {
         obj = virQEMUQAPISchemaObjectGet("variants", query, "case", cur);
@@ -142,7 +195,7 @@ virQEMUQAPISchemaTraverseObject(virJSONValuePtr cur,
 
 
 static int
-virQEMUQAPISchemaTraverseArray(virJSONValuePtr cur,
+virQEMUQAPISchemaTraverseArray(virJSONValue *cur,
                                struct virQEMUQAPISchemaTraverseContext *ctxt)
 {
     const char *querytype;
@@ -156,11 +209,26 @@ virQEMUQAPISchemaTraverseArray(virJSONValuePtr cur,
 
 
 static int
-virQEMUQAPISchemaTraverseCommand(virJSONValuePtr cur,
+virQEMUQAPISchemaTraverseCommand(virJSONValue *cur,
                                  struct virQEMUQAPISchemaTraverseContext *ctxt)
 {
     const char *query = virQEMUQAPISchemaTraverseContextNextQuery(ctxt);
     const char *querytype;
+    char modifier = *query;
+
+    if (!g_ascii_isalpha(modifier))
+        query++;
+
+    /* exit on modifiers for other types */
+    if (modifier == '^' || modifier == '!' || modifier == '+' || modifier == '*')
+        return 0;
+
+    if (modifier == '$') {
+        if (virQEMUQAPISchemaTraverseContextHasNextQuery(ctxt))
+            return -3;
+
+        return virQEMUQAPISchemaTraverseHasObjectFeature(query, cur);
+    }
 
     if (!(querytype = virJSONValueObjectGetString(cur, query)))
         return 0;
@@ -170,12 +238,12 @@ virQEMUQAPISchemaTraverseCommand(virJSONValuePtr cur,
 
 
 static int
-virQEMUQAPISchemaTraverseEnum(virJSONValuePtr cur,
+virQEMUQAPISchemaTraverseEnum(virJSONValue *cur,
                               struct virQEMUQAPISchemaTraverseContext *ctxt)
 {
     const char *query = virQEMUQAPISchemaTraverseContextNextQuery(ctxt);
-    virJSONValuePtr values;
-    virJSONValuePtr enumval;
+    virJSONValue *values;
+    virJSONValue *enumval;
     const char *value;
     size_t i;
 
@@ -204,7 +272,7 @@ virQEMUQAPISchemaTraverseEnum(virJSONValuePtr cur,
 
 
 static int
-virQEMUQAPISchemaTraverseBuiltin(virJSONValuePtr cur,
+virQEMUQAPISchemaTraverseBuiltin(virJSONValue *cur,
                                  struct virQEMUQAPISchemaTraverseContext *ctxt)
 {
     const char *query = virQEMUQAPISchemaTraverseContextNextQuery(ctxt);
@@ -229,12 +297,12 @@ virQEMUQAPISchemaTraverseBuiltin(virJSONValuePtr cur,
 
 
 static int
-virQEMUQAPISchemaTraverseAlternate(virJSONValuePtr cur,
+virQEMUQAPISchemaTraverseAlternate(virJSONValue *cur,
                                    struct virQEMUQAPISchemaTraverseContext *ctxt)
 {
     struct virQEMUQAPISchemaTraverseContext savectxt = *ctxt;
-    virJSONValuePtr members;
-    virJSONValuePtr member;
+    virJSONValue *members;
+    virJSONValue *member;
     const char *membertype;
     int rc;
     size_t i;
@@ -260,7 +328,7 @@ virQEMUQAPISchemaTraverseAlternate(virJSONValuePtr cur,
 /* The function must return 1 on successful query, 0 if the query was not found
  * -1 when a libvirt error is reported, -2 if the schema is invalid and -3 if
  *  the query component is malformed. */
-typedef int (*virQEMUQAPISchemaTraverseFunc)(virJSONValuePtr cur,
+typedef int (*virQEMUQAPISchemaTraverseFunc)(virJSONValue *cur,
                                              struct virQEMUQAPISchemaTraverseContext *ctxt);
 
 struct virQEMUQAPISchemaTraverseMetaType {
@@ -284,9 +352,12 @@ static int
 virQEMUQAPISchemaTraverse(const char *baseName,
                           struct virQEMUQAPISchemaTraverseContext *ctxt)
 {
-    virJSONValuePtr cur;
+    virJSONValue *cur;
     const char *metatype;
     size_t i;
+
+    if (virQEMUQAPISchemaTraverseContextValidateDepth(ctxt) < 0)
+        return -2;
 
     if (!(cur = virHashLookup(ctxt->schema, baseName)))
         return -2;
@@ -299,7 +370,7 @@ virQEMUQAPISchemaTraverse(const char *baseName,
     if (!(metatype = virJSONValueObjectGetString(cur, "meta-type")))
         return -2;
 
-    for (i = 0; i < ARRAY_CARDINALITY(traverseMetaType); i++) {
+    for (i = 0; i < G_N_ELEMENTS(traverseMetaType); i++) {
         if (STREQ(metatype, traverseMetaType[i].metatype))
             return traverseMetaType[i].func(cur, ctxt);
     }
@@ -331,14 +402,16 @@ virQEMUQAPISchemaTraverse(const char *baseName,
  *   'subattribute': selects a plain object member named 'subattribute'
  *   '*subattribute': same as above but the selected member must be optional
  *                    (has a property named 'default' in the schema)
- *   '+variant": In the case of unionized objects, select a specific variant of
- *               the prevously selected member
+ *   '+variant': In the case of unionized objects, select a specific variant of
+ *               the previously selected member
  *
  * - Boolean queries - @entry remains NULL, return value indicates success:
  *   '^enumval': returns true if the previously selected enum contains 'enumval'
  *   '!basictype': returns true if previously selected type is of 'basictype'
- *                 JSON type. Spported are 'null', 'string', 'number', 'value',
+ *                 JSON type. Supported are 'null', 'string', 'number', 'value',
  *                 'int' and 'boolean.
+ *   '$feature': returns true if the previously selected type supports 'feature'
+ *               ('feature' is in the 'features' array of given type)
  *
  * If the name of any (sub)attribute starts with non-alphabetical symbols it
  * needs to be prefixed by a single space.
@@ -356,10 +429,10 @@ virQEMUQAPISchemaTraverse(const char *baseName,
  */
 int
 virQEMUQAPISchemaPathGet(const char *query,
-                         virHashTablePtr schema,
-                         virJSONValuePtr *entry)
+                         GHashTable *schema,
+                         virJSONValue **entry)
 {
-    VIR_AUTOSTRINGLIST elems = NULL;
+    g_auto(GStrv) elems = NULL;
     struct virQEMUQAPISchemaTraverseContext ctxt;
     const char *cmdname;
     int rc;
@@ -367,7 +440,7 @@ virQEMUQAPISchemaPathGet(const char *query,
     if (entry)
         *entry = NULL;
 
-    if (!(elems = virStringSplit(query, "/", 0)))
+    if (!(elems = g_strsplit(query, "/", 0)))
         return -1;
 
     if (!*elems) {
@@ -405,18 +478,18 @@ virQEMUQAPISchemaPathGet(const char *query,
 
 bool
 virQEMUQAPISchemaPathExists(const char *query,
-                            virHashTablePtr schema)
+                            GHashTable *schema)
 {
     return virQEMUQAPISchemaPathGet(query, schema, NULL) == 1;
 }
 
 static int
-virQEMUQAPISchemaEntryProcess(size_t pos ATTRIBUTE_UNUSED,
-                              virJSONValuePtr item,
+virQEMUQAPISchemaEntryProcess(size_t pos G_GNUC_UNUSED,
+                              virJSONValue *item,
                               void *opaque)
 {
     const char *name;
-    virHashTablePtr schema = opaque;
+    GHashTable *schema = opaque;
 
     if (!(name = virJSONValueObjectGetString(item, "name"))) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -438,13 +511,13 @@ virQEMUQAPISchemaEntryProcess(size_t pos ATTRIBUTE_UNUSED,
  * Converts the schema into the hash-table used by the functions working with
  * the schema. @schemareply is consumed and freed.
  */
-virHashTablePtr
-virQEMUQAPISchemaConvert(virJSONValuePtr schemareply)
+GHashTable *
+virQEMUQAPISchemaConvert(virJSONValue *schemareply)
 {
-    VIR_AUTOPTR(virHashTable) schema = NULL;
-    VIR_AUTOPTR(virJSONValue) schemajson = schemareply;
+    g_autoptr(GHashTable) schema = NULL;
+    g_autoptr(virJSONValue) schemajson = schemareply;
 
-    if (!(schema = virHashCreate(512, virJSONValueHashFree)))
+    if (!(schema = virHashNew(virJSONValueHashFree)))
         return NULL;
 
     if (virJSONValueArrayForeachSteal(schemajson,
@@ -452,5 +525,5 @@ virQEMUQAPISchemaConvert(virJSONValuePtr schemareply)
                                       schema) < 0)
         return NULL;
 
-    VIR_RETURN_PTR(schema);
+    return g_steal_pointer(&schema);
 }

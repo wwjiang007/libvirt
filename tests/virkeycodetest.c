@@ -22,7 +22,6 @@
 #include "testutils.h"
 
 #include "virkeycode.h"
-#include "virutil.h"
 #include "virerror.h"
 #include "viralloc.h"
 #include "virlog.h"
@@ -33,9 +32,8 @@
 
 VIR_LOG_INIT("tests.keycodetest");
 
-static int testKeycodeMapping(const void *data ATTRIBUTE_UNUSED)
+static int testKeycodeMapping(const void *data G_GNUC_UNUSED)
 {
-    int ret = -1;
     int got;
 
 #define TRANSLATE(from, to, val, want) \
@@ -45,7 +43,7 @@ static int testKeycodeMapping(const void *data ATTRIBUTE_UNUSED)
                                             val)) != want) { \
             fprintf(stderr, "Translating %d from %s to %s, got %d want %d\n", \
                     val, #from, #to, got, want); \
-            goto cleanup; \
+            return -1; \
         } \
     } while (0)
 
@@ -60,15 +58,12 @@ static int testKeycodeMapping(const void *data ATTRIBUTE_UNUSED)
 
 #undef TRANSLATE
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 
-static int testKeycodeStrings(const void *data ATTRIBUTE_UNUSED)
+static int testKeycodeStrings(const void *data G_GNUC_UNUSED)
 {
-    int ret = -1;
     int got;
 
 #define TRANSLATE(from, str, want) \
@@ -77,7 +72,7 @@ static int testKeycodeStrings(const void *data ATTRIBUTE_UNUSED)
                                              str)) != want) { \
             fprintf(stderr, "Converting %s from %s, got %d want %d\n", \
                     str, #from, got, want); \
-            goto cleanup; \
+            return -1; \
         } \
     } while (0)
 
@@ -90,9 +85,7 @@ static int testKeycodeStrings(const void *data ATTRIBUTE_UNUSED)
 
 #undef TRANSLATE
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 static int

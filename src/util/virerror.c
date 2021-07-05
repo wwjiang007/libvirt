@@ -27,8 +27,8 @@
 #include "viralloc.h"
 #include "virlog.h"
 #include "virthread.h"
-#include "virutil.h"
 #include "virstring.h"
+#include "virbuffer.h"
 
 #define LIBVIRT_VIRERRORPRIV_H_ALLOW
 #include "virerrorpriv.h"
@@ -142,6 +142,10 @@ VIR_ENUM_IMPL(virErrorDomain,
               "Resource control",
               "FirewallD",
               "Domain Checkpoint",
+
+              "TPM", /* 70 */
+              "BPF",
+              "Cloud-Hypervisor Driver",
 );
 
 
@@ -156,7 +160,7 @@ virLastErrFreeData(void *data)
     if (!err)
         return;
     virResetError(err);
-    VIR_FREE(err);
+    g_free(err);
 }
 
 
@@ -185,8 +189,7 @@ virErrorGenericFailure(virErrorPtr err)
     err->code = VIR_ERR_INTERNAL_ERROR;
     err->domain = VIR_FROM_NONE;
     err->level = VIR_ERR_ERROR;
-    ignore_value(VIR_STRDUP_QUIET(err->message,
-                                  _("An error occurred, but the cause is unknown")));
+    err->message = g_strdup(_("An error occurred, but the cause is unknown"));
 }
 
 
@@ -206,14 +209,10 @@ virCopyError(virErrorPtr from,
     to->code = from->code;
     to->domain = from->domain;
     to->level = from->level;
-    if (VIR_STRDUP_QUIET(to->message, from->message) < 0)
-        ret = -1;
-    if (VIR_STRDUP_QUIET(to->str1, from->str1) < 0)
-        ret = -1;
-    if (VIR_STRDUP_QUIET(to->str2, from->str2) < 0)
-        ret = -1;
-    if (VIR_STRDUP_QUIET(to->str3, from->str3) < 0)
-        ret = -1;
+    to->message = g_strdup(from->message);
+    to->str1 = g_strdup(from->str1);
+    to->str2 = g_strdup(from->str2);
+    to->str3 = g_strdup(from->str3);
     to->int1 = from->int1;
     to->int2 = from->int2;
     /*
@@ -226,14 +225,8 @@ virCopyError(virErrorPtr from,
 virErrorPtr
 virErrorCopyNew(virErrorPtr err)
 {
-    virErrorPtr ret;
-
-    if (VIR_ALLOC_QUIET(ret) < 0)
-        return NULL;
-
-    if (virCopyError(err, ret) < 0)
-        VIR_FREE(ret);
-
+    virErrorPtr ret = g_new0(virError, 1);
+    virCopyError(err, ret);
     return ret;
 }
 
@@ -244,10 +237,9 @@ virLastErrorObject(void)
     virErrorPtr err;
     err = virThreadLocalGet(&virLastErr);
     if (!err) {
-        if (VIR_ALLOC_QUIET(err) < 0)
-            return NULL;
+        err = g_new0(virError, 1);
         if (virThreadLocalSet(&virLastErr, err) < 0)
-            VIR_FREE(err);
+            g_clear_pointer(&err, g_free);
     }
     return err;
 }
@@ -407,8 +399,7 @@ virSaveLastError(void)
     virErrorPtr to;
     int saved_errno = errno;
 
-    if (VIR_ALLOC_QUIET(to) < 0)
-        return NULL;
+    to = g_new0(virError, 1);
 
     virCopyLastError(to);
     errno = saved_errno;
@@ -488,7 +479,7 @@ void
 virFreeError(virErrorPtr err)
 {
     virResetError(err);
-    VIR_FREE(err);
+    g_free(err);
 }
 
 /**
@@ -765,6 +756,71 @@ void virRaiseErrorLog(const char *filename,
                       meta, "%s", err->message);
 }
 
+
+/**
+ * virRaiseErrorInternal:
+ *
+ * Internal helper to assign and raise error. Note that @msgarg, @str1arg,
+ * @str2arg and @str3arg if non-NULL must be heap-allocated strings and are
+ * stolen and freed by this function.
+ */
+static void
+virRaiseErrorInternal(const char *filename,
+                      const char *funcname,
+                      size_t linenr,
+                      int domain,
+                      int code,
+                      virErrorLevel level,
+                      char *msgarg,
+                      char *str1arg,
+                      char *str2arg,
+                      char *str3arg,
+                      int int1,
+                      int int2)
+{
+    g_autofree char *msg = msgarg;
+    g_autofree char *str1 = str1arg;
+    g_autofree char *str2 = str2arg;
+    g_autofree char *str3 = str3arg;
+    virErrorPtr to;
+    virLogMetadata meta[] = {
+        { .key = "LIBVIRT_DOMAIN", .s = NULL, .iv = domain },
+        { .key = "LIBVIRT_CODE", .s = NULL, .iv = code },
+        { .key = NULL },
+    };
+
+    /*
+     * All errors are recorded in thread local storage
+     * For compatibility, public API calls will copy them
+     * to the per-connection error object when necessary
+     */
+    if (!(to = virLastErrorObject()))
+        return;
+
+    virResetError(to);
+
+    if (code == VIR_ERR_OK)
+        return;
+
+    if (!msg)
+        msg = g_strdup(_("No error message provided"));
+
+    /* Deliberately not setting conn, dom & net fields since
+     * they are utterly unsafe. */
+    to->domain = domain;
+    to->code = code;
+    to->message = g_steal_pointer(&msg);
+    to->level = level;
+    to->str1 = g_steal_pointer(&str1);
+    to->str2 = g_steal_pointer(&str2);
+    to->str3 = g_steal_pointer(&str3);
+    to->int1 = int1;
+    to->int2 = int2;
+
+    virRaiseErrorLog(filename, funcname, linenr, to, meta);
+}
+
+
 /**
  * virRaiseErrorFull:
  * @filename: filename where error was raised
@@ -799,63 +855,20 @@ virRaiseErrorFull(const char *filename,
                   const char *fmt, ...)
 {
     int save_errno = errno;
-    virErrorPtr to;
-    char *str;
-    virLogMetadata meta[] = {
-        { .key = "LIBVIRT_DOMAIN", .s = NULL, .iv = domain },
-        { .key = "LIBVIRT_CODE", .s = NULL, .iv = code },
-        { .key = NULL },
-    };
+    char *msg = NULL;
 
-    /*
-     * All errors are recorded in thread local storage
-     * For compatibility, public API calls will copy them
-     * to the per-connection error object when necessary
-     */
-    to = virLastErrorObject();
-    if (!to) {
-        errno = save_errno;
-        return; /* Hit OOM allocating thread error object, sod all we can do now */
-    }
-
-    virResetError(to);
-
-    if (code == VIR_ERR_OK) {
-        errno = save_errno;
-        return;
-    }
-
-    /*
-     * formats the message; drop message on OOM situations
-     */
-    if (fmt == NULL) {
-        ignore_value(VIR_STRDUP_QUIET(str, _("No error message provided")));
-    } else {
+    if (fmt) {
         va_list ap;
+
         va_start(ap, fmt);
-        ignore_value(virVasprintfQuiet(&str, fmt, ap));
+        msg = g_strdup_vprintf(fmt, ap);
         va_end(ap);
     }
 
-    /*
-     * Save the information about the error
-     */
-    /*
-     * Deliberately not setting conn, dom & net fields since
-     * they're utterly unsafe
-     */
-    to->domain = domain;
-    to->code = code;
-    to->message = str;
-    to->level = level;
-    ignore_value(VIR_STRDUP_QUIET(to->str1, str1));
-    ignore_value(VIR_STRDUP_QUIET(to->str2, str2));
-    ignore_value(VIR_STRDUP_QUIET(to->str3, str3));
-    to->int1 = int1;
-    to->int2 = int2;
-
-    virRaiseErrorLog(filename, funcname, linenr,
-                     to, meta);
+    virRaiseErrorInternal(filename, funcname, linenr,
+                          domain, code, level,
+                          msg, g_strdup(str1), g_strdup(str2), g_strdup(str3),
+                          int1, int2);
 
     errno = save_errno;
 }
@@ -912,7 +925,7 @@ typedef struct {
 } virErrorMsgTuple;
 
 
-const virErrorMsgTuple virErrorMsgStrings[VIR_ERR_NUMBER_LAST] = {
+static const virErrorMsgTuple virErrorMsgStrings[] = {
     [VIR_ERR_OK] = { NULL, NULL },
     [VIR_ERR_INTERNAL_ERROR] = {
         N_("internal error"),
@@ -1226,7 +1239,27 @@ const virErrorMsgTuple virErrorMsgStrings[VIR_ERR_NUMBER_LAST] = {
     [VIR_ERR_NO_DOMAIN_BACKUP] = {
         N_("Domain backup job id not found"),
         N_("Domain backup job id not found: %s") },
+    [VIR_ERR_INVALID_NETWORK_PORT] = {
+        N_("Invalid network port pointer"),
+        N_("Invalid network port pointer: %s") },
+    [VIR_ERR_NETWORK_PORT_EXIST] = {
+        N_("this network port exists already"),
+        N_("network port %s exists already") },
+    [VIR_ERR_NO_NETWORK_PORT] = {
+        N_("network port not found"),
+        N_("network port not found: %s") },
+    [VIR_ERR_NO_HOSTNAME] = {
+        N_("no hostname found"),
+        N_("no hostname found: %s") },
+    [VIR_ERR_CHECKPOINT_INCONSISTENT] = {
+        N_("checkpoint inconsistent"),
+        N_("checkpoint inconsistent: %s") },
+    [VIR_ERR_MULTIPLE_DOMAINS] = {
+        N_("multiple matching domains found"),
+        N_("multiple matching domains found: %s") },
 };
+
+G_STATIC_ASSERT(G_N_ELEMENTS(virErrorMsgStrings) == VIR_ERR_NUMBER_LAST);
 
 
 /**
@@ -1276,46 +1309,32 @@ void virReportErrorHelper(int domcode,
                           const char *fmt, ...)
 {
     int save_errno = errno;
-    va_list args;
-    char errorMessage[VIR_ERROR_MAX_LENGTH];
-    const char *virerr;
+    char *detail = NULL;
+    char *errormsg = NULL;
+    char *fullmsg = NULL;
 
     if (fmt) {
+        va_list args;
+
         va_start(args, fmt);
-        vsnprintf(errorMessage, sizeof(errorMessage)-1, fmt, args);
+        detail = g_strdup_vprintf(fmt, args);
         va_end(args);
-    } else {
-        errorMessage[0] = '\0';
     }
 
-    virerr = virErrorMsg(errorcode, (errorMessage[0] ? errorMessage : NULL));
-    virRaiseErrorFull(filename, funcname, linenr,
-                      domcode, errorcode, VIR_ERR_ERROR,
-                      virerr, errorMessage, NULL,
-                      -1, -1, virerr, errorMessage);
-    errno = save_errno;
-}
+    errormsg = g_strdup(virErrorMsg(errorcode, detail));
 
-/**
- * virStrerror:
- * @theerrno: the errno value
- * @errBuf: the buffer to save the error to
- * @errBufLen: the buffer length
- *
- * Generate an error string for the given errno
- *
- * Returns a pointer to the error string, possibly indicating that the
- *         error is unknown
- */
-const char *virStrerror(int theerrno, char *errBuf, size_t errBufLen)
-{
-    int save_errno = errno;
-    const char *ret;
+    if (errormsg) {
+        if (detail)
+            fullmsg = g_strdup_printf(errormsg, detail);
+        else
+            fullmsg = g_strdup(errormsg);
+    }
 
-    strerror_r(theerrno, errBuf, errBufLen);
-    ret = errBuf;
+    virRaiseErrorInternal(filename, funcname, linenr,
+                          domcode, errorcode, VIR_ERR_ERROR,
+                          fullmsg, errormsg, detail, NULL, -1, -1);
+
     errno = save_errno;
-    return ret;
 }
 
 /**
@@ -1338,61 +1357,33 @@ void virReportSystemErrorFull(int domcode,
                               const char *fmt, ...)
 {
     int save_errno = errno;
-    char strerror_buf[VIR_ERROR_MAX_LENGTH];
-    char msgDetailBuf[VIR_ERROR_MAX_LENGTH];
-
-    const char *errnoDetail = virStrerror(theerrno, strerror_buf,
-                                          sizeof(strerror_buf));
-    const char *msg = virErrorMsg(VIR_ERR_SYSTEM_ERROR, fmt);
-    const char *msgDetail = NULL;
+    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    char *detail = NULL;
+    char *errormsg = NULL;
+    char *fullmsg = NULL;
 
     if (fmt) {
         va_list args;
-        int n;
 
         va_start(args, fmt);
-        n = vsnprintf(msgDetailBuf, sizeof(msgDetailBuf), fmt, args);
+        virBufferVasprintf(&buf, fmt, args);
         va_end(args);
 
-        size_t len = strlen(errnoDetail);
-        if (0 <= n && n + 2 + len < sizeof(msgDetailBuf)) {
-          char *p = msgDetailBuf + n;
-          stpcpy(stpcpy(p, ": "), errnoDetail);
-          msgDetail = msgDetailBuf;
-        }
+        virBufferAddLit(&buf, ": ");
     }
 
-    if (!msgDetail)
-        msgDetail = errnoDetail;
+    virBufferAdd(&buf, g_strerror(theerrno), -1);
 
-    virRaiseErrorFull(filename, funcname, linenr,
-                      domcode, VIR_ERR_SYSTEM_ERROR, VIR_ERR_ERROR,
-                      msg, msgDetail, NULL, theerrno, -1, msg, msgDetail);
+    detail = virBufferContentAndReset(&buf);
+    errormsg = g_strdup(virErrorMsg(VIR_ERR_SYSTEM_ERROR, detail));
+    fullmsg = g_strdup_printf(errormsg, detail);
+
+    virRaiseErrorInternal(filename, funcname, linenr,
+                          domcode, VIR_ERR_SYSTEM_ERROR, VIR_ERR_ERROR,
+                          fullmsg, errormsg, detail, NULL, theerrno, -1);
     errno = save_errno;
 }
 
-/**
- * virReportOOMErrorFull:
- * @domcode: the virErrorDomain indicating where it's coming from
- * @filename: filename where error was raised
- * @funcname: function name where error was raised
- * @linenr: line number where error was raised
- *
- * Convenience internal routine called when an out of memory error is
- * detected
- */
-void virReportOOMErrorFull(int domcode,
-                           const char *filename,
-                           const char *funcname,
-                           size_t linenr)
-{
-    const char *virerr;
-
-    virerr = virErrorMsg(VIR_ERR_NO_MEMORY, NULL);
-    virRaiseErrorFull(filename, funcname, linenr,
-                      domcode, VIR_ERR_NO_MEMORY, VIR_ERR_ERROR,
-                      virerr, NULL, NULL, -1, -1, virerr, NULL);
-}
 
 /**
  * virSetErrorLogPriorityFunc:
@@ -1451,4 +1442,38 @@ bool virLastErrorIsSystemErrno(int errnum)
     if (errnum != 0 && err->int1 != errnum)
         return false;
     return true;
+}
+
+
+/**
+ * virLastErrorPrefixMessage:
+ * @fmt: printf-style formatting string
+ * @...: Arguments for @fmt
+ *
+ * Prefixes last error reported with message formatted from @fmt. This is useful
+ * if the low level error message does not convey enough information to describe
+ * the problem.
+ */
+void
+virLastErrorPrefixMessage(const char *fmt, ...)
+{
+    int save_errno = errno;
+    virErrorPtr err = virGetLastError();
+    g_autofree char *fmtmsg = NULL;
+    g_autofree char *newmsg = NULL;
+    va_list args;
+
+    if (!err)
+        return;
+
+    va_start(args, fmt);
+    fmtmsg = g_strdup_vprintf(fmt, args);
+    va_end(args);
+
+    newmsg = g_strdup_printf("%s: %s", fmtmsg, err->message);
+
+    VIR_FREE(err->message);
+    err->message = g_steal_pointer(&newmsg);
+
+    errno = save_errno;
 }

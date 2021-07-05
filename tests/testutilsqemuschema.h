@@ -16,23 +16,37 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_TESTUTILSQEMUSCHEMA_H
-# define LIBVIRT_TESTUTILSQEMUSCHEMA_H
+#pragma once
 
-# include "virhash.h"
-# include "virjson.h"
-# include "virbuffer.h"
+#include "virhash.h"
+#include "virjson.h"
+#include "virbuffer.h"
 
 int
-testQEMUSchemaValidate(virJSONValuePtr obj,
-                       virJSONValuePtr root,
-                       virHashTablePtr schema,
-                       virBufferPtr debug);
+testQEMUSchemaValidate(virJSONValue *obj,
+                       virJSONValue *root,
+                       GHashTable *schema,
+                       bool allowDeprecated,
+                       virBuffer *debug);
 
-virJSONValuePtr
-testQEMUSchemaGetLatest(void);
+int
+testQEMUSchemaValidateCommand(const char *command,
+                              virJSONValue *arguments,
+                              GHashTable *schema,
+                              bool allowDeprecated,
+                              bool allowRemoved,
+                              virBuffer *debug);
 
-virHashTablePtr
-testQEMUSchemaLoad(void);
+int
+testQEMUSchemaEntryMatchTemplate(virJSONValue *schemaentry,
+                                 ...);
 
-#endif /* LIBVIRT_TESTUTILSQEMUSCHEMA_H */
+
+virJSONValue *
+testQEMUSchemaGetLatest(const char* arch);
+
+GHashTable *
+testQEMUSchemaLoadLatest(const char *arch);
+
+GHashTable *
+testQEMUSchemaLoad(const char *filename);

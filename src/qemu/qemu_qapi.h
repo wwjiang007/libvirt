@@ -16,25 +16,21 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_QEMU_QAPI_H
-# define LIBVIRT_QEMU_QAPI_H
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
-# include "virhash.h"
-# include "virjson.h"
+#include "virhash.h"
+#include "virjson.h"
 
 int
 virQEMUQAPISchemaPathGet(const char *query,
-                         virHashTablePtr schema,
-                         virJSONValuePtr *entry);
+                         GHashTable *schema,
+                         virJSONValue **entry);
 
 bool
 virQEMUQAPISchemaPathExists(const char *query,
-                            virHashTablePtr schema);
+                            GHashTable *schema);
 
-virHashTablePtr
-virQEMUQAPISchemaConvert(virJSONValuePtr schemareply);
-
-
-#endif /* LIBVIRT_QEMU_QAPI_H */
+GHashTable *
+virQEMUQAPISchemaConvert(virJSONValue *schemareply);

@@ -2,24 +2,13 @@
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
   <head>
-    <script type="text/javascript" src="js/jquery-3.1.1.min.js"> </script>
-    <script type="text/javascript" src="js/moment.min.js"> </script>
-    <script type="text/javascript" src="js/jquery.rss.min.js"> </script>
-
     <script type="text/javascript">
       <!--
-      jQuery(function($) {
-        $("#planet").rss("http://planet.virt-tools.org/atom.xml", {
-          ssl: true,
-          layoutTemplate: '<dl>{entries}</dl>',
-          entryTemplate: '<dt><a href="{url}">{title}</a></dt><dd>by {author} on {date}</li>',
-          dateFormat: 'DD MMM YYYY'
-        })
-      })
+      window.addEventListener("load", function() { fetchRSS() });
       // -->
     </script>
   </head>
-  <body class="index">
+  <body id="index">
     <h1>The virtualization API</h1>
 
     <div class="panel">
@@ -29,7 +18,7 @@
       </p>
       <ul>
         <li>is a toolkit to manage <a href="platforms.html">virtualization platforms</a></li>
-        <li>is accessible from C, Python, Perl, Java and more</li>
+        <li>is accessible from C, Python, Perl, Go and more</li>
         <li>is licensed under open source licenses</li>
         <li>supports <a href="drvqemu.html">KVM</a>,
           <a href="drvqemu.html">QEMU</a>, <a href="drvxen.html">Xen</a>,
@@ -38,7 +27,7 @@
           <a href="drvlxc.html">LXC</a>,
           <a href="drvbhyve.html">BHyve</a> and
           <a href="drivers.html">more</a></li>
-        <li>targets Linux, FreeBSD, <a href="windows.html">Windows</a> and OS-X</li>
+        <li>targets Linux, FreeBSD, <a href="windows.html">Windows</a> and macOS</li>
         <li>is used by many <a href="apps.html">applications</a></li>
       </ul>
       <p>Recent / forthcoming <a href="news.html">release changes</a></p>
@@ -69,9 +58,14 @@
           <a href="formatstoragecaps.html">storage pool capabilities</a>,
           <a href="formatnode.html">node devices</a>,
           <a href="formatsecret.html">secrets</a>,
-          <a href="formatsnapshot.html">snapshots</a></dd>
-        <dt><a href="http://wiki.libvirt.org">Wiki</a></dt>
+          <a href="formatsnapshot.html">snapshots</a>,
+          <a href="formatcheckpoint.html">checkpoints</a>,
+          <a href="formatbackup.html">backup jobs</a></dd>
+        <dt><a href="https://wiki.libvirt.org">Wiki</a></dt>
         <dd>Read further community contributed content</dd>
+
+        <dt><a href="kbase/index.html">Knowledge base</a></dt>
+        <dd>Learn more about libvirt through knowledge base</dd>
       </dl>
     </div>
 
@@ -81,7 +75,7 @@
       </div>
 
       <p>
-        Read more on the <a href="http://planet.virt-tools.org/">Virt Tools blog planet</a>
+        Read more on the <a href="https://planet.virt-tools.org/">Virt Tools blog planet</a>
       </p>
     </div>
 

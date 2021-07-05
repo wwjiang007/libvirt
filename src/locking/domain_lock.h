@@ -19,43 +19,40 @@
  *
  */
 
-#ifndef LIBVIRT_DOMAIN_LOCK_H
-# define LIBVIRT_DOMAIN_LOCK_H
+#pragma once
 
-# include "internal.h"
-# include "domain_conf.h"
-# include "lock_manager.h"
+#include "internal.h"
+#include "domain_conf.h"
+#include "lock_manager.h"
 
-int virDomainLockProcessStart(virLockManagerPluginPtr plugin,
+int virDomainLockProcessStart(virLockManagerPlugin *plugin,
                               const char *uri,
-                              virDomainObjPtr dom,
+                              virDomainObj *dom,
                               bool paused,
                               int *fd);
-int virDomainLockProcessPause(virLockManagerPluginPtr plugin,
-                              virDomainObjPtr dom,
+int virDomainLockProcessPause(virLockManagerPlugin *plugin,
+                              virDomainObj *dom,
                               char **state);
-int virDomainLockProcessResume(virLockManagerPluginPtr plugin,
+int virDomainLockProcessResume(virLockManagerPlugin *plugin,
                                const char *uri,
-                               virDomainObjPtr dom,
+                               virDomainObj *dom,
                                const char *state);
-int virDomainLockProcessInquire(virLockManagerPluginPtr plugin,
-                                virDomainObjPtr dom,
+int virDomainLockProcessInquire(virLockManagerPlugin *plugin,
+                                virDomainObj *dom,
                                 char **state);
 
-int virDomainLockImageAttach(virLockManagerPluginPtr plugin,
+int virDomainLockImageAttach(virLockManagerPlugin *plugin,
                              const char *uri,
-                             virDomainObjPtr dom,
-                             virStorageSourcePtr src);
-int virDomainLockImageDetach(virLockManagerPluginPtr plugin,
-                             virDomainObjPtr dom,
-                             virStorageSourcePtr src);
+                             virDomainObj *dom,
+                             virStorageSource *src);
+int virDomainLockImageDetach(virLockManagerPlugin *plugin,
+                             virDomainObj *dom,
+                             virStorageSource *src);
 
-int virDomainLockLeaseAttach(virLockManagerPluginPtr plugin,
+int virDomainLockLeaseAttach(virLockManagerPlugin *plugin,
                              const char *uri,
-                             virDomainObjPtr dom,
-                             virDomainLeaseDefPtr lease);
-int virDomainLockLeaseDetach(virLockManagerPluginPtr plugin,
-                             virDomainObjPtr dom,
-                             virDomainLeaseDefPtr lease);
-
-#endif /* LIBVIRT_DOMAIN_LOCK_H */
+                             virDomainObj *dom,
+                             virDomainLeaseDef *lease);
+int virDomainLockLeaseDetach(virLockManagerPlugin *plugin,
+                             virDomainObj *dom,
+                             virDomainLeaseDef *lease);

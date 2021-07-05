@@ -14,18 +14,17 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_TESTUTILSQEMU_H
-# define LIBVIRT_TESTUTILSQEMU_H
+#pragma once
 
-# ifdef WITH_QEMU
+#ifdef WITH_QEMU
 
-#  include "capabilities.h"
-#  include "virfilecache.h"
-#  include "domain_conf.h"
-#  include "qemu/qemu_capabilities.h"
-#  include "qemu/qemu_conf.h"
+# include "capabilities.h"
+# include "virfilecache.h"
+# include "domain_conf.h"
+# include "qemu/qemu_capabilities.h"
+# include "qemu/qemu_conf.h"
 
-#  define TEST_QEMU_CAPS_PATH abs_srcdir "/qemucapabilitiesdata"
+# define TEST_QEMU_CAPS_PATH abs_srcdir "/qemucapabilitiesdata"
 
 enum {
     GIC_NONE = 0,
@@ -49,64 +48,70 @@ typedef enum {
 typedef enum {
     FLAG_EXPECT_FAILURE     = 1 << 0,
     FLAG_EXPECT_PARSE_ERROR = 1 << 1,
-    FLAG_FIPS               = 1 << 2,
+    FLAG_FIPS_HOST          = 1 << 2, /* simulate host with FIPS mode enabled */
     FLAG_REAL_CAPS          = 1 << 3,
     FLAG_SKIP_LEGACY_CPUS   = 1 << 4,
+    FLAG_SLIRP_HELPER       = 1 << 5,
 } testQemuInfoFlags;
 
 struct testQemuInfo {
     const char *name;
     char *infile;
     char *outfile;
-    virQEMUCapsPtr qemuCaps;
+    char *errfile;
+    virQEMUCaps *qemuCaps;
     const char *migrateFrom;
     int migrateFd;
     unsigned int flags;
     unsigned int parseFlags;
+    virArch arch;
+    char *schemafile;
+    GHashTable *qapiSchemaCache;
 };
 
-virCapsPtr testQemuCapsInit(void);
-virDomainXMLOptionPtr testQemuXMLConfInit(void);
+virCaps *testQemuCapsInit(void);
+virDomainXMLOption *testQemuXMLConfInit(void);
 
 
-virQEMUCapsPtr qemuTestParseCapabilitiesArch(virArch arch,
+virQEMUCaps *qemuTestParseCapabilitiesArch(virArch arch,
                                              const char *capsFile);
-virQEMUCapsPtr qemuTestParseCapabilities(virCapsPtr caps,
-                                         const char *capsFile);
 
-extern virCPUDefPtr cpuDefault;
-extern virCPUDefPtr cpuHaswell;
-extern virCPUDefPtr cpuPower8;
-extern virCPUDefPtr cpuPower9;
+extern virCPUDef *cpuDefault;
+extern virCPUDef *cpuHaswell;
+extern virCPUDef *cpuPower8;
+extern virCPUDef *cpuPower9;
 
-void qemuTestSetHostArch(virCapsPtr caps,
-                        virArch arch);
-void qemuTestSetHostCPU(virCapsPtr caps,
-                        virCPUDefPtr cpu);
+void qemuTestSetHostArch(virQEMUDriver *driver,
+                         virArch arch);
+void qemuTestSetHostCPU(virQEMUDriver *driver,
+                        virArch arch,
+                        virCPUDef *cpu);
 
 int qemuTestDriverInit(virQEMUDriver *driver);
 void qemuTestDriverFree(virQEMUDriver *driver);
-int qemuTestCapsCacheInsert(virFileCachePtr cache,
-                            virQEMUCapsPtr caps);
+int qemuTestCapsCacheInsert(virFileCache *cache,
+                            virQEMUCaps *caps);
 
-int testQemuCapsSetGIC(virQEMUCapsPtr qemuCaps,
+int testQemuCapsSetGIC(virQEMUCaps *qemuCaps,
                        int gic);
 
 char *testQemuGetLatestCapsForArch(const char *arch,
                                    const char *suffix);
-virHashTablePtr testQemuGetLatestCaps(void);
+GHashTable *testQemuGetLatestCaps(void);
 
-typedef int (*testQemuCapsIterateCallback)(const char *base,
+typedef int (*testQemuCapsIterateCallback)(const char *inputDir,
+                                           const char *prefix,
+                                           const char *version,
                                            const char *archName,
+                                           const char *suffix,
                                            void *opaque);
 int testQemuCapsIterate(const char *suffix,
                         testQemuCapsIterateCallback callback,
                         void *opaque);
 
 int testQemuInfoSetArgs(struct testQemuInfo *info,
-                        virHashTablePtr capslatest, ...);
+                        GHashTable *capscache,
+                        GHashTable *capslatest, ...);
 void testQemuInfoClear(struct testQemuInfo *info);
 
-# endif
-
-#endif /* LIBVIRT_TESTUTILSQEMU_H */
+#endif

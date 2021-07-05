@@ -19,19 +19,18 @@
 #include <config.h>
 
 #include <fcntl.h>
-#include <sys/socket.h>
+#include <unistd.h>
 
 #include "testutils.h"
 #include "virnettlshelpers.h"
-#include "virutil.h"
 #include "virerror.h"
 #include "viralloc.h"
 #include "virlog.h"
 #include "virfile.h"
 #include "vircommand.h"
-#include "virsocketaddr.h"
+#include "virsocket.h"
 
-#if !defined WIN32 && HAVE_LIBTASN1_H && LIBGNUTLS_VERSION_NUMBER >= 0x020600
+#if !defined WIN32 && WITH_LIBTASN1_H && LIBGNUTLS_VERSION_NUMBER >= 0x020600
 
 # include "rpc/virnettlscontext.h"
 
@@ -54,13 +53,13 @@ struct testTLSContextData {
  *
  * This code is done when libvirtd starts up, or before
  * a libvirt client connects. The test is ensuring that
- * the creation of virNetTLSContextPtr fails if we
+ * the creation of virNetTLSContext *fails if we
  * give bogus certs, or succeeds for good certs
  */
 static int testTLSContextInit(const void *opaque)
 {
     struct testTLSContextData *data = (struct testTLSContextData *)opaque;
-    virNetTLSContextPtr ctxt = NULL;
+    virNetTLSContext *ctxt = NULL;
     int ret = -1;
 
     if (data->isServer) {
@@ -111,7 +110,7 @@ mymain(void)
 {
     int ret = 0;
 
-    setenv("GNUTLS_FORCE_FIPS_MODE", "2", 1);
+    g_setenv("GNUTLS_FORCE_FIPS_MODE", "2", TRUE);
 
     testTLSInit(KEYFILE);
 
@@ -137,6 +136,7 @@ mymain(void)
     }; \
     testTLSGenerateCert(&varname, cavarname.crt)
 
+    VIR_WARNINGS_NO_DECLARATION_AFTER_STATEMENT
 # define TLS_ROOT_REQ(varname, \
                       co, cn, an1, an2, ia1, ia2, bce, bcc, bci, \
                       kue, kuc, kuv, kpe, kpc, kpo1, kpo2, so, eo) \
@@ -562,7 +562,9 @@ mymain(void)
 
     testTLSWriteCertChain("cacertchain-ctx.pem",
                           certchain,
-                          ARRAY_CARDINALITY(certchain));
+                          G_N_ELEMENTS(certchain));
+
+    VIR_WARNINGS_RESET
 
     DO_CTX_TEST(true, "cacertchain-ctx.pem", servercertlevel3areq.filename, false);
     DO_CTX_TEST(false, "cacertchain-ctx.pem", clientcertlevel2breq.filename, false);
@@ -630,7 +632,7 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/virrandommock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("virrandom"))
 
 #else
 

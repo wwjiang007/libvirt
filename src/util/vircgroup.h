@@ -19,16 +19,13 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRCGROUP_H
-# define LIBVIRT_VIRCGROUP_H
+#pragma once
 
-# include "virutil.h"
-# include "virbitmap.h"
-# include "virenum.h"
+#include "virbitmap.h"
+#include "virenum.h"
 
 struct _virCgroup;
 typedef struct _virCgroup virCgroup;
-typedef virCgroup *virCgroupPtr;
 
 enum {
     VIR_CGROUP_CONTROLLER_CPU,
@@ -50,7 +47,7 @@ VIR_ENUM_DECL(virCgroupController);
  * bit array stored in int. Like this:
  *   1 << VIR_CGROUP_CONTROLLER_CPU
  * Make sure we will not overflow */
-verify(VIR_CGROUP_CONTROLLER_LAST < 8 * sizeof(int));
+G_STATIC_ASSERT(VIR_CGROUP_CONTROLLER_LAST < 8 * sizeof(int));
 
 typedef enum {
     VIR_CGROUP_THREAD_VCPU = 0,
@@ -62,23 +59,27 @@ typedef enum {
 
 bool virCgroupAvailable(void);
 
-int virCgroupNewSelf(virCgroupPtr *group)
+int virCgroupNew(const char *path,
+                 int controllers,
+                 virCgroup **group);
+
+int virCgroupNewSelf(virCgroup **group)
     ATTRIBUTE_NONNULL(1);
 
-int virCgroupNewThread(virCgroupPtr domain,
+int virCgroupNewThread(virCgroup *domain,
                        virCgroupThreadName nameval,
                        int id,
                        bool create,
-                       virCgroupPtr *group)
+                       virCgroup **group)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(5);
 
-int virCgroupDelThread(virCgroupPtr cgroup,
+int virCgroupDelThread(virCgroup *cgroup,
                        virCgroupThreadName nameval,
                        int idx);
 
 int virCgroupNewDetect(pid_t pid,
                        int controllers,
-                       virCgroupPtr *group);
+                       virCgroup **group);
 
 int
 virCgroupNewDetectMachine(const char *name,
@@ -86,7 +87,7 @@ virCgroupNewDetectMachine(const char *name,
                           pid_t pid,
                           int controllers,
                           char *machinename,
-                          virCgroupPtr *group)
+                          virCgroup **group)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
 int virCgroupNewMachine(const char *name,
@@ -99,7 +100,8 @@ int virCgroupNewMachine(const char *name,
                         int *nicindexes,
                         const char *partition,
                         int controllers,
-                        virCgroupPtr *group)
+                        unsigned int maxthreads,
+                        virCgroup **group)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2)
     ATTRIBUTE_NONNULL(3);
 
@@ -108,90 +110,72 @@ int virCgroupTerminateMachine(const char *name)
 
 bool virCgroupNewIgnoreError(void);
 
-void virCgroupFree(virCgroupPtr *group);
+void virCgroupFree(virCgroup *group);
 
-bool virCgroupHasController(virCgroupPtr cgroup, int controller);
-int virCgroupPathOfController(virCgroupPtr group,
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virCgroup, virCgroupFree);
+
+bool virCgroupHasController(virCgroup *cgroup, int controller);
+int virCgroupPathOfController(virCgroup *group,
                               unsigned int controller,
                               const char *key,
                               char **path);
 
-int virCgroupAddProcess(virCgroupPtr group, pid_t pid);
-int virCgroupAddMachineProcess(virCgroupPtr group, pid_t pid);
-int virCgroupAddThread(virCgroupPtr group, pid_t pid);
+int virCgroupAddProcess(virCgroup *group, pid_t pid);
+int virCgroupAddMachineProcess(virCgroup *group, pid_t pid);
+int virCgroupAddThread(virCgroup *group, pid_t pid);
 
-int virCgroupSetBlkioWeight(virCgroupPtr group, unsigned int weight);
-int virCgroupGetBlkioWeight(virCgroupPtr group, unsigned int *weight);
+int virCgroupSetBlkioWeight(virCgroup *group, unsigned int weight);
+int virCgroupGetBlkioWeight(virCgroup *group, unsigned int *weight);
 
-int virCgroupGetBlkioIoServiced(virCgroupPtr group,
+int virCgroupGetBlkioIoServiced(virCgroup *group,
                                 long long *bytes_read,
                                 long long *bytes_write,
                                 long long *requests_read,
                                 long long *requests_write);
-int virCgroupGetBlkioIoDeviceServiced(virCgroupPtr group,
+int virCgroupGetBlkioIoDeviceServiced(virCgroup *group,
                                       const char *path,
                                       long long *bytes_read,
                                       long long *bytes_write,
                                       long long *requests_read,
                                       long long *requests_write);
 
-int virCgroupSetBlkioDeviceWeight(virCgroupPtr group,
-                                  const char *path,
-                                  unsigned int weight);
-
-int virCgroupSetBlkioDeviceReadIops(virCgroupPtr group,
+int virCgroupSetupBlkioDeviceWeight(virCgroup *cgroup,
                                     const char *path,
-                                    unsigned int riops);
+                                    unsigned int *weight);
 
-int virCgroupSetBlkioDeviceWriteIops(virCgroupPtr group,
+int virCgroupSetupBlkioDeviceReadIops(virCgroup *cgroup,
+                                      const char *path,
+                                      unsigned int *riops);
+
+int virCgroupSetupBlkioDeviceWriteIops(virCgroup *cgroup,
+                                       const char *path,
+                                       unsigned int *wiops);
+
+int virCgroupSetupBlkioDeviceReadBps(virCgroup *cgroup,
                                      const char *path,
-                                     unsigned int wiops);
+                                     unsigned long long *rbps);
 
-int virCgroupSetBlkioDeviceReadBps(virCgroupPtr group,
-                                   const char *path,
-                                   unsigned long long rbps);
+int virCgroupSetupBlkioDeviceWriteBps(virCgroup *cgroup,
+                                      const char *path,
+                                      unsigned long long *wbps);
 
-int virCgroupSetBlkioDeviceWriteBps(virCgroupPtr group,
-                                    const char *path,
-                                    unsigned long long wbps);
-
-int virCgroupGetBlkioDeviceWeight(virCgroupPtr group,
-                                  const char *path,
-                                  unsigned int *weight);
-
-int virCgroupGetBlkioDeviceReadIops(virCgroupPtr group,
-                                    const char *path,
-                                    unsigned int *riops);
-
-int virCgroupGetBlkioDeviceWriteIops(virCgroupPtr group,
-                                     const char *path,
-                                     unsigned int *wiops);
-
-int virCgroupGetBlkioDeviceReadBps(virCgroupPtr group,
-                                   const char *path,
-                                   unsigned long long *rbps);
-
-int virCgroupGetBlkioDeviceWriteBps(virCgroupPtr group,
-                                    const char *path,
-                                    unsigned long long *wbps);
-
-int virCgroupSetMemory(virCgroupPtr group, unsigned long long kb);
-int virCgroupGetMemoryStat(virCgroupPtr group,
+int virCgroupSetMemory(virCgroup *group, unsigned long long kb);
+int virCgroupGetMemoryStat(virCgroup *group,
                            unsigned long long *cache,
                            unsigned long long *activeAnon,
                            unsigned long long *inactiveAnon,
                            unsigned long long *activeFile,
                            unsigned long long *inactiveFile,
                            unsigned long long *unevictable);
-int virCgroupGetMemoryUsage(virCgroupPtr group, unsigned long *kb);
+int virCgroupGetMemoryUsage(virCgroup *group, unsigned long *kb);
 
-int virCgroupSetMemoryHardLimit(virCgroupPtr group, unsigned long long kb);
-int virCgroupGetMemoryHardLimit(virCgroupPtr group, unsigned long long *kb);
-int virCgroupSetMemorySoftLimit(virCgroupPtr group, unsigned long long kb);
-int virCgroupGetMemorySoftLimit(virCgroupPtr group, unsigned long long *kb);
-int virCgroupSetMemSwapHardLimit(virCgroupPtr group, unsigned long long kb);
-int virCgroupGetMemSwapHardLimit(virCgroupPtr group, unsigned long long *kb);
-int virCgroupGetMemSwapUsage(virCgroupPtr group, unsigned long long *kb);
+int virCgroupSetMemoryHardLimit(virCgroup *group, unsigned long long kb);
+int virCgroupGetMemoryHardLimit(virCgroup *group, unsigned long long *kb);
+int virCgroupSetMemorySoftLimit(virCgroup *group, unsigned long long kb);
+int virCgroupGetMemorySoftLimit(virCgroup *group, unsigned long long *kb);
+int virCgroupSetMemSwapHardLimit(virCgroup *group, unsigned long long kb);
+int virCgroupGetMemSwapHardLimit(virCgroup *group, unsigned long long *kb);
+int virCgroupGetMemSwapUsage(virCgroup *group, unsigned long long *kb);
 
 enum {
     VIR_CGROUP_DEVICE_READ  = 1,
@@ -203,86 +187,99 @@ enum {
 
 const char *virCgroupGetDevicePermsString(int perms);
 
-int virCgroupDenyAllDevices(virCgroupPtr group);
+int virCgroupDenyAllDevices(virCgroup *group);
 
-int virCgroupAllowAllDevices(virCgroupPtr group, int perms);
+int virCgroupAllowAllDevices(virCgroup *group, int perms);
 
-int virCgroupAllowDevice(virCgroupPtr group,
+int virCgroupAllowDevice(virCgroup *group,
                          char type,
                          int major,
                          int minor,
                          int perms);
-int virCgroupAllowDevicePath(virCgroupPtr group,
+int virCgroupAllowDevicePath(virCgroup *group,
                              const char *path,
                              int perms,
                              bool ignoreEacces);
 
-int virCgroupDenyDevice(virCgroupPtr group,
+int virCgroupDenyDevice(virCgroup *group,
                         char type,
                         int major,
                         int minor,
                         int perms);
-int virCgroupDenyDevicePath(virCgroupPtr group,
+int virCgroupDenyDevicePath(virCgroup *group,
                             const char *path,
                             int perms,
                             bool ignoreEacces);
 
 int
-virCgroupGetPercpuStats(virCgroupPtr group,
+virCgroupGetPercpuStats(virCgroup *group,
                         virTypedParameterPtr params,
                         unsigned int nparams,
                         int start_cpu,
                         unsigned int ncpus,
-                        virBitmapPtr guestvcpus);
+                        virBitmap *guestvcpus);
 
 int
-virCgroupGetDomainTotalCpuStats(virCgroupPtr group,
+virCgroupGetDomainTotalCpuStats(virCgroup *group,
                                 virTypedParameterPtr params,
                                 int nparams);
 
-int virCgroupSetCpuShares(virCgroupPtr group, unsigned long long shares);
-int virCgroupGetCpuShares(virCgroupPtr group, unsigned long long *shares);
+int virCgroupSetCpuShares(virCgroup *group, unsigned long long shares);
+int virCgroupGetCpuShares(virCgroup *group, unsigned long long *shares);
 
-int virCgroupSetCpuCfsPeriod(virCgroupPtr group, unsigned long long cfs_period);
-int virCgroupGetCpuCfsPeriod(virCgroupPtr group, unsigned long long *cfs_period);
+#define VIR_CGROUP_CPU_SHARES_MIN 2LL
+#define VIR_CGROUP_CPU_SHARES_MAX 262144LL
+#define VIR_CGROUP_CPU_PERIOD_MIN 1000LL
+#define VIR_CGROUP_CPU_PERIOD_MAX 1000000LL
+#define VIR_CGROUP_CPU_QUOTA_MIN 1000LL
+/* Based on kernel code ((1ULL << MAX_BW_BITS) - 1) where MAX_BW_BITS is
+ * (64 - BW_SHIFT) and BW_SHIFT is 20 */
+#define VIR_CGROUP_CPU_QUOTA_MAX 17592186044415LL
 
-int virCgroupSetCpuCfsQuota(virCgroupPtr group, long long cfs_quota);
-int virCgroupGetCpuCfsQuota(virCgroupPtr group, long long *cfs_quota);
+int virCgroupSetCpuCfsPeriod(virCgroup *group, unsigned long long cfs_period);
+int virCgroupGetCpuCfsPeriod(virCgroup *group, unsigned long long *cfs_period);
+int virCgroupGetCpuPeriodQuota(virCgroup *cgroup, unsigned long long *period,
+                               long long *quota);
+int virCgroupSetupCpuPeriodQuota(virCgroup *cgroup, unsigned long long period,
+                                 long long quota);
 
-int virCgroupGetCpuacctUsage(virCgroupPtr group, unsigned long long *usage);
-int virCgroupGetCpuacctPercpuUsage(virCgroupPtr group, char **usage);
-int virCgroupGetCpuacctStat(virCgroupPtr group, unsigned long long *user,
+int virCgroupSetCpuCfsQuota(virCgroup *group, long long cfs_quota);
+int virCgroupGetCpuCfsQuota(virCgroup *group, long long *cfs_quota);
+
+int virCgroupGetCpuacctUsage(virCgroup *group, unsigned long long *usage);
+int virCgroupGetCpuacctPercpuUsage(virCgroup *group, char **usage);
+int virCgroupGetCpuacctStat(virCgroup *group, unsigned long long *user,
                             unsigned long long *sys);
 
-int virCgroupSetFreezerState(virCgroupPtr group, const char *state);
-int virCgroupGetFreezerState(virCgroupPtr group, char **state);
+int virCgroupSetFreezerState(virCgroup *group, const char *state);
+int virCgroupGetFreezerState(virCgroup *group, char **state);
 
-int virCgroupSetCpusetMems(virCgroupPtr group, const char *mems);
-int virCgroupGetCpusetMems(virCgroupPtr group, char **mems);
+int virCgroupSetCpusetMems(virCgroup *group, const char *mems);
+int virCgroupGetCpusetMems(virCgroup *group, char **mems);
 
-int virCgroupSetCpusetMemoryMigrate(virCgroupPtr group, bool migrate);
-int virCgroupGetCpusetMemoryMigrate(virCgroupPtr group, bool *migrate);
+int virCgroupSetCpusetMemoryMigrate(virCgroup *group, bool migrate);
+int virCgroupGetCpusetMemoryMigrate(virCgroup *group, bool *migrate);
 
-int virCgroupSetCpusetCpus(virCgroupPtr group, const char *cpus);
-int virCgroupGetCpusetCpus(virCgroupPtr group, char **cpus);
+int virCgroupSetCpusetCpus(virCgroup *group, const char *cpus);
+int virCgroupGetCpusetCpus(virCgroup *group, char **cpus);
+int virCgroupSetupCpusetCpus(virCgroup *cgroup, virBitmap *cpumask);
 
-int virCgroupRemove(virCgroupPtr group);
+int virCgroupRemove(virCgroup *group);
 
-int virCgroupKillRecursive(virCgroupPtr group, int signum);
-int virCgroupKillPainfully(virCgroupPtr group);
+int virCgroupKillRecursive(virCgroup *group, int signum);
+int virCgroupKillPainfully(virCgroup *group);
 
-int virCgroupBindMount(virCgroupPtr group,
+int virCgroupBindMount(virCgroup *group,
                        const char *oldroot,
                        const char *mountopts);
 
-bool virCgroupSupportsCpuBW(virCgroupPtr cgroup);
+bool virCgroupSupportsCpuBW(virCgroup *cgroup);
 
-int virCgroupSetOwner(virCgroupPtr cgroup,
+int virCgroupSetOwner(virCgroup *cgroup,
                       uid_t uid,
                       gid_t gid,
                       int controllers);
 
-int virCgroupHasEmptyTasks(virCgroupPtr cgroup, int controller);
+int virCgroupHasEmptyTasks(virCgroup *cgroup, int controller);
 
 bool virCgroupControllerAvailable(int controller);
-#endif /* LIBVIRT_VIRCGROUP_H */

@@ -18,11 +18,9 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRGIC_H
-# define LIBVIRT_VIRGIC_H
+#pragma once
 
-# include "virutil.h"
-# include "virenum.h"
+#include "virenum.h"
 
 typedef enum {
     VIR_GIC_VERSION_NONE = 0,
@@ -41,10 +39,7 @@ typedef enum {
 } virGICImplementation;
 
 typedef struct _virGICCapability virGICCapability;
-typedef virGICCapability *virGICCapabilityPtr;
 struct _virGICCapability {
     virGICVersion version;
     virGICImplementation implementation;
 };
-
-#endif /* LIBVIRT_VIRGIC_H */

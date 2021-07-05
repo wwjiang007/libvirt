@@ -84,7 +84,7 @@ typedef enum {
     VIR_FROM_ONE = 27,          /* The OpenNebula driver no longer exists.
                                    Retained for ABI/API compat only */
     VIR_FROM_ESX = 28,          /* Error from ESX driver */
-    VIR_FROM_PHYP = 29,         /* Error from IBM power hypervisor */
+    VIR_FROM_PHYP = 29,         /* Error from the phyp driver, unused since 6.0.0 */
 
     VIR_FROM_SECRET = 30,       /* Error from secret storage */
     VIR_FROM_CPU = 31,          /* Error from CPU driver */
@@ -133,6 +133,10 @@ typedef enum {
     VIR_FROM_RESCTRL = 67,      /* Error from resource control */
     VIR_FROM_FIREWALLD = 68,    /* Error from firewalld */
     VIR_FROM_DOMAIN_CHECKPOINT = 69, /* Error from domain checkpoint */
+
+    VIR_FROM_TPM = 70,          /* Error from TPM */
+    VIR_FROM_BPF = 71,          /* Error from BPF code */
+    VIR_FROM_CH = 72,           /* Error from Cloud-Hypervisor driver */
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_ERR_DOMAIN_LAST
@@ -310,15 +314,14 @@ typedef enum {
                                            was denied */
     VIR_ERR_DBUS_SERVICE = 89,          /* error from a dbus service */
     VIR_ERR_STORAGE_VOL_EXIST = 90,     /* the storage vol already exists */
-    VIR_ERR_CPU_INCOMPATIBLE = 91,      /* given CPU is incompatible with host
-                                           CPU*/
+    VIR_ERR_CPU_INCOMPATIBLE = 91,      /* given CPU is incompatible with host CPU */
     VIR_ERR_XML_INVALID_SCHEMA = 92,    /* XML document doesn't validate against schema */
     VIR_ERR_MIGRATE_FINISH_OK = 93,     /* Finish API succeeded but it is expected to return NULL */
     VIR_ERR_AUTH_UNAVAILABLE = 94,      /* authentication unavailable */
     VIR_ERR_NO_SERVER = 95,             /* Server was not found */
     VIR_ERR_NO_CLIENT = 96,             /* Client was not found */
     VIR_ERR_AGENT_UNSYNCED = 97,        /* guest agent replies with wrong id
-                                           to guest-sync command (DEPRECATED)*/
+                                           to guest-sync command (DEPRECATED) */
     VIR_ERR_LIBSSH = 98,                /* error in libssh transport driver */
     VIR_ERR_DEVICE_MISSING = 99,        /* fail to find the desired device */
     VIR_ERR_INVALID_NWFILTER_BINDING = 100,  /* invalid nwfilter binding */
@@ -326,6 +329,12 @@ typedef enum {
     VIR_ERR_INVALID_DOMAIN_CHECKPOINT = 102, /* invalid domain checkpoint */
     VIR_ERR_NO_DOMAIN_CHECKPOINT = 103, /* domain checkpoint not found */
     VIR_ERR_NO_DOMAIN_BACKUP = 104,     /* domain backup job id not found */
+    VIR_ERR_INVALID_NETWORK_PORT = 105, /* invalid network port object */
+    VIR_ERR_NETWORK_PORT_EXIST = 106,   /* the network port already exist */
+    VIR_ERR_NO_NETWORK_PORT = 107,      /* network port not found */
+    VIR_ERR_NO_HOSTNAME = 108,          /* no domain's hostname found */
+    VIR_ERR_CHECKPOINT_INCONSISTENT = 109, /* checkpoint can't be used */
+    VIR_ERR_MULTIPLE_DOMAINS = 110,     /* more than one matching domain found */
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_ERR_NUMBER_LAST

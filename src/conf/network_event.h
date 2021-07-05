@@ -19,16 +19,15 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_NETWORK_EVENT_H
-# define LIBVIRT_NETWORK_EVENT_H
+#pragma once
 
-# include "internal.h"
-# include "object_event.h"
-# include "object_event_private.h"
+#include "internal.h"
+#include "object_event.h"
+#include "object_event_private.h"
 
 int
 virNetworkEventStateRegisterID(virConnectPtr conn,
-                               virObjectEventStatePtr state,
+                               virObjectEventState *state,
                                virNetworkPtr net,
                                int eventID,
                                virConnectNetworkEventGenericCallback cb,
@@ -40,7 +39,7 @@ virNetworkEventStateRegisterID(virConnectPtr conn,
 
 int
 virNetworkEventStateRegisterClient(virConnectPtr conn,
-                                   virObjectEventStatePtr state,
+                                   virObjectEventState *state,
                                    virNetworkPtr net,
                                    int eventID,
                                    virConnectNetworkEventGenericCallback cb,
@@ -50,10 +49,8 @@ virNetworkEventStateRegisterClient(virConnectPtr conn,
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(5)
     ATTRIBUTE_NONNULL(8);
 
-virObjectEventPtr
+virObjectEvent *
 virNetworkEventLifecycleNew(const char *name,
                             const unsigned char *uuid,
                             int type,
                             int detail);
-
-#endif /* LIBVIRT_NETWORK_EVENT_H */

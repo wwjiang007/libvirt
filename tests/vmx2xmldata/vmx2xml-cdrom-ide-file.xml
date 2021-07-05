@@ -1,4 +1,5 @@
 <domain type='vmware'>
+  <name>test</name>
   <uuid>00000000-0000-0000-0000-000000000000</uuid>
   <memory unit='KiB'>32768</memory>
   <currentMemory unit='KiB'>32768</currentMemory>
@@ -14,6 +15,7 @@
     <disk type='file' device='cdrom'>
       <source file='[datastore] directory/cdrom.iso'/>
       <target dev='hda' bus='ide'/>
+      <readonly/>
       <address type='drive' controller='0' bus='0' target='0' unit='0'/>
     </disk>
     <controller type='ide' index='0'/>

@@ -25,12 +25,9 @@
 #include <stddef.h>
 #include <wchar.h>
 #include <wctype.h>
-#include "c-ctype.h"
 
 #include "viralloc.h"
 #include "virbuffer.h"
-#include "virstring.h"
-#include "virsh-util.h"
 
 #define HEX_ENCODE_LENGTH 4 /* represents length of '\xNN' */
 
@@ -41,13 +38,13 @@ struct _vshTableRow {
 
 
 struct _vshTable {
-    vshTableRowPtr *rows;
+    vshTableRow **rows;
     size_t nrows;
 };
 
 
 static void
-vshTableRowFree(vshTableRowPtr row)
+vshTableRowFree(vshTableRow *row)
 {
     size_t i;
 
@@ -55,15 +52,15 @@ vshTableRowFree(vshTableRowPtr row)
         return;
 
     for (i = 0; i < row->ncells; i++)
-        VIR_FREE(row->cells[i]);
+        g_free(row->cells[i]);
 
-    VIR_FREE(row->cells);
-    VIR_FREE(row);
+    g_free(row->cells);
+    g_free(row);
 }
 
 
 void
-vshTableFree(vshTablePtr table)
+vshTableFree(vshTable *table)
 {
     size_t i;
 
@@ -72,8 +69,8 @@ vshTableFree(vshTablePtr table)
 
     for (i = 0; i < table->nrows; i++)
         vshTableRowFree(table->rows[i]);
-    VIR_FREE(table->rows);
-    VIR_FREE(table);
+    g_free(table->rows);
+    g_free(table);
 }
 
 
@@ -85,12 +82,12 @@ vshTableFree(vshTablePtr table)
  * Create a new row in the table. Each argument passed
  * represents a cell in the row.
  *
- * Return: pointer to vshTableRowPtr row or NULL.
+ * Return: pointer to vshTableRow *row or NULL.
  */
-static vshTableRowPtr
+static vshTableRow *
 vshTableRowNew(const char *arg, va_list ap)
 {
-    vshTableRowPtr row = NULL;
+    vshTableRow *row = NULL;
 
     if (!arg) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -98,19 +95,15 @@ vshTableRowNew(const char *arg, va_list ap)
         goto error;
     }
 
-    if (VIR_ALLOC(row) < 0)
-        goto error;
+    row = g_new0(vshTableRow, 1);
 
     while (arg) {
-        char *tmp = NULL;
+        g_autofree char *tmp = NULL;
 
-        if (VIR_STRDUP(tmp, arg) < 0)
-            goto error;
+        tmp = g_strdup(arg);
 
-        if (VIR_APPEND_ELEMENT(row->cells, row->ncells, tmp) < 0) {
-            VIR_FREE(tmp);
+        if (VIR_APPEND_ELEMENT(row->cells, row->ncells, tmp) < 0)
             goto error;
-        }
 
         arg = va_arg(ap, const char *);
     }
@@ -131,15 +124,14 @@ vshTableRowNew(const char *arg, va_list ap)
  *
  * Returns: pointer to table or NULL.
  */
-vshTablePtr
+vshTable *
 vshTableNew(const char *arg, ...)
 {
-    vshTablePtr table = NULL;
-    vshTableRowPtr header = NULL;
+    vshTable *table = NULL;
+    vshTableRow *header = NULL;
     va_list ap;
 
-    if (VIR_ALLOC(table) < 0)
-        goto error;
+    table = g_new0(vshTable, 1);
 
     va_start(ap, arg);
     header = vshTableRowNew(arg, ap);
@@ -170,9 +162,9 @@ vshTableNew(const char *arg, ...)
  * Returns: 0 if succeeded, -1 if failed.
  */
 int
-vshTableRowAppend(vshTablePtr table, const char *arg, ...)
+vshTableRowAppend(vshTable *table, const char *arg, ...)
 {
-    vshTableRowPtr row = NULL;
+    vshTableRow *row = NULL;
     size_t ncolumns = table->rows[0]->ncells;
     va_list ap;
     int ret = -1;
@@ -219,16 +211,15 @@ vshTableSafeEncode(const char *s, size_t *width)
 
     memset(&st, 0, sizeof(st));
 
-    if (VIR_ALLOC_N(buf, (sz * HEX_ENCODE_LENGTH) + 1) < 0)
-        return NULL;
+    buf = g_new0(char, (sz * HEX_ENCODE_LENGTH) + 1);
 
     ret = buf;
     *width = 0;
 
     while (p && *p) {
         if ((*p == '\\' && *(p + 1) == 'x') ||
-            c_iscntrl(*p)) {
-            snprintf(buf, HEX_ENCODE_LENGTH + 1, "\\x%02x", *p);
+            g_ascii_iscntrl(*p)) {
+            g_snprintf(buf, HEX_ENCODE_LENGTH + 1, "\\x%02x", *p);
             buf += HEX_ENCODE_LENGTH;
             *width += HEX_ENCODE_LENGTH;
             p++;
@@ -245,8 +236,8 @@ vshTableSafeEncode(const char *s, size_t *width)
                  * Not valid multibyte sequence -- maybe it's
                  * printable char according to the current locales.
                  */
-                if (!c_isprint(*p)) {
-                    snprintf(buf, HEX_ENCODE_LENGTH + 1, "\\x%02x", *p);
+                if (!g_ascii_isprint(*p)) {
+                    g_snprintf(buf, HEX_ENCODE_LENGTH + 1, "\\x%02x", *p);
                     buf += HEX_ENCODE_LENGTH;
                     *width += HEX_ENCODE_LENGTH;
                 } else {
@@ -256,14 +247,14 @@ vshTableSafeEncode(const char *s, size_t *width)
             } else if (!iswprint(wc)) {
                 size_t i;
                 for (i = 0; i < len; i++) {
-                    snprintf(buf, HEX_ENCODE_LENGTH + 1, "\\x%02x", p[i]);
+                    g_snprintf(buf, HEX_ENCODE_LENGTH + 1, "\\x%02x", p[i]);
                     buf += HEX_ENCODE_LENGTH;
                     *width += HEX_ENCODE_LENGTH;
                 }
             } else {
                 memcpy(buf, p, len);
                 buf += len;
-                *width += wcwidth(wc);
+                *width += g_unichar_iszerowidth(wc) ? 0 : (g_unichar_iswide(wc) ? 2 : 1);
             }
             p += len;
         }
@@ -288,7 +279,7 @@ vshTableSafeEncode(const char *s, size_t *width)
  * Return 0 in case of success, -1 otherwise.
  */
 static int
-vshTableGetColumnsWidths(vshTablePtr table,
+vshTableGetColumnsWidths(vshTable *table,
                          size_t *maxwidths,
                          size_t **widths,
                          bool header)
@@ -297,7 +288,7 @@ vshTableGetColumnsWidths(vshTablePtr table,
 
     i = header? 0 : 1;
     for (; i < table->nrows; i++) {
-        vshTableRowPtr row = table->rows[i];
+        vshTableRow *row = table->rows[i];
         size_t j;
 
         for (j = 0; j < row->ncells; j++) {
@@ -330,10 +321,10 @@ vshTableGetColumnsWidths(vshTablePtr table,
  * @buf: buffer to store table (only if @toStdout == true)
  */
 static void
-vshTableRowPrint(vshTableRowPtr row,
+vshTableRowPrint(vshTableRow *row,
                  size_t *maxwidths,
                  size_t *widths,
-                 virBufferPtr buf)
+                 virBuffer *buf)
 {
     size_t i;
     size_t j;
@@ -364,26 +355,22 @@ vshTableRowPrint(vshTableRowPtr row,
  * Return string containing table, or NULL
  */
 static char *
-vshTablePrint(vshTablePtr table, bool header)
+vshTablePrint(vshTable *table, bool header)
 {
     size_t i;
     size_t j;
-    size_t *maxwidths;
+    g_autofree size_t *maxwidths = NULL;
     size_t **widths;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     char *ret = NULL;
 
-    if (VIR_ALLOC_N(maxwidths, table->rows[0]->ncells))
-        goto cleanup;
+    maxwidths = g_new0(size_t, table->rows[0]->ncells);
 
-    if (VIR_ALLOC_N(widths, table->nrows))
-        goto cleanup;
+    widths = g_new0(size_t *, table->nrows);
 
     /* retrieve widths of columns */
-    for (i = 0; i < table->nrows; i++) {
-        if (VIR_ALLOC_N(widths[i], table->rows[0]->ncells))
-            goto cleanup;
-    }
+    for (i = 0; i < table->nrows; i++)
+        widths[i] = g_new0(size_t, table->rows[0]->ncells);
 
     if (vshTableGetColumnsWidths(table, maxwidths, widths, header) < 0)
         goto cleanup;
@@ -406,7 +393,6 @@ vshTablePrint(vshTablePtr table, bool header)
     ret = virBufferContentAndReset(&buf);
 
  cleanup:
-    VIR_FREE(maxwidths);
     for (i = 0; i < table->nrows; i++)
         VIR_FREE(widths[i]);
     VIR_FREE(widths);
@@ -424,18 +410,16 @@ vshTablePrint(vshTablePtr table, bool header)
  * (apart from quiet mode) this code may need update
  */
 void
-vshTablePrintToStdout(vshTablePtr table, vshControl *ctl)
+vshTablePrintToStdout(vshTable *table, vshControl *ctl)
 {
     bool header;
-    char *out;
+    g_autofree char *out = NULL;
 
     header = ctl ? !ctl->quiet : true;
 
     out = vshTablePrintToString(table, header);
     if (out)
         vshPrint(ctl, "%s", out);
-
-    VIR_FREE(out);
 }
 
 
@@ -448,7 +432,7 @@ vshTablePrintToStdout(vshTablePtr table, vshControl *ctl)
  * stdout. User will have to free returned string.
  */
 char *
-vshTablePrintToString(vshTablePtr table, bool header)
+vshTablePrintToString(vshTable *table, bool header)
 {
     return vshTablePrint(table, header);
 }

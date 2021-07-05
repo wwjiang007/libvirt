@@ -20,7 +20,7 @@
  */
 
 #include <config.h>
-#include <poll.h>
+#include <unistd.h>
 
 #include "virpolkit.h"
 #include "virerror.h"
@@ -28,17 +28,19 @@
 #include "virstring.h"
 #include "virprocess.h"
 #include "viralloc.h"
-#include "virdbus.h"
+#include "virgdbus.h"
 #include "virfile.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_POLKIT
 
 VIR_LOG_INIT("util.polkit");
 
 #if WITH_POLKIT
+# include <poll.h>
 
 struct _virPolkitAgent {
-    virCommandPtr cmd;
+    virCommand *cmd;
 };
 
 /*
@@ -61,90 +63,99 @@ int virPolkitCheckAuth(const char *actionid,
                        const char **details,
                        bool allowInteraction)
 {
-    DBusConnection *sysbus;
-    DBusMessage *reply = NULL;
-    char **retdetails = NULL;
-    size_t nretdetails = 0;
-    bool is_authorized;
-    bool is_challenge;
+    GDBusConnection *sysbus;
+    GVariantBuilder builder;
+    GVariant *gprocess = NULL;
+    GVariant *gdetails = NULL;
+    g_autoptr(GVariant) message = NULL;
+    g_autoptr(GVariant) reply = NULL;
+    g_autoptr(GVariantIter) iter = NULL;
+    char *retkey;
+    char *retval;
+    gboolean is_authorized;
+    gboolean is_challenge;
     bool is_dismissed = false;
-    size_t i;
-    int ret = -1;
+    const char **next;
 
-    if (!(sysbus = virDBusGetSystemBus()))
-        goto cleanup;
+    if (!(sysbus = virGDBusGetSystemBus()))
+        return -1;
 
     VIR_INFO("Checking PID %lld running as %d",
              (long long) pid, uid);
 
-    if (virDBusCallMethod(sysbus,
-                          &reply,
-                          NULL,
-                          "org.freedesktop.PolicyKit1",
-                          "/org/freedesktop/PolicyKit1/Authority",
-                          "org.freedesktop.PolicyKit1.Authority",
-                          "CheckAuthorization",
-                          "(sa{sv})sa&{ss}us",
-                          "unix-process",
-                          3,
-                          "pid", "u", (unsigned int)pid,
-                          "start-time", "t", startTime,
-                          "uid", "i", (int)uid,
-                          actionid,
-                          virStringListLength(details) / 2,
-                          details,
-                          allowInteraction,
-                          "" /* cancellation ID */) < 0)
-        goto cleanup;
+    g_variant_builder_init(&builder, G_VARIANT_TYPE("a{sv}"));
+    g_variant_builder_add(&builder, "{sv}", "pid", g_variant_new_uint32(pid));
+    g_variant_builder_add(&builder, "{sv}", "start-time", g_variant_new_uint64(startTime));
+    g_variant_builder_add(&builder, "{sv}", "uid", g_variant_new_int32(uid));
+    gprocess = g_variant_builder_end(&builder);
 
-    if (virDBusMessageDecode(reply,
-                             "(bba&{ss})",
-                             &is_authorized,
-                             &is_challenge,
-                             &nretdetails,
-                             &retdetails) < 0)
-        goto cleanup;
+    g_variant_builder_init(&builder, G_VARIANT_TYPE("a{ss}"));
 
-    for (i = 0; i < (nretdetails / 2); i++) {
-        if (STREQ(retdetails[(i * 2)], "polkit.dismissed") &&
-            STREQ(retdetails[(i * 2) + 1], "true"))
+    if (details) {
+        for (next = details; *next; next++) {
+            const char *detail1 = *(next++);
+            const char *detail2 = *next;
+            g_variant_builder_add(&builder, "{ss}", detail1, detail2);
+        }
+    }
+
+    gdetails = g_variant_builder_end(&builder);
+
+    message = g_variant_new("((s@a{sv})s@a{ss}us)",
+                            "unix-process",
+                            gprocess,
+                            actionid,
+                            gdetails,
+                            allowInteraction,
+                            "" /* cancellation ID */);
+
+    if (virGDBusCallMethod(sysbus,
+                           &reply,
+                           G_VARIANT_TYPE("((bba{ss}))"),
+                           NULL,
+                           "org.freedesktop.PolicyKit1",
+                           "/org/freedesktop/PolicyKit1/Authority",
+                           "org.freedesktop.PolicyKit1.Authority",
+                           "CheckAuthorization",
+                           message) < 0)
+        return -1;
+
+    g_variant_get(reply, "((bba{ss}))", &is_authorized, &is_challenge, &iter);
+
+    while (g_variant_iter_loop(iter, "{ss}", &retkey, &retval)) {
+        if (STREQ(retkey, "polkit.dismissed") && STREQ(retval, "true"))
             is_dismissed = true;
     }
 
     VIR_DEBUG("is auth %d  is challenge %d",
               is_authorized, is_challenge);
 
-    if (is_authorized) {
-        ret = 0;
+    if (is_authorized)
+        return 0;
+
+    if (is_dismissed) {
+        virReportError(VIR_ERR_AUTH_CANCELLED, "%s",
+                       _("user cancelled authentication process"));
+    } else if (is_challenge) {
+        virReportError(VIR_ERR_AUTH_UNAVAILABLE,
+                       _("no polkit agent available to authenticate action '%s'"),
+                       actionid);
     } else {
-        ret = -2;
-        if (is_dismissed)
-            virReportError(VIR_ERR_AUTH_CANCELLED, "%s",
-                           _("user cancelled authentication process"));
-        else if (is_challenge)
-            virReportError(VIR_ERR_AUTH_UNAVAILABLE,
-                           _("no polkit agent available to authenticate "
-                             "action '%s'"),
-                           actionid);
-        else
-            virReportError(VIR_ERR_AUTH_FAILED, "%s",
-                           _("access denied by policy"));
+        virReportError(VIR_ERR_AUTH_FAILED, "%s",
+                       _("access denied by policy"));
     }
 
- cleanup:
-    virStringListFreeCount(retdetails, nretdetails);
-    virDBusMessageUnref(reply);
-    return ret;
+    return -2;
 }
 
 
 /* virPolkitAgentDestroy:
- * @cmd: Pointer to the virCommandPtr created during virPolkitAgentCreate
+ * @cmd: Pointer to the virCommand * created during virPolkitAgentCreate
  *
  * Destroy resources used by Polkit Agent
  */
 void
-virPolkitAgentDestroy(virPolkitAgentPtr agent)
+virPolkitAgentDestroy(virPolkitAgent *agent)
 {
     if (!agent)
         return;
@@ -157,12 +168,12 @@ virPolkitAgentDestroy(virPolkitAgentPtr agent)
  *
  * Allocate and setup a polkit agent
  *
- * Returns a virCommandPtr on success and NULL on failure
+ * Returns a virCommand *on success and NULL on failure
  */
-virPolkitAgentPtr
+virPolkitAgent *
 virPolkitAgentCreate(void)
 {
-    virPolkitAgentPtr agent = NULL;
+    virPolkitAgent *agent = NULL;
     int pipe_fd[2] = {-1, -1};
     struct pollfd pollfd;
     int outfd = STDOUT_FILENO;
@@ -171,11 +182,10 @@ virPolkitAgentCreate(void)
     if (!isatty(STDIN_FILENO))
         goto error;
 
-    if (pipe2(pipe_fd, 0) < 0)
+    if (virPipe(pipe_fd) < 0)
         goto error;
 
-    if (VIR_ALLOC(agent) < 0)
-        goto error;
+    agent = g_new0(virPolkitAgent, 1);
 
     agent->cmd = virCommandNewArgList(PKTTYAGENT, "--process", NULL);
 
@@ -209,12 +219,12 @@ virPolkitAgentCreate(void)
 
 #else /* ! WITH_POLKIT */
 
-int virPolkitCheckAuth(const char *actionid ATTRIBUTE_UNUSED,
-                       pid_t pid ATTRIBUTE_UNUSED,
-                       unsigned long long startTime ATTRIBUTE_UNUSED,
-                       uid_t uid ATTRIBUTE_UNUSED,
-                       const char **details ATTRIBUTE_UNUSED,
-                       bool allowInteraction ATTRIBUTE_UNUSED)
+int virPolkitCheckAuth(const char *actionid G_GNUC_UNUSED,
+                       pid_t pid G_GNUC_UNUSED,
+                       unsigned long long startTime G_GNUC_UNUSED,
+                       uid_t uid G_GNUC_UNUSED,
+                       const char **details G_GNUC_UNUSED,
+                       bool allowInteraction G_GNUC_UNUSED)
 {
     VIR_ERROR(_("Polkit auth attempted, even though polkit is not available"));
     virReportError(VIR_ERR_AUTH_FAILED, "%s",
@@ -224,13 +234,13 @@ int virPolkitCheckAuth(const char *actionid ATTRIBUTE_UNUSED,
 
 
 void
-virPolkitAgentDestroy(virPolkitAgentPtr agent ATTRIBUTE_UNUSED)
+virPolkitAgentDestroy(virPolkitAgent *agent G_GNUC_UNUSED)
 {
     return; /* do nothing */
 }
 
 
-virPolkitAgentPtr
+virPolkitAgent *
 virPolkitAgentCreate(void)
 {
     virReportError(VIR_ERR_AUTH_FAILED, "%s",

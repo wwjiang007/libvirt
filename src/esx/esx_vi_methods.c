@@ -105,8 +105,8 @@
     { \
         int result = -1; \
         const char *methodName = #_name; \
-        virBuffer buffer = VIR_BUFFER_INITIALIZER; \
-        char *request = NULL; \
+        g_auto(virBuffer) buffer = VIR_BUFFER_INITIALIZER; \
+        g_autofree char *request = NULL; \
         esxVI_Response *response = NULL; \
  \
         ESX_VI__METHOD__PARAMETER__THIS__##_this_from_service \
@@ -123,9 +123,6 @@
         virBufferAddLit(&buffer, "</"#_name">"); \
         virBufferAddLit(&buffer, ESX_VI__SOAP__REQUEST_FOOTER); \
  \
-        if (virBufferCheckError(&buffer) < 0) \
-            goto cleanup; \
- \
         request = virBufferContentAndReset(&buffer); \
  \
         if (esxVI_Context_Execute(ctx, methodName, request, &response, \
@@ -139,11 +136,6 @@
         result = 0; \
  \
       cleanup: \
-        if (result < 0) { \
-            virBufferFreeAndReset(&buffer); \
-        } \
- \
-        VIR_FREE(request); \
         esxVI_Response_Free(&response); \
  \
         return result; \

@@ -20,11 +20,10 @@
 
 #include "testutils.h"
 
-#ifdef NSS
+#ifdef WITH_NSS
 
-# include <arpa/inet.h>
 # include "libvirt_nss.h"
-# include "virsocketaddr.h"
+# include "virsocket.h"
 
 # define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -41,12 +40,11 @@ testGetHostByName(const void *opaque)
 {
     const struct testNSSData *data = opaque;
     const bool existent = data->hostname && data->ipAddr && data->ipAddr[0];
-    int ret = -1;
     struct hostent resolved;
     char buf[BUF_SIZE] = { 0 };
     char **addrList;
     int rv, tmp_errno = 0, tmp_herrno = 0;
-    size_t i = 0, j = 0;
+    size_t i = 0;
 
     memset(&resolved, 0, sizeof(resolved));
 
@@ -64,16 +62,16 @@ testGetHostByName(const void *opaque)
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "Resolving of %s failed due to internal error",
                        data->hostname);
-        goto cleanup;
+        return -1;
     } else if (rv == NSS_STATUS_NOTFOUND) {
         /* Resolving failed. Should it? */
         if (!existent)
-            ret = 0;
+            return 0;
         else
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            "Resolving of %s failed",
                            data->hostname);
-        goto cleanup;
+        return -1;
     }
 
     /* Resolving succeeded. Should it? */
@@ -81,7 +79,7 @@ testGetHostByName(const void *opaque)
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "Resolving of %s succeeded but was expected to fail",
                        data->hostname);
-        goto cleanup;
+        return -1;
     }
 
     /* Now lets see if resolved address match our expectations. */
@@ -89,7 +87,7 @@ testGetHostByName(const void *opaque)
     if (!resolved.h_name) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        "resolved.h_name empty");
-        goto cleanup;
+        return -1;
     }
 
     if (data->af != AF_UNSPEC &&
@@ -97,7 +95,7 @@ testGetHostByName(const void *opaque)
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "Expected AF_INET (%d) got %d",
                        data->af, resolved.h_addrtype);
-        goto cleanup;
+        return -1;
     }
 
     if ((resolved.h_addrtype == AF_INET && resolved.h_length != 4) ||
@@ -107,16 +105,17 @@ testGetHostByName(const void *opaque)
                        "Expected %d bytes long address, got %d",
                        resolved.h_addrtype == AF_INET ? 4 : 16,
                        resolved.h_length);
-        goto cleanup;
+        return -1;
     }
 
     if (!resolved.h_addr_list) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        "resolved.h_addr_list empty");
-        goto cleanup;
+        return -1;
     }
 
     addrList = resolved.h_addr_list;
+    i = 0;
     while (*addrList) {
         virSocketAddr sa;
         char *ipAddr;
@@ -132,19 +131,15 @@ testGetHostByName(const void *opaque)
 
         if (!(ipAddr = virSocketAddrFormat(&sa))) {
             /* error reported by helper */
-            goto cleanup;
+            return -1;
         }
 
-        for (j = 0; data->ipAddr[j]; j++) {
-            if (STREQ(data->ipAddr[j], ipAddr))
-                break;
-        }
-
-        if (!data->ipAddr[j]) {
+        if (STRNEQ_NULLABLE(data->ipAddr[i], ipAddr)) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                           "Unexpected address %s", ipAddr);
+                           "Unexpected address %s, expecting %s",
+                           ipAddr, NULLSTR(data->ipAddr[i]));
             VIR_FREE(ipAddr);
-            goto cleanup;
+            return -1;
         }
         VIR_FREE(ipAddr);
 
@@ -152,18 +147,14 @@ testGetHostByName(const void *opaque)
         i++;
     }
 
-    for (j = 0; data->ipAddr[j]; j++)
-        ;
-
-    if (i != j) {
+    if (data->ipAddr[i]) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       "Expected %zu addresses, got %zu", j, i);
-        goto cleanup;
+                       "Expected %s address, got NULL",
+                       data->ipAddr[i]);
+        return -1;
     }
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 static int
@@ -182,7 +173,7 @@ mymain(void)
     } while (0)
 
 # if !defined(LIBVIRT_NSS_GUEST)
-    DO_TEST("fedora", AF_INET, "192.168.122.197", "192.168.122.198", "192.168.122.199");
+    DO_TEST("fedora", AF_INET, "192.168.122.197", "192.168.122.198", "192.168.122.199", "192.168.122.3");
     DO_TEST("gentoo", AF_INET, "192.168.122.254");
     DO_TEST("gentoo", AF_INET6, "2001:1234:dead:beef::2");
     DO_TEST("gentoo", AF_UNSPEC, "192.168.122.254");
@@ -195,7 +186,7 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/nssmock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("nss"))
 #else
 int
 main(void)

@@ -19,27 +19,24 @@
  *
  */
 
-#ifndef LIBVIRT_BHYVE_COMMAND_H
-# define LIBVIRT_BHYVE_COMMAND_H
+#pragma once
 
-# include "bhyve_domain.h"
-# include "bhyve_utils.h"
+#include "bhyve_domain.h"
+#include "bhyve_utils.h"
 
-# include "domain_conf.h"
-# include "vircommand.h"
+#include "domain_conf.h"
+#include "vircommand.h"
 
-# define BHYVE_CONFIG_FORMAT_ARGV "bhyve-argv"
+#define BHYVE_CONFIG_FORMAT_ARGV "bhyve-argv"
 
-virCommandPtr virBhyveProcessBuildBhyveCmd(virConnectPtr conn,
-                                           virDomainDefPtr def,
-                                           bool dryRun);
+virCommand *virBhyveProcessBuildBhyveCmd(struct _bhyveConn *driver,
+                                         virDomainDef *def,
+                                         bool dryRun);
 
-virCommandPtr
-virBhyveProcessBuildDestroyCmd(bhyveConnPtr driver,
-                               virDomainDefPtr def);
+virCommand *
+virBhyveProcessBuildDestroyCmd(struct _bhyveConn *driver,
+                               virDomainDef *def);
 
-virCommandPtr
-virBhyveProcessBuildLoadCmd(virConnectPtr conn, virDomainDefPtr def,
+virCommand *
+virBhyveProcessBuildLoadCmd(struct _bhyveConn *driver, virDomainDef *def,
                             const char *devmap_file, char **devicesmap_out);
-
-#endif /* LIBVIRT_BHYVE_COMMAND_H */

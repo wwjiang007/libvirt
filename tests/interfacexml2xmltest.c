@@ -19,7 +19,7 @@ testCompareXMLToXMLFiles(const char *xml)
     char *xmlData = NULL;
     char *actual = NULL;
     int ret = -1;
-    virInterfaceDefPtr dev = NULL;
+    virInterfaceDef *dev = NULL;
 
     if (virTestLoadFile(xml, &xmlData) < 0)
         goto fail;
@@ -50,9 +50,8 @@ testCompareXMLToXMLHelper(const void *data)
     int result = -1;
     char *xml = NULL;
 
-    if (virAsprintf(&xml, "%s/interfaceschemadata/%s.xml",
-                    abs_srcdir, (const char*)data) < 0)
-        return -1;
+    xml = g_strdup_printf("%s/interfaceschemadata/%s.xml", abs_srcdir,
+                          (const char *)data);
 
     result = testCompareXMLToXMLFiles(xml);
 

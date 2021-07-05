@@ -19,27 +19,29 @@
  *
  */
 
-#ifndef LIBVIRT_VMX_H
-# define LIBVIRT_VMX_H
+#pragma once
 
-# include "internal.h"
-# include "virconf.h"
-# include "domain_conf.h"
+#include "internal.h"
+#include "virconf.h"
+#include "domain_conf.h"
 
-# define VMX_CONFIG_FORMAT_ARGV "vmware-vmx"
+#define VMX_CONFIG_FORMAT_ARGV "vmware-vmx"
 
 typedef struct _virVMXContext virVMXContext;
 
-virDomainXMLOptionPtr virVMXDomainXMLConfInit(void);
+virDomainXMLOption *virVMXDomainXMLConfInit(virCaps *caps);
 
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  * Context
  */
 
-typedef char * (*virVMXParseFileName)(const char *fileName, void *opaque);
+typedef int (*virVMXParseFileName)(const char *fileName,
+                                   void *opaque,
+                                   char **src,
+                                   bool allow_missing);
 typedef char * (*virVMXFormatFileName)(const char *src, void *opaque);
-typedef int (*virVMXAutodetectSCSIControllerModel)(virDomainDiskDefPtr def,
+typedef int (*virVMXAutodetectSCSIControllerModel)(virDomainDiskDef *def,
                                                    int *model, void *opaque);
 
 /*
@@ -66,15 +68,15 @@ struct _virVMXContext {
 
 char *virVMXEscapeHex(const char *string, char escape, const char *special);
 
-# define virVMXEscapeHexPipe(_string) virVMXEscapeHex(_string, '|', "\"")
+#define virVMXEscapeHexPipe(_string) virVMXEscapeHex(_string, '|', "\"")
 
-# define virVMXEscapeHexPercent(_string) virVMXEscapeHex(_string, '%', "/\\")
+#define virVMXEscapeHexPercent(_string) virVMXEscapeHex(_string, '%', "/\\")
 
 int virVMXUnescapeHex(char *string, char escape);
 
-# define virVMXUnescapeHexPipe(_string) virVMXUnescapeHex(_string, '|')
+#define virVMXUnescapeHexPipe(_string) virVMXUnescapeHex(_string, '|')
 
-# define virVMXUnescapeHexPercent(_string) virVMXUnescapeHex(_string, '%')
+#define virVMXUnescapeHexPercent(_string) virVMXUnescapeHex(_string, '%')
 
 char *virVMXConvertToUTF8(const char *encoding, const char *string);
 
@@ -84,32 +86,10 @@ char *virVMXConvertToUTF8(const char *encoding, const char *string);
  * VMX -> Domain XML
  */
 
-virDomainDefPtr virVMXParseConfig(virVMXContext *ctx,
-                                  virDomainXMLOptionPtr xmlopt,
-                                  virCapsPtr caps,
+virDomainDef *virVMXParseConfig(virVMXContext *ctx,
+                                  virDomainXMLOption *xmlopt,
+                                  virCaps *caps,
                                   const char *vmx);
-
-int virVMXParseVNC(virConfPtr conf, virDomainGraphicsDefPtr *def);
-
-int virVMXParseSCSIController(virConfPtr conf, int controller, bool *present,
-                              int *virtualDev);
-
-int virVMXParseDisk(virVMXContext *ctx, virDomainXMLOptionPtr xmlopt,
-                    virConfPtr conf, int device, int busType,
-                    int controllerOrBus, int unit, virDomainDiskDefPtr *def,
-                    virDomainDefPtr vmdef);
-
-int virVMXParseFileSystem(virConfPtr conf, int number, virDomainFSDefPtr *def);
-
-int virVMXParseEthernet(virConfPtr conf, int controller, virDomainNetDefPtr *def);
-
-int virVMXParseSerial(virVMXContext *ctx, virConfPtr conf, int port,
-                      virDomainChrDefPtr *def);
-
-int virVMXParseParallel(virVMXContext *ctx, virConfPtr conf, int port,
-                        virDomainChrDefPtr *def);
-
-int virVMXParseSVGA(virConfPtr conf, virDomainVideoDefPtr *def);
 
 
 
@@ -117,29 +97,5 @@ int virVMXParseSVGA(virConfPtr conf, virDomainVideoDefPtr *def);
  * Domain XML -> VMX
  */
 
-char *virVMXFormatConfig(virVMXContext *ctx, virDomainXMLOptionPtr xmlopt,
-                         virDomainDefPtr def, int virtualHW_version);
-
-int virVMXFormatVNC(virDomainGraphicsDefPtr def, virBufferPtr buffer);
-
-int virVMXFormatDisk(virVMXContext *ctx, virDomainDiskDefPtr def,
-                     virBufferPtr buffer);
-
-int virVMXFormatFloppy(virVMXContext *ctx, virDomainDiskDefPtr def,
-                       virBufferPtr buffer, bool floppy_present[2]);
-
-int virVMXFormatFileSystem(virDomainFSDefPtr def, int number,
-                           virBufferPtr buffer);
-
-int virVMXFormatEthernet(virDomainNetDefPtr def, int controller,
-                         virBufferPtr buffer);
-
-int virVMXFormatSerial(virVMXContext *ctx, virDomainChrDefPtr def,
-                       virBufferPtr buffer);
-
-int virVMXFormatParallel(virVMXContext *ctx, virDomainChrDefPtr def,
-                         virBufferPtr buffer);
-
-int virVMXFormatSVGA(virDomainVideoDefPtr def, virBufferPtr buffer);
-
-#endif /* LIBVIRT_VMX_H */
+char *virVMXFormatConfig(virVMXContext *ctx, virDomainXMLOption *xmlopt,
+                         virDomainDef *def, int virtualHW_version);

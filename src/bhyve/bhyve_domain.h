@@ -18,29 +18,23 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_BHYVE_DOMAIN_H
-# define LIBVIRT_BHYVE_DOMAIN_H
+#pragma once
 
-# include "domain_addr.h"
-# include "domain_conf.h"
+#include "domain_addr.h"
+#include "domain_conf.h"
 
-# include "bhyve_monitor.h"
+#include "bhyve_monitor.h"
 
 typedef struct _bhyveDomainObjPrivate bhyveDomainObjPrivate;
-typedef bhyveDomainObjPrivate *bhyveDomainObjPrivatePtr;
 struct _bhyveDomainObjPrivate {
-    virDomainPCIAddressSetPtr pciaddrs;
+    virDomainPCIAddressSet *pciaddrs;
     bool persistentAddrs;
 
-    bhyveMonitorPtr mon;
+    bhyveMonitor *mon;
 };
 
-virDomainXMLOptionPtr virBhyveDriverCreateXMLConf(bhyveConnPtr);
+virDomainXMLOption *virBhyveDriverCreateXMLConf(struct _bhyveConn *);
 
 extern virDomainXMLPrivateDataCallbacks virBhyveDriverPrivateDataCallbacks;
 extern virDomainDefParserConfig virBhyveDriverDomainDefParserConfig;
-extern virDomainXMLNamespace virBhyveDriverDomainXMLNamespace;
-
-bool bhyveDomainDefNeedsISAController(virDomainDefPtr def);
-
-#endif /* LIBVIRT_BHYVE_DOMAIN_H */
+extern virXMLNamespace virBhyveDriverDomainXMLNamespace;

@@ -18,29 +18,23 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRAUTHCONFIG_H
-# define LIBVIRT_VIRAUTHCONFIG_H
+#pragma once
 
-# include "internal.h"
-# include "virautoclean.h"
+#include "internal.h"
 
 typedef struct _virAuthConfig virAuthConfig;
-typedef virAuthConfig *virAuthConfigPtr;
 
-
-virAuthConfigPtr virAuthConfigNew(const char *path);
-virAuthConfigPtr virAuthConfigNewData(const char *path,
+virAuthConfig *virAuthConfigNew(const char *path);
+virAuthConfig *virAuthConfigNewData(const char *path,
                                       const char *data,
                                       size_t len);
 
-void virAuthConfigFree(virAuthConfigPtr auth);
+void virAuthConfigFree(virAuthConfig *auth);
 
-int virAuthConfigLookup(virAuthConfigPtr auth,
+int virAuthConfigLookup(virAuthConfig *auth,
                         const char *service,
                         const char *hostname,
                         const char *credname,
-                        const char **value);
+                        char **value);
 
-VIR_DEFINE_AUTOPTR_FUNC(virAuthConfig, virAuthConfigFree);
-
-#endif /* LIBVIRT_VIRAUTHCONFIG_H */
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virAuthConfig, virAuthConfigFree);

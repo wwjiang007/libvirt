@@ -19,23 +19,22 @@
  *
  */
 
-#ifndef LIBVIRT_BHYVE_CAPABILITIES_H
-# define LIBVIRT_BHYVE_CAPABILITIES_H
+#pragma once
 
-# include "capabilities.h"
-# include "conf/domain_capabilities.h"
+#include "capabilities.h"
+#include "conf/domain_capabilities.h"
 
-# include "bhyve_utils.h"
+#include "bhyve_utils.h"
 
-virCapsPtr virBhyveCapsBuild(void);
-int virBhyveDomainCapsFill(virDomainCapsPtr caps,
+virCaps *virBhyveCapsBuild(void);
+int virBhyveDomainCapsFill(virDomainCaps *caps,
                            unsigned int bhyvecaps,
-                           virDomainCapsStringValuesPtr firmwares);
-virDomainCapsPtr virBhyveDomainCapsBuild(bhyveConnPtr,
-                                         const char *emulatorbin,
-                                         const char *machine,
-                                         virArch arch,
-                                         virDomainVirtType virttype);
+                           virDomainCapsStringValues *firmwares);
+virDomainCaps *virBhyveDomainCapsBuild(bhyveConn *conn,
+                                       const char *emulatorbin,
+                                       const char *machine,
+                                       virArch arch,
+                                       virDomainVirtType virttype);
 
 /* These are bit flags: */
 typedef enum {
@@ -50,9 +49,10 @@ typedef enum {
     BHYVE_CAP_FBUF = 1 << 4,
     BHYVE_CAP_XHCI = 1 << 5,
     BHYVE_CAP_CPUTOPOLOGY = 1 << 6,
+    BHYVE_CAP_SOUND_HDA = 1 << 7,
+    BHYVE_CAP_VNC_PASSWORD = 1 << 8,
+    BHYVE_CAP_VIRTIO_9P = 1 << 9,
 } virBhyveCapsFlags;
 
 int virBhyveProbeGrubCaps(virBhyveGrubCapsFlags *caps);
 int virBhyveProbeCaps(unsigned int *caps);
-
-#endif /* LIBVIRT_BHYVE_CAPABILITIES_H */

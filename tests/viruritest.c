@@ -41,77 +41,80 @@ struct URIParseData {
     const char *query;
     const char *fragment;
     const char *user;
-    virURIParamPtr params;
+    virURIParam *params;
 };
 
 static int testURIParse(const void *args)
 {
     int ret = -1;
-    virURIPtr uri = NULL;
+    virURI *uri = NULL;
     const struct URIParseData *data = args;
     char *uristr = NULL;
     size_t i;
+    bool fail = false;
 
     if (!(uri = virURIParse(data->uri)))
         goto cleanup;
 
     if (STRNEQ(uri->scheme, data->scheme)) {
-        VIR_DEBUG("Expected scheme '%s', actual '%s'",
-                  data->scheme, uri->scheme);
-        goto cleanup;
+        VIR_TEST_DEBUG("Expected scheme '%s', actual '%s'",
+                       data->scheme, uri->scheme);
+        fail = true;
     }
 
     if (STRNEQ(uri->server, data->server)) {
-        VIR_DEBUG("Expected server '%s', actual '%s'",
-                  data->server, uri->server);
-        goto cleanup;
+        VIR_TEST_DEBUG("Expected server '%s', actual '%s'",
+                       data->server, uri->server);
+        fail = true;
     }
 
     if (uri->port != data->port) {
-        VIR_DEBUG("Expected port '%d', actual '%d'",
-                  data->port, uri->port);
-        goto cleanup;
+        VIR_TEST_DEBUG("Expected port '%d', actual '%d'",
+                       data->port, uri->port);
+        fail = true;
     }
 
     if (STRNEQ_NULLABLE(uri->path, data->path)) {
-        VIR_DEBUG("Expected path '%s', actual '%s'",
-                  data->path, uri->path);
-        goto cleanup;
+        VIR_TEST_DEBUG("Expected path '%s', actual '%s'",
+                       data->path, uri->path);
+        fail = true;
     }
 
     if (STRNEQ_NULLABLE(uri->query, data->query)) {
-        VIR_DEBUG("Expected query '%s', actual '%s'",
-                  data->query, uri->query);
-        goto cleanup;
+        VIR_TEST_DEBUG("Expected query '%s', actual '%s'",
+                       data->query, uri->query);
+        fail = true;
     }
 
     if (STRNEQ_NULLABLE(uri->fragment, data->fragment)) {
-        VIR_DEBUG("Expected fragment '%s', actual '%s'",
-                  data->fragment, uri->fragment);
-        goto cleanup;
+        VIR_TEST_DEBUG("Expected fragment '%s', actual '%s'",
+                       data->fragment, uri->fragment);
+        fail = true;
     }
 
     for (i = 0; data->params && data->params[i].name && i < uri->paramsCount; i++) {
         if (STRNEQ_NULLABLE(data->params[i].name, uri->params[i].name)) {
-            VIR_DEBUG("Expected param name %zu '%s', actual '%s'",
-                      i, data->params[i].name, uri->params[i].name);
-            goto cleanup;
+            VIR_TEST_DEBUG("Expected param name %zu '%s', actual '%s'",
+                           i, data->params[i].name, uri->params[i].name);
+            fail = true;
         }
         if (STRNEQ_NULLABLE(data->params[i].value, uri->params[i].value)) {
-            VIR_DEBUG("Expected param value %zu '%s', actual '%s'",
-                      i, data->params[i].value, uri->params[i].value);
-            goto cleanup;
+            VIR_TEST_DEBUG("Expected param value %zu '%s', actual '%s'",
+                           i, data->params[i].value, uri->params[i].value);
+            fail = true;
         }
     }
     if (data->params && data->params[i].name) {
-        VIR_DEBUG("Missing parameter %zu %s=%s",
-                  i, data->params[i].name, data->params[i].value);
-        goto cleanup;
+        VIR_TEST_DEBUG("Missing parameter %zu %s=%s",
+                       i, data->params[i].name, data->params[i].value);
+        fail = true;
     }
     if (i != uri->paramsCount) {
-        VIR_DEBUG("Unexpected parameter %zu %s=%s",
-                  i, uri->params[i].name, uri->params[i].value);
-        goto cleanup;
+        for (; i < uri->paramsCount; i++) {
+            VIR_TEST_DEBUG("Unexpected parameter %zu %s=%s",
+                           i, uri->params[i].name, uri->params[i].value);
+        }
+        fail = true;
     }
 
     VIR_FREE(uri->query);
@@ -121,10 +124,13 @@ static int testURIParse(const void *args)
         goto cleanup;
 
     if (STRNEQ(uristr, data->uri_out)) {
-        VIR_DEBUG("URI did not roundtrip, expect '%s', actual '%s'",
-                  data->uri_out, uristr);
-        goto cleanup;
+        VIR_TEST_DEBUG("URI did not roundtrip, expect '%s', actual '%s'",
+                       data->uri_out, uristr);
+        fail = true;
     }
+
+    if (fail)
+        goto cleanup;
 
     ret = 0;
  cleanup:
@@ -139,7 +145,9 @@ mymain(void)
 {
     int ret = 0;
 
+#ifndef WIN32
     signal(SIGPIPE, SIG_IGN);
+#endif /* WIN32 */
 
 #define TEST_FULL(uri, uri_out, scheme, server, port, path, query, \
                   fragment, user, params) \
@@ -158,6 +166,7 @@ mymain(void)
               *query_out ? "test://example.com/?" query_out : NULL, \
               "test", "example.com", 0, "/", query_in, NULL, NULL, params)
 
+    VIR_WARNINGS_NO_DECLARATION_AFTER_STATEMENT
     virURIParam params[] = {
         { (char*)"name", (char*)"value", false },
         { NULL, NULL, false },
@@ -165,12 +174,21 @@ mymain(void)
 
     TEST_PARSE("test://example.com", "test", "example.com", 0, NULL, NULL, NULL, NULL, NULL);
     TEST_PARSE("test://foo@example.com", "test", "example.com", 0, NULL, NULL, NULL, "foo", NULL);
+    TEST_PARSE("test://foo:pass@example.com", "test", "example.com", 0, NULL, NULL, NULL, "foo:pass", NULL);
     TEST_PARSE("test://example.com:123", "test", "example.com", 123, NULL, NULL, NULL, NULL, NULL);
     TEST_PARSE("test://example.com:123/system?name=value#foo", "test", "example.com", 123, "/system", "name=value", "foo", NULL, params);
     TEST_PARSE("test://127.0.0.1:123/system", "test", "127.0.0.1", 123, "/system", NULL, NULL, NULL, NULL);
     TEST_PARSE("test://[::1]:123/system", "test", "::1", 123, "/system", NULL, NULL, NULL, NULL);
     TEST_PARSE("test://[2001:41c8:1:4fd4::2]:123/system", "test", "2001:41c8:1:4fd4::2", 123, "/system", NULL, NULL, NULL, NULL);
     TEST_PARSE("gluster+rdma://example.com:1234/gv0/vol.img", "gluster+rdma", "example.com", 1234, "/gv0/vol.img", NULL, NULL, NULL, NULL);
+
+    virURIParam spiceparams[] = {
+        { (char *) "tlsSubject", (char *) "C=XX,L=Testtown,O=Test Company,CN=tester.test", false },
+        { NULL, NULL, false },
+    };
+    TEST_FULL("spice://[3ffe::104]:5900/?tlsSubject=C=XX,L=Testtown,O=Test%20Company,CN=tester.test",
+              "spice://[3ffe::104]:5900/?tlsSubject=C%3DXX%2CL%3DTesttown%2CO%3DTest%20Company%2CCN%3Dtester.test",
+              "spice", "3ffe::104", 5900, "/", "tlsSubject=C=XX,L=Testtown,O=Test%20Company,CN=tester.test", NULL, NULL, spiceparams);
 
     virURIParam params1[] = {
         { (char*)"foo", (char*)"one", false },
@@ -182,42 +200,35 @@ mymain(void)
         { (char*)"foo", (char*)"two", false },
         { NULL, NULL, false },
     };
-#ifdef HAVE_XMLURI_QUERY_RAW
     virURIParam params3[] = {
         { (char*)"foo", (char*)"&one", false },
         { (char*)"bar", (char*)"&two", false },
         { NULL, NULL, false },
     };
-#endif
     virURIParam params4[] = {
         { (char*)"foo", (char*)"", false },
         { NULL, NULL, false },
     };
-#ifdef HAVE_XMLURI_QUERY_RAW
     virURIParam params5[] = {
         { (char*)"foo", (char*)"one two", false },
         { NULL, NULL, false },
     };
-#endif
     virURIParam params6[] = {
         { (char*)"foo", (char*)"one", false },
         { NULL, NULL, false },
     };
+    VIR_WARNINGS_RESET
 
     TEST_PARAMS("foo=one&bar=two", "", params1);
     TEST_PARAMS("foo=one&foo=two", "", params2);
     TEST_PARAMS("foo=one&&foo=two", "foo=one&foo=two", params2);
     TEST_PARAMS("foo=one;foo=two", "foo=one&foo=two", params2);
-#ifdef HAVE_XMLURI_QUERY_RAW
     TEST_PARAMS("foo=%26one&bar=%26two", "", params3);
-#endif
     TEST_PARAMS("foo", "foo=", params4);
     TEST_PARAMS("foo=", "", params4);
     TEST_PARAMS("foo=&", "foo=", params4);
     TEST_PARAMS("foo=&&", "foo=", params4);
-#ifdef HAVE_XMLURI_QUERY_RAW
     TEST_PARAMS("foo=one%20two", "", params5);
-#endif
     TEST_PARAMS("=bogus&foo=one", "foo=one", params6);
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

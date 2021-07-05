@@ -1,6 +1,7 @@
 <cpus>
   <model name='Cascadelake-Server'>
-    <signature family='6' model='85'/> <!-- 050654 -->
+    <decode host='on' guest='on'/>
+    <signature family='6' model='85' stepping='5-7'/> <!-- 050654 -->
     <vendor name='Intel'/>
     <feature name='3dnowprefetch'/>
     <feature name='abm'/>
@@ -43,8 +44,6 @@
     <feature name='msr'/>
     <feature name='mtrr'/>
     <feature name='nx'/>
-    <!-- 'ospke' is a dynamic feature and cannot be enabled manually
-         see QEMU's commit 9ccb9784b57 for more details -->
     <feature name='pae'/>
     <feature name='pat'/>
     <feature name='pcid'/>

@@ -22,18 +22,17 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_NWFILTER_CONF_H
-# define LIBVIRT_NWFILTER_CONF_H
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
-# include "virhash.h"
-# include "virxml.h"
-# include "virbuffer.h"
-# include "virsocketaddr.h"
-# include "virmacaddr.h"
-# include "virdomainobjlist.h"
-# include "virenum.h"
+#include "virhash.h"
+#include "virxml.h"
+#include "virbuffer.h"
+#include "virsocketaddr.h"
+#include "virmacaddr.h"
+#include "virdomainobjlist.h"
+#include "virenum.h"
 
 /* XXX
  * The config parser/structs should not be using platform specific
@@ -41,21 +40,21 @@
  * so temporarily define them until this can be re-written to use
  * locally defined enums for all constants
  */
-# ifndef ETHERTYPE_IP
-#  define ETHERTYPE_IP            0x0800
-# endif
-# ifndef ETHERTYPE_ARP
-#  define ETHERTYPE_ARP           0x0806
-# endif
-# ifndef ETHERTYPE_REVARP
-#  define ETHERTYPE_REVARP        0x8035
-# endif
-# ifndef ETHERTYPE_IPV6
-#  define ETHERTYPE_IPV6          0x86dd
-# endif
-# ifndef ETHERTYPE_VLAN
-#  define ETHERTYPE_VLAN          0x8100
-# endif
+#ifndef ETHERTYPE_IP
+# define ETHERTYPE_IP            0x0800
+#endif
+#ifndef ETHERTYPE_ARP
+# define ETHERTYPE_ARP           0x0806
+#endif
+#ifndef ETHERTYPE_REVARP
+# define ETHERTYPE_REVARP        0x8035
+#endif
+#ifndef ETHERTYPE_IPV6
+# define ETHERTYPE_IPV6          0x86dd
+#endif
+#ifndef ETHERTYPE_VLAN
+# define ETHERTYPE_VLAN          0x8100
+#endif
 
 /**
  * Chain suffix size is:
@@ -66,7 +65,7 @@
  *   terminating '0' =
  * 32-3-15-1-1 = 12
  */
-# define MAX_CHAIN_SUFFIX_SIZE  12
+#define MAX_CHAIN_SUFFIX_SIZE  12
 
 
 typedef enum {
@@ -76,13 +75,13 @@ typedef enum {
 } virNWFilterEntryItemFlags;
 
 
-# define MAX_COMMENT_LENGTH  256
-# define MAX_IPSET_NAME_LENGTH 32 /* incl. terminating '\0' */
+#define MAX_COMMENT_LENGTH  256
+#define MAX_IPSET_NAME_LENGTH 32 /* incl. terminating '\0' */
 
-# define HAS_ENTRY_ITEM(data) \
+#define HAS_ENTRY_ITEM(data) \
   (((data)->flags) & NWFILTER_ENTRY_ITEM_FLAG_EXISTS)
 
-# define ENTRY_WANT_NEG_SIGN(data) \
+#define ENTRY_WANT_NEG_SIGN(data) \
   (((data)->flags) & NWFILTER_ENTRY_ITEM_FLAG_IS_NEG)
 
 /* datatypes appearing in rule attributes */
@@ -108,14 +107,13 @@ typedef enum attrDatatype {
     DATATYPE_LAST             = (1 << 17),
 } virNWFilterAttrDataType;
 
-# define NWFILTER_MAC_BGA "01:80:c2:00:00:00"
+#define NWFILTER_MAC_BGA "01:80:c2:00:00:00"
 
 
 typedef struct _nwItemDesc nwItemDesc;
-typedef nwItemDesc *nwItemDescPtr;
 struct _nwItemDesc {
     virNWFilterEntryItemFlags flags;
-    virNWFilterVarAccessPtr varAccess;
+    virNWFilterVarAccess *varAccess;
     enum attrDatatype datatype;
     union {
         virMacAddr macaddr;
@@ -138,11 +136,10 @@ struct _nwItemDesc {
     } u;
 };
 
-# define VALID_IPSETNAME \
+#define VALID_IPSETNAME \
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-+ "
 
 typedef struct _ethHdrDataDef ethHdrDataDef;
-typedef ethHdrDataDef *ethHdrDataDefPtr;
 struct _ethHdrDataDef {
     nwItemDesc dataSrcMACAddr;
     nwItemDesc dataSrcMACMask;
@@ -152,7 +149,6 @@ struct _ethHdrDataDef {
 
 
 typedef struct _ethHdrFilterDef  ethHdrFilterDef;
-typedef ethHdrFilterDef *ethHdrFilterDefPtr;
 struct _ethHdrFilterDef {
     ethHdrDataDef ethHdr;
     nwItemDesc dataProtocolID;
@@ -161,7 +157,6 @@ struct _ethHdrFilterDef {
 
 
 typedef struct _vlanHdrFilterDef  vlanHdrFilterDef;
-typedef vlanHdrFilterDef *vlanHdrFilterDefPtr;
 struct _vlanHdrFilterDef {
     ethHdrDataDef ethHdr;
     nwItemDesc dataVlanID;
@@ -171,7 +166,6 @@ struct _vlanHdrFilterDef {
 
 
 typedef struct _stpHdrFilterDef  stpHdrFilterDef;
-typedef stpHdrFilterDef *stpHdrFilterDefPtr;
 struct _stpHdrFilterDef {
     ethHdrDataDef ethHdr;
     nwItemDesc dataType;
@@ -201,7 +195,6 @@ struct _stpHdrFilterDef {
 
 
 typedef struct _arpHdrFilterDef  arpHdrFilterDef;
-typedef arpHdrFilterDef *arpHdrFilterDefPtr;
 struct _arpHdrFilterDef {
     ethHdrDataDef ethHdr;
     nwItemDesc dataHWType;
@@ -219,7 +212,6 @@ struct _arpHdrFilterDef {
 
 
 typedef struct _ipHdrDataDef  ipHdrDataDef;
-typedef ipHdrDataDef *ipHdrDataDefPtr;
 struct _ipHdrDataDef {
     nwItemDesc dataIPVersion;
     nwItemDesc dataSrcIPAddr;
@@ -241,7 +233,6 @@ struct _ipHdrDataDef {
 
 
 typedef struct _portDataDef portDataDef;
-typedef portDataDef *portDataDefPtr;
 struct _portDataDef {
     nwItemDesc dataSrcPortStart;
     nwItemDesc dataSrcPortEnd;
@@ -251,7 +242,6 @@ struct _portDataDef {
 
 
 typedef struct _ipHdrFilterDef  ipHdrFilterDef;
-typedef ipHdrFilterDef *ipHdrFilterDefPtr;
 struct _ipHdrFilterDef {
     ethHdrDataDef ethHdr;
     ipHdrDataDef ipHdr;
@@ -260,7 +250,6 @@ struct _ipHdrFilterDef {
 
 
 typedef struct _ipv6HdrFilterDef  ipv6HdrFilterDef;
-typedef ipv6HdrFilterDef *ipv6HdrFilterDefPtr;
 struct _ipv6HdrFilterDef {
     ethHdrDataDef  ethHdr;
     ipHdrDataDef   ipHdr;
@@ -273,7 +262,6 @@ struct _ipv6HdrFilterDef {
 
 
 typedef struct _icmpHdrFilterDef  icmpHdrFilterDef;
-typedef icmpHdrFilterDef *icmpHdrFilterDefPtr;
 struct _icmpHdrFilterDef {
     nwItemDesc   dataSrcMACAddr;
     ipHdrDataDef ipHdr;
@@ -284,7 +272,6 @@ struct _icmpHdrFilterDef {
 
 
 typedef struct _allHdrFilterDef  allHdrFilterDef;
-typedef allHdrFilterDef *allHdrFilterDefPtr;
 struct _allHdrFilterDef {
     nwItemDesc    dataSrcMACAddr;
     ipHdrDataDef  ipHdr;
@@ -292,7 +279,6 @@ struct _allHdrFilterDef {
 
 
 typedef struct _igmpHdrFilterDef  igmpHdrFilterDef;
-typedef igmpHdrFilterDef *igmpHdrFilterDefPtr;
 struct _igmpHdrFilterDef {
     nwItemDesc   dataSrcMACAddr;
     ipHdrDataDef ipHdr;
@@ -300,7 +286,6 @@ struct _igmpHdrFilterDef {
 
 
 typedef struct _tcpHdrFilterDef  tcpHdrFilterDef;
-typedef tcpHdrFilterDef *tcpHdrFilterDefPtr;
 struct _tcpHdrFilterDef {
     nwItemDesc   dataSrcMACAddr;
     ipHdrDataDef ipHdr;
@@ -311,7 +296,6 @@ struct _tcpHdrFilterDef {
 
 
 typedef struct _udpHdrFilterDef  udpHdrFilterDef;
-typedef udpHdrFilterDef *udpHdrFilterDefPtr;
 struct _udpHdrFilterDef {
     nwItemDesc   dataSrcMACAddr;
     ipHdrDataDef ipHdr;
@@ -320,7 +304,6 @@ struct _udpHdrFilterDef {
 
 
 typedef struct _sctpHdrFilterDef  sctpHdrFilterDef;
-typedef sctpHdrFilterDef *sctpHdrFilterDefPtr;
 struct _sctpHdrFilterDef {
     nwItemDesc   dataSrcMACAddr;
     ipHdrDataDef ipHdr;
@@ -329,7 +312,6 @@ struct _sctpHdrFilterDef {
 
 
 typedef struct _espHdrFilterDef  espHdrFilterDef;
-typedef espHdrFilterDef *espHdrFilterDefPtr;
 struct _espHdrFilterDef {
     nwItemDesc   dataSrcMACAddr;
     ipHdrDataDef ipHdr;
@@ -337,7 +319,6 @@ struct _espHdrFilterDef {
 
 
 typedef struct _ahHdrFilterDef  ahHdrFilterDef;
-typedef ahHdrFilterDef *ahHdrFilterDefPtr;
 struct _ahHdrFilterDef {
     nwItemDesc   dataSrcMACAddr;
     ipHdrDataDef ipHdr;
@@ -345,7 +326,6 @@ struct _ahHdrFilterDef {
 
 
 typedef struct _udpliteHdrFilterDef  udpliteHdrFilterDef;
-typedef udpliteHdrFilterDef *udpliteHdrFilterDefPtr;
 struct _udpliteHdrFilterDef {
     nwItemDesc   dataSrcMACAddr;
     ipHdrDataDef ipHdr;
@@ -426,20 +406,20 @@ typedef enum {
 } virNWFilterEbtablesTableType;
 
 
-# define MIN_RULE_PRIORITY  -1000
-# define MAX_RULE_PRIORITY  1000
+#define MIN_RULE_PRIORITY  -1000
+#define MAX_RULE_PRIORITY  1000
 
-# define NWFILTER_MIN_FILTER_PRIORITY -1000
-# define NWFILTER_MAX_FILTER_PRIORITY MAX_RULE_PRIORITY
+#define NWFILTER_MIN_FILTER_PRIORITY -1000
+#define NWFILTER_MAX_FILTER_PRIORITY MAX_RULE_PRIORITY
 
-# define NWFILTER_ROOT_FILTER_PRI 0
-# define NWFILTER_STP_FILTER_PRI  -810
-# define NWFILTER_MAC_FILTER_PRI  -800
-# define NWFILTER_VLAN_FILTER_PRI -750
-# define NWFILTER_IPV4_FILTER_PRI -700
-# define NWFILTER_IPV6_FILTER_PRI -600
-# define NWFILTER_ARP_FILTER_PRI  -500
-# define NWFILTER_RARP_FILTER_PRI -400
+#define NWFILTER_ROOT_FILTER_PRI 0
+#define NWFILTER_STP_FILTER_PRI  -810
+#define NWFILTER_MAC_FILTER_PRI  -800
+#define NWFILTER_VLAN_FILTER_PRI -750
+#define NWFILTER_IPV4_FILTER_PRI -700
+#define NWFILTER_IPV6_FILTER_PRI -600
+#define NWFILTER_ARP_FILTER_PRI  -500
+#define NWFILTER_RARP_FILTER_PRI -400
 
 typedef enum {
     RULE_FLAG_NO_STATEMATCH      = (1 << 0),
@@ -451,20 +431,19 @@ typedef enum {
 } virNWFilterRuleFlags;
 
 
-# define IPTABLES_STATE_FLAGS \
+#define IPTABLES_STATE_FLAGS \
   (RULE_FLAG_STATE_NEW | \
    RULE_FLAG_STATE_ESTABLISHED | \
    RULE_FLAG_STATE_RELATED | \
    RULE_FLAG_STATE_INVALID | \
    RULE_FLAG_STATE_NONE)
 
-void virNWFilterPrintStateMatchFlags(virBufferPtr buf, const char *prefix,
+void virNWFilterPrintStateMatchFlags(virBuffer *buf, const char *prefix,
                                      int32_t flags, bool disp_none);
 
 typedef int32_t virNWFilterRulePriority;
 
 typedef struct _virNWFilterRuleDef  virNWFilterRuleDef;
-typedef virNWFilterRuleDef *virNWFilterRuleDefPtr;
 struct _virNWFilterRuleDef {
     virNWFilterRulePriority priority;
     virNWFilterRuleFlags flags;
@@ -490,7 +469,7 @@ struct _virNWFilterRuleDef {
     } p;
 
     size_t nVarAccess;
-    virNWFilterVarAccessPtr *varAccess;
+    virNWFilterVarAccess **varAccess;
 
     size_t nstrings;
     char **strings;
@@ -498,15 +477,13 @@ struct _virNWFilterRuleDef {
 
 
 typedef struct _virNWFilterIncludeDef virNWFilterIncludeDef;
-typedef virNWFilterIncludeDef *virNWFilterIncludeDefPtr;
 struct _virNWFilterIncludeDef {
     char *filterref;
-    virHashTablePtr params;
+    GHashTable *params;
 };
 
 
 typedef struct _virNWFilterEntry virNWFilterEntry;
-typedef virNWFilterEntry *virNWFilterEntryPtr;
 struct _virNWFilterEntry {
     virNWFilterRuleDef    *rule;
     virNWFilterIncludeDef *include;
@@ -525,14 +502,12 @@ typedef enum {
     VIR_NWFILTER_CHAINSUFFIX_LAST,
 } virNWFilterChainSuffixType;
 
-# define VALID_CHAINNAME \
+#define VALID_CHAINNAME \
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-"
 
 typedef int32_t virNWFilterChainPriority;
 
 typedef struct _virNWFilterDef virNWFilterDef;
-typedef virNWFilterDef *virNWFilterDefPtr;
-
 struct _virNWFilterDef {
     char *name;
     unsigned char uuid[VIR_UUID_BUFLEN];
@@ -542,24 +517,24 @@ struct _virNWFilterDef {
     virNWFilterChainPriority chainPriority;
 
     size_t nentries;
-    virNWFilterEntryPtr *filterEntries;
+    virNWFilterEntry **filterEntries;
 };
 
 
 void
-virNWFilterRuleDefFree(virNWFilterRuleDefPtr def);
+virNWFilterRuleDefFree(virNWFilterRuleDef *def);
 
 void
-virNWFilterDefFree(virNWFilterDefPtr def);
+virNWFilterDefFree(virNWFilterDef *def);
 
 int
 virNWFilterTriggerRebuild(void);
 
 int
 virNWFilterDeleteDef(const char *configDir,
-                     virNWFilterDefPtr def);
+                     virNWFilterDef *def);
 
-virNWFilterDefPtr
+virNWFilterDef *
 virNWFilterDefParseNode(xmlDocPtr xml,
                         xmlNodePtr root);
 
@@ -568,12 +543,12 @@ virNWFilterDefFormat(const virNWFilterDef *def);
 
 int
 virNWFilterSaveConfig(const char *configDir,
-                      virNWFilterDefPtr def);
+                      virNWFilterDef *def);
 
-virNWFilterDefPtr
+virNWFilterDef *
 virNWFilterDefParseString(const char *xml);
 
-virNWFilterDefPtr
+virNWFilterDef *
 virNWFilterDefParseFile(const char *filename);
 
 void
@@ -599,13 +574,13 @@ char *
 virNWFilterPrintTCPFlags(uint8_t flags);
 
 bool
-virNWFilterRuleIsProtocolIPv4(virNWFilterRuleDefPtr rule);
+virNWFilterRuleIsProtocolIPv4(virNWFilterRuleDef *rule);
 
 bool
-virNWFilterRuleIsProtocolIPv6(virNWFilterRuleDefPtr rule);
+virNWFilterRuleIsProtocolIPv6(virNWFilterRuleDef *rule);
 
 bool
-virNWFilterRuleIsProtocolEthernet(virNWFilterRuleDefPtr rule);
+virNWFilterRuleIsProtocolEthernet(virNWFilterRuleDef *rule);
 
 
 VIR_ENUM_DECL(virNWFilterRuleAction);
@@ -615,5 +590,3 @@ VIR_ENUM_DECL(virNWFilterJumpTarget);
 VIR_ENUM_DECL(virNWFilterChainPolicy);
 VIR_ENUM_DECL(virNWFilterEbtablesTable);
 VIR_ENUM_DECL(virNWFilterChainSuffix);
-
-#endif /* LIBVIRT_NWFILTER_CONF_H */

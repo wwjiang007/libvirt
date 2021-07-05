@@ -9,14 +9,14 @@
     <boot dev='hd'/>
   </os>
   <cpu>
-    <topology sockets='2' cores='1' threads='1'/>
+    <topology sockets='2' dies='1' cores='1' threads='1'/>
   </cpu>
   <clock offset='utc'/>
   <on_poweroff>destroy</on_poweroff>
   <on_reboot>restart</on_reboot>
   <on_crash>destroy</on_crash>
   <devices>
-    <emulator>/usr/bin/qemu-system-i686</emulator>
+    <emulator>/usr/bin/qemu-system-i386</emulator>
     <disk type='block' device='disk'>
       <driver name='qemu' type='raw'/>
       <source dev='/dev/HostVG/QEMUGuest1'/>

@@ -24,7 +24,6 @@
 
 #include "vircommand.h"
 #include "cpu/cpu.h"
-#include "dirname.h"
 #include "viralloc.h"
 #include "virfile.h"
 #include "viruuid.h"
@@ -33,6 +32,7 @@
 #include "vmware_conf.h"
 #include "virstring.h"
 #include "virlog.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_VMWARE
 
@@ -56,22 +56,22 @@ vmwareFreeDriver(struct vmware_driver *driver)
     virObjectUnref(driver->domains);
     virObjectUnref(driver->caps);
     virObjectUnref(driver->xmlopt);
-    VIR_FREE(driver->vmrun);
-    VIR_FREE(driver);
+    g_free(driver->vmrun);
+    g_free(driver);
 }
 
 
-virCapsPtr
+virCaps *
 vmwareCapsInit(void)
 {
-    virCapsPtr caps = NULL;
-    virCapsGuestPtr guest = NULL;
+    virCaps *caps = NULL;
+    virCapsGuest *guest = NULL;
 
     if ((caps = virCapabilitiesNew(virArchFromHost(),
                                    false, false)) == NULL)
         goto error;
 
-    if (virCapabilitiesInitNUMA(caps) < 0)
+    if (!(caps->host.numa = virCapabilitiesHostNUMANewHost()))
         goto error;
 
     if (virCapabilitiesInitCaches(caps) < 0)
@@ -127,21 +127,19 @@ vmwareCapsInit(void)
 int
 vmwareLoadDomains(struct vmware_driver *driver)
 {
-    virDomainDefPtr vmdef = NULL;
-    virDomainObjPtr vm = NULL;
+    virDomainDef *vmdef = NULL;
+    virDomainObj *vm = NULL;
     char *vmxPath = NULL;
     char *vmx = NULL;
     vmwareDomainPtr pDomain;
-    char *directoryName = NULL;
-    char *fileName = NULL;
     int ret = -1;
     virVMXContext ctx;
     char *outbuf = NULL;
     char *str;
     char *saveptr = NULL;
-    virCommandPtr cmd;
+    virCommand *cmd;
 
-    ctx.parseFileName = vmwareCopyVMXFileName;
+    ctx.parseFileName = vmwareParseVMXFileName;
     ctx.formatFileName = NULL;
     ctx.autodetectSCSIControllerModel = NULL;
     ctx.datacenterPath = NULL;
@@ -156,7 +154,7 @@ vmwareLoadDomains(struct vmware_driver *driver)
     for (str = outbuf; (vmxPath = strtok_r(str, "\n", &saveptr)) != NULL;
         str = NULL) {
 
-        if (vmxPath[0] != '/')
+        if (!g_path_is_absolute(vmxPath))
             continue;
 
         if (virFileReadAll(vmxPath, 10000, &vmx) < 0)
@@ -175,8 +173,7 @@ vmwareLoadDomains(struct vmware_driver *driver)
 
         pDomain = vm->privateData;
 
-        if (VIR_STRDUP(pDomain->vmxPath, vmxPath) < 0)
-            goto cleanup;
+        pDomain->vmxPath = g_strdup(vmxPath);
 
         vmwareDomainConfigDisplay(pDomain, vmdef);
 
@@ -198,8 +195,6 @@ vmwareLoadDomains(struct vmware_driver *driver)
     virCommandFree(cmd);
     VIR_FREE(outbuf);
     virDomainDefFree(vmdef);
-    VIR_FREE(directoryName);
-    VIR_FREE(fileName);
     VIR_FREE(vmx);
     virObjectUnref(vm);
     return ret;
@@ -266,28 +261,24 @@ int
 vmwareExtractVersion(struct vmware_driver *driver)
 {
     int ret = -1;
-    virCommandPtr cmd = NULL;
+    virCommand *cmd = NULL;
     char * outbuf = NULL;
     char *bin = NULL;
     char *vmwarePath = NULL;
 
-    if ((vmwarePath = mdir_name(driver->vmrun)) == NULL)
-        goto cleanup;
+    vmwarePath = g_path_get_dirname(driver->vmrun);
 
     switch (driver->type) {
         case VMWARE_DRIVER_PLAYER:
-            if (virAsprintf(&bin, "%s/%s", vmwarePath, "vmplayer") < 0)
-                goto cleanup;
+            bin = g_strdup_printf("%s/%s", vmwarePath, "vmplayer");
             break;
 
         case VMWARE_DRIVER_WORKSTATION:
-            if (virAsprintf(&bin, "%s/%s", vmwarePath, "vmware") < 0)
-                goto cleanup;
+            bin = g_strdup_printf("%s/%s", vmwarePath, "vmware");
             break;
 
         case VMWARE_DRIVER_FUSION:
-            if (virAsprintf(&bin, "%s/%s", vmwarePath, "vmware-vmx") < 0)
-                goto cleanup;
+            bin = g_strdup_printf("%s/%s", vmwarePath, "vmware-vmx");
             break;
 
         default:
@@ -317,7 +308,7 @@ vmwareExtractVersion(struct vmware_driver *driver)
 }
 
 int
-vmwareDomainConfigDisplay(vmwareDomainPtr pDomain, virDomainDefPtr def)
+vmwareDomainConfigDisplay(vmwareDomainPtr pDomain, virDomainDef *def)
 {
     size_t i;
 
@@ -352,43 +343,29 @@ vmwareParsePath(const char *path, char **directory, char **filename)
             return -1;
         }
 
-        if (VIR_STRNDUP(*directory, path, separator - path - 1) < 0)
-            goto error;
-        if (VIR_STRDUP(*filename, separator) < 0) {
-            VIR_FREE(*directory);
-            goto error;
-        }
+        *directory = g_strndup(path, separator - path - 1);
+        *filename = g_strdup(separator);
 
     } else {
-        if (VIR_STRDUP(*filename, path) < 0)
-            goto error;
+        *filename = g_strdup(path);
     }
 
     return 0;
-
- error:
-    return -1;
 }
 
-int
+void
 vmwareConstructVmxPath(char *directoryName, char *name, char **vmxPath)
 {
-    int ret;
-
     if (directoryName != NULL)
-        ret = virAsprintf(vmxPath, "%s/%s.vmx", directoryName, name);
+        *vmxPath = g_strdup_printf("%s/%s.vmx", directoryName, name);
     else
-        ret = virAsprintf(vmxPath, "%s.vmx", name);
-
-    if (ret < 0)
-        return -1;
-    return 0;
+        *vmxPath = g_strdup_printf("%s.vmx", name);
 }
 
 int
-vmwareVmxPath(virDomainDefPtr vmdef, char **vmxPath)
+vmwareVmxPath(virDomainDef *vmdef, char **vmxPath)
 {
-    virDomainDiskDefPtr disk = NULL;
+    virDomainDiskDef *disk = NULL;
     char *directoryName = NULL;
     char *fileName = NULL;
     int ret = -1;
@@ -442,8 +419,7 @@ vmwareVmxPath(virDomainDefPtr vmdef, char **vmxPath)
         goto cleanup;
     }
 
-    if (vmwareConstructVmxPath(directoryName, vmdef->name, vmxPath) < 0)
-        goto cleanup;
+    vmwareConstructVmxPath(directoryName, vmdef->name, vmxPath);
 
     ret = 0;
 
@@ -456,8 +432,7 @@ vmwareVmxPath(virDomainDefPtr vmdef, char **vmxPath)
 int
 vmwareMoveFile(char *srcFile, char *dstFile)
 {
-    const char *cmdmv[] =
-        { "mv", PROGRAM_SENTINEL, PROGRAM_SENTINEL, NULL };
+    g_autoptr(virCommand) cmd = NULL;
 
     if (!virFileExists(srcFile)) {
         virReportError(VIR_ERR_INTERNAL_ERROR, _("file %s does not exist"),
@@ -468,9 +443,9 @@ vmwareMoveFile(char *srcFile, char *dstFile)
     if (STREQ(srcFile, dstFile))
         return 0;
 
-    vmwareSetSentinal(cmdmv, srcFile);
-    vmwareSetSentinal(cmdmv, dstFile);
-    if (virRun(cmdmv, NULL) < 0) {
+    cmd = virCommandNewArgList("mv", srcFile, dstFile, NULL);
+
+    if (virCommandRun(cmd, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("failed to move file to %s "), dstFile);
         return -1;
@@ -482,8 +457,7 @@ vmwareMoveFile(char *srcFile, char *dstFile)
 int
 vmwareMakePath(char *srcDir, char *srcName, char *srcExt, char **outpath)
 {
-    if (virAsprintf(outpath, "%s/%s.%s", srcDir, srcName, srcExt) < 0)
-        return -1;
+    *outpath = g_strdup_printf("%s/%s.%s", srcDir, srcName, srcExt);
     return 0;
 }
 
@@ -497,12 +471,9 @@ vmwareExtractPid(const char * vmxPath)
     char *tmp = NULL;
     int pid_value = -1;
 
-    if ((vmxDir = mdir_name(vmxPath)) == NULL)
-        goto cleanup;
+    vmxDir = g_path_get_dirname(vmxPath);
 
-    if (virAsprintf(&logFilePath, "%s/vmware.log",
-                    vmxDir) < 0)
-        goto cleanup;
+    logFilePath = g_strdup_printf("%s/vmware.log", vmxDir);
 
     if ((logFile = fopen(logFilePath, "r")) == NULL)
         goto cleanup;
@@ -536,11 +507,20 @@ vmwareExtractPid(const char * vmxPath)
     return pid_value;
 }
 
-char *
-vmwareCopyVMXFileName(const char *datastorePath, void *opaque ATTRIBUTE_UNUSED)
+int
+vmwareParseVMXFileName(const char *datastorePath,
+                       void *opaque G_GNUC_UNUSED,
+                       char **out,
+                       bool allow_missing G_GNUC_UNUSED)
 {
-    char *path;
+    *out = g_strdup(datastorePath);
 
-    ignore_value(VIR_STRDUP(path, datastorePath));
-    return path;
+    return *out ? 0 : -1;
+}
+
+char *
+vmwareFormatVMXFileName(const char *datastorePath,
+                        void *opaque G_GNUC_UNUSED)
+{
+    return g_strdup(datastorePath);
 }

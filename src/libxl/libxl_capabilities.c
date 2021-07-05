@@ -21,7 +21,6 @@
 #include <config.h>
 
 #include <libxl.h>
-#include <regex.h>
 
 #include "internal.h"
 #include "virlog.h"
@@ -53,7 +52,6 @@ enum libxlHwcapVersion {
 
 struct guest_arch {
     virArch arch;
-    int bits;
     int hvm;
     int pvh;
     int pae;
@@ -64,7 +62,7 @@ struct guest_arch {
 #define XEN_CAP_REGEX "(xen|hvm)-[[:digit:]]+\\.[[:digit:]]+-(aarch64|armv7l|x86_32|x86_64|ia64|powerpc64)(p|be)?"
 
 static int
-libxlCapsAddCPUID(virCPUDataPtr data, virCPUx86CPUID *cpuid, ssize_t ncaps)
+libxlCapsAddCPUID(virCPUData *data, virCPUx86CPUID *cpuid, ssize_t ncaps)
 {
     virCPUx86DataItem item = { 0 };
     size_t i;
@@ -108,12 +106,12 @@ libxlCapsAddCPUID(virCPUDataPtr data, virCPUx86CPUID *cpuid, ssize_t ncaps)
  *       word 8 | - Non existent -   | CPUID.80000008.EBX   |
  *
  */
-static virCPUDataPtr
-libxlCapsNodeData(virCPUDefPtr cpu, libxl_hwcap hwcap,
+static virCPUData *
+libxlCapsNodeData(virCPUDef *cpu, libxl_hwcap hwcap,
                   enum libxlHwcapVersion version)
 {
     ssize_t ncaps;
-    virCPUDataPtr cpudata = NULL;
+    virCPUData *cpudata = NULL;
     virCPUx86CPUID cpuid[] = {
         { .eax_in = 0x00000001,
           .edx = hwcap[0] },
@@ -135,11 +133,11 @@ libxlCapsNodeData(virCPUDefPtr cpu, libxl_hwcap hwcap,
     if (!(cpudata = virCPUDataNew(cpu->arch)))
         goto error;
 
-    ncaps = ARRAY_CARDINALITY(cpuid);
+    ncaps = G_N_ELEMENTS(cpuid);
     if (libxlCapsAddCPUID(cpudata, cpuid, ncaps) < 0)
         goto error;
 
-    ncaps = ARRAY_CARDINALITY(cpuid_ver1);
+    ncaps = G_N_ELEMENTS(cpuid_ver1);
     if (version > LIBXL_HWCAP_V0 &&
         libxlCapsAddCPUID(cpudata, cpuid_ver1, ncaps) < 0)
         goto error;
@@ -157,11 +155,11 @@ libxlCapsNodeData(virCPUDefPtr cpu, libxl_hwcap hwcap,
  * the X'th 32-bit word of hw_cap.
  */
 static int
-libxlCapsInitCPU(virCapsPtr caps, libxl_physinfo *phy_info,
+libxlCapsInitCPU(virCaps *caps, libxl_physinfo *phy_info,
                  enum libxlHwcapVersion version)
 {
-    virCPUDataPtr data = NULL;
-    virCPUDefPtr cpu = NULL;
+    virCPUData *data = NULL;
+    virCPUDef *cpu = NULL;
     int ret = -1;
     int host_pae;
     int host_lm;
@@ -170,8 +168,7 @@ libxlCapsInitCPU(virCapsPtr caps, libxl_physinfo *phy_info,
     if (!phy_info->hw_cap[0])
         return 0;
 
-    if (VIR_ALLOC(cpu) < 0)
-        goto error;
+    cpu = virCPUDefNew();
 
     host_pae = phy_info->hw_cap[0] & LIBXL_X86_FEATURE_PAE_MASK;
     if (host_pae &&
@@ -188,6 +185,7 @@ libxlCapsInitCPU(virCapsPtr caps, libxl_physinfo *phy_info,
     cpu->type = VIR_CPU_TYPE_HOST;
     cpu->cores = phy_info->cores_per_socket;
     cpu->threads = phy_info->threads_per_core;
+    cpu->dies = 1;
     cpu->sockets = phy_info->nr_cpus / (cpu->cores * cpu->threads);
     caps->host.cpu = cpu;
 
@@ -210,7 +208,7 @@ libxlCapsInitCPU(virCapsPtr caps, libxl_physinfo *phy_info,
 }
 
 static int
-libxlCapsInitHost(libxl_ctx *ctx, virCapsPtr caps)
+libxlCapsInitHost(libxl_ctx *ctx, virCaps *caps)
 {
     const libxl_version_info *ver_info;
     enum libxlHwcapVersion version;
@@ -245,13 +243,13 @@ libxlCapsInitHost(libxl_ctx *ctx, virCapsPtr caps)
 }
 
 static int
-libxlCapsInitNuma(libxl_ctx *ctx, virCapsPtr caps)
+libxlCapsInitNuma(libxl_ctx *ctx, virCaps *caps)
 {
     libxl_numainfo *numa_info = NULL;
     libxl_cputopology *cpu_topo = NULL;
-    int nr_nodes = 0, nr_cpus = 0, nr_siblings = 0;
-    virCapsHostNUMACellCPUPtr *cpus = NULL;
-    virCapsHostNUMACellSiblingInfoPtr siblings = NULL;
+    int nr_nodes = 0, nr_cpus = 0, nr_distances = 0;
+    virCapsHostNUMACellCPU **cpus = NULL;
+    virNumaDistance *distances = NULL;
     int *nr_cpus_node = NULL;
     size_t i;
     int ret = -1;
@@ -262,20 +260,18 @@ libxlCapsInitNuma(libxl_ctx *ctx, virCapsPtr caps)
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("libxl_get_numainfo failed"));
         goto cleanup;
-    } else {
-        cpu_topo = libxl_get_cpu_topology(ctx, &nr_cpus);
-        if (cpu_topo == NULL || nr_cpus == 0) {
-            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                           _("libxl_get_cpu_topology failed"));
-            goto cleanup;
-        }
     }
 
-    if (VIR_ALLOC_N(cpus, nr_nodes) < 0)
+    cpu_topo = libxl_get_cpu_topology(ctx, &nr_cpus);
+    if (cpu_topo == NULL || nr_cpus == 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("libxl_get_cpu_topology failed"));
         goto cleanup;
+    }
 
-    if (VIR_ALLOC_N(nr_cpus_node, nr_nodes) < 0)
-        goto cleanup;
+    cpus = g_new0(virCapsHostNUMACellCPU *, nr_nodes);
+
+    nr_cpus_node = g_new0(int, nr_nodes);
 
     /* For each node, prepare a list of CPUs belonging to that node */
     for (i = 0; i < nr_cpus; i++) {
@@ -287,11 +283,9 @@ libxlCapsInitNuma(libxl_ctx *ctx, virCapsPtr caps)
         nr_cpus_node[node]++;
 
         if (nr_cpus_node[node] == 1) {
-            if (VIR_ALLOC(cpus[node]) < 0)
-                goto cleanup;
+            cpus[node] = g_new0(virCapsHostNUMACellCPU, 1);
         } else {
-            if (VIR_REALLOC_N(cpus[node], nr_cpus_node[node]) < 0)
-                goto cleanup;
+            VIR_REALLOC_N(cpus[node], nr_cpus_node[node]);
         }
 
         /* Mapping between what libxl tells and what libvirt wants */
@@ -300,10 +294,6 @@ libxlCapsInitNuma(libxl_ctx *ctx, virCapsPtr caps)
         cpus[node][nr_cpus_node[node]-1].core_id = cpu_topo[i].core;
         /* Allocate the siblings maps. We will be filling them later */
         cpus[node][nr_cpus_node[node]-1].siblings = virBitmapNew(nr_cpus);
-        if (!cpus[node][nr_cpus_node[node]-1].siblings) {
-            virReportOOMError();
-            goto cleanup;
-        }
     }
 
     /* Let's now populate the siblings bitmaps */
@@ -321,32 +311,29 @@ libxlCapsInitNuma(libxl_ctx *ctx, virCapsPtr caps)
         }
     }
 
+    caps->host.numa = virCapabilitiesHostNUMANew();
     for (i = 0; i < nr_nodes; i++) {
         if (numa_info[i].size == LIBXL_NUMAINFO_INVALID_ENTRY)
             continue;
 
-        nr_siblings = numa_info[i].num_dists;
-        if (nr_siblings) {
+        nr_distances = numa_info[i].num_dists;
+        if (nr_distances) {
             size_t j;
 
-            if (VIR_ALLOC_N(siblings, nr_siblings) < 0)
-                goto cleanup;
+            distances = g_new0(virNumaDistance, nr_distances);
 
-            for (j = 0; j < nr_siblings; j++) {
-                siblings[j].node = j;
-                siblings[j].distance = numa_info[i].dists[j];
+            for (j = 0; j < nr_distances; j++) {
+                distances[j].cellid = j;
+                distances[j].value = numa_info[i].dists[j];
             }
         }
 
-        if (virCapabilitiesAddHostNUMACell(caps, i,
-                                           numa_info[i].size / 1024,
-                                           nr_cpus_node[i], cpus[i],
-                                           nr_siblings, siblings,
-                                           0, NULL) < 0) {
-            virCapabilitiesClearHostNUMACellCPUTopology(cpus[i],
-                                                        nr_cpus_node[i]);
-            goto cleanup;
-        }
+        virCapabilitiesHostNUMAAddCell(caps->host.numa, i,
+                                       numa_info[i].size / 1024,
+                                       nr_cpus_node[i], &cpus[i],
+                                       nr_distances, &distances,
+                                       0, NULL,
+                                       NULL);
 
         /* This is safe, as the CPU list is now stored in the NUMA cell */
         cpus[i] = NULL;
@@ -358,8 +345,11 @@ libxlCapsInitNuma(libxl_ctx *ctx, virCapsPtr caps)
     if (ret != 0) {
         for (i = 0; cpus && i < nr_nodes; i++)
             VIR_FREE(cpus[i]);
-        virCapabilitiesFreeNUMAInfo(caps);
-        VIR_FREE(siblings);
+        if (caps->host.numa) {
+            virCapabilitiesHostNUMAUnref(caps->host.numa);
+            caps->host.numa = NULL;
+        }
+        VIR_FREE(distances);
     }
 
     VIR_FREE(cpus);
@@ -371,13 +361,13 @@ libxlCapsInitNuma(libxl_ctx *ctx, virCapsPtr caps)
 }
 
 static int
-libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
+libxlCapsInitGuests(libxl_ctx *ctx, virCaps *caps)
 {
     const libxl_version_info *ver_info;
-    int err;
-    regex_t regex;
+    g_autoptr(GRegex) regex = NULL;
+    g_autoptr(GError) err = NULL;
+    g_autoptr(GMatchInfo) info = NULL;
     char *str, *token;
-    regmatch_t subs[4];
     char *saveptr = NULL;
     size_t i;
 
@@ -398,12 +388,10 @@ libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
         return -1;
     }
 
-    err = regcomp(&regex, XEN_CAP_REGEX, REG_EXTENDED);
-    if (err != 0) {
-        char error[100];
-        regerror(err, &regex, error, sizeof(error));
+    regex = g_regex_new(XEN_CAP_REGEX, 0, 0, &err);
+    if (!regex) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Failed to compile regex %s"), error);
+                       _("Failed to compile regex %s"), err->message);
         return -1;
     }
 
@@ -436,31 +424,31 @@ libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
          nr_guest_archs < sizeof(guest_archs) / sizeof(guest_archs[0])
                  && (token = strtok_r(str, " ", &saveptr)) != NULL;
          str = NULL) {
-        if (regexec(&regex, token, sizeof(subs) / sizeof(subs[0]),
-                    subs, 0) == 0) {
-            int hvm = STRPREFIX(&token[subs[1].rm_so], "hvm");
+        if (g_regex_match(regex, token, 0, &info)) {
+            g_autofree char *modestr = g_match_info_fetch(info, 1);
+            g_autofree char *archstr = g_match_info_fetch(info, 2);
+            g_autofree char *suffixstr = g_match_info_fetch(info, 3);
+            int hvm = STRPREFIX(modestr, "hvm");
             virArch arch;
             int pae = 0, nonpae = 0, ia64_be = 0;
 
-            if (STRPREFIX(&token[subs[2].rm_so], "x86_32")) {
+            if (STRPREFIX(archstr, "x86_32")) {
                 arch = VIR_ARCH_I686;
-                if (subs[3].rm_so != -1 &&
-                    STRPREFIX(&token[subs[3].rm_so], "p"))
+                if (suffixstr != NULL && STRPREFIX(suffixstr, "p"))
                     pae = 1;
                 else
                     nonpae = 1;
-            } else if (STRPREFIX(&token[subs[2].rm_so], "x86_64")) {
+            } else if (STRPREFIX(archstr, "x86_64")) {
                 arch = VIR_ARCH_X86_64;
-            } else if (STRPREFIX(&token[subs[2].rm_so], "ia64")) {
+            } else if (STRPREFIX(archstr, "ia64")) {
                 arch = VIR_ARCH_ITANIUM;
-                if (subs[3].rm_so != -1 &&
-                    STRPREFIX(&token[subs[3].rm_so], "be"))
+                if (suffixstr != NULL && STRPREFIX(suffixstr, "be"))
                     ia64_be = 1;
-            } else if (STRPREFIX(&token[subs[2].rm_so], "powerpc64")) {
+            } else if (STRPREFIX(archstr, "powerpc64")) {
                 arch = VIR_ARCH_PPC64;
-            } else if (STRPREFIX(&token[subs[2].rm_so], "armv7l")) {
+            } else if (STRPREFIX(archstr, "armv7l")) {
                 arch = VIR_ARCH_ARMV7L;
-            } else if (STRPREFIX(&token[subs[2].rm_so], "aarch64")) {
+            } else if (STRPREFIX(archstr, "aarch64")) {
                 arch = VIR_ARCH_AARCH64;
             } else {
                 continue;
@@ -474,7 +462,7 @@ libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
             }
 
             /* Too many arch flavours - highly unlikely ! */
-            if (i >= ARRAY_CARDINALITY(guest_archs))
+            if (i >= G_N_ELEMENTS(guest_archs))
                 continue;
             /* Didn't find a match, so create a new one */
             if (i == nr_guest_archs)
@@ -500,10 +488,10 @@ libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
              * HVM guest type. Add a PVH guest type for each new HVM
              * guest type.
              */
-#ifdef HAVE_XEN_PVH
+#ifdef WITH_XEN_PVH
             if (hvm && i == nr_guest_archs-1) {
                 /* Ensure we have not exhausted the guest_archs array */
-                if (nr_guest_archs >= ARRAY_CARDINALITY(guest_archs))
+                if (nr_guest_archs >= G_N_ELEMENTS(guest_archs))
                     continue;
                 i = nr_guest_archs;
                 nr_guest_archs++;
@@ -515,14 +503,13 @@ libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
 #endif
         }
     }
-    regfree(&regex);
 
     for (i = 0; i < nr_guest_archs; ++i) {
-        virCapsGuestPtr guest;
+        virCapsGuest *guest;
         char const *const xen_machines[] = {
             guest_archs[i].hvm ? "xenfv" :
                 (guest_archs[i].pvh ? "xenpvh" : "xenpv")};
-        virCapsGuestMachinePtr *machines;
+        virCapsGuestMachine **machines;
 
         if ((machines = virCapabilitiesAllocMachines(xen_machines, 1)) == NULL)
             return -1;
@@ -551,46 +538,26 @@ libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
                                           NULL) == NULL)
             return -1;
 
-        if (guest_archs[i].pae &&
-            virCapabilitiesAddGuestFeature(guest,
-                                           "pae",
-                                           1,
-                                           0) == NULL)
-            return -1;
+        if (guest_archs[i].pae)
+            virCapabilitiesAddGuestFeature(guest, VIR_CAPS_GUEST_FEATURE_TYPE_PAE);
 
-        if (guest_archs[i].nonpae &&
-            virCapabilitiesAddGuestFeature(guest,
-                                           "nonpae",
-                                           1,
-                                           0) == NULL)
-            return -1;
+        if (guest_archs[i].nonpae)
+            virCapabilitiesAddGuestFeature(guest, VIR_CAPS_GUEST_FEATURE_TYPE_NONPAE);
 
-        if (guest_archs[i].ia64_be &&
-            virCapabilitiesAddGuestFeature(guest,
-                                           "ia64_be",
-                                           1,
-                                           0) == NULL)
-            return -1;
+        if (guest_archs[i].ia64_be)
+            virCapabilitiesAddGuestFeature(guest, VIR_CAPS_GUEST_FEATURE_TYPE_IA64_BE);
 
         if (guest_archs[i].hvm) {
-            if (virCapabilitiesAddGuestFeature(guest,
-                                               "acpi",
-                                               1,
-                                               1) == NULL)
-                return -1;
+            virCapabilitiesAddGuestFeatureWithToggle(guest, VIR_CAPS_GUEST_FEATURE_TYPE_ACPI,
+                                                     true, true);
 
-            if (virCapabilitiesAddGuestFeature(guest, "apic",
-                                               1,
-                                               0) == NULL)
-                return -1;
+            virCapabilitiesAddGuestFeatureWithToggle(guest, VIR_CAPS_GUEST_FEATURE_TYPE_APIC,
+                                                     true, false);
         }
 
         if (guest_archs[i].hvm || guest_archs[i].pvh) {
-            if (virCapabilitiesAddGuestFeature(guest,
-                                               "hap",
-                                               1,
-                                               1) == NULL)
-                return -1;
+            virCapabilitiesAddGuestFeatureWithToggle(guest, VIR_CAPS_GUEST_FEATURE_TYPE_HAP,
+                                                     true, true);
         }
     }
 
@@ -599,11 +566,11 @@ libxlCapsInitGuests(libxl_ctx *ctx, virCapsPtr caps)
 
 static int
 libxlMakeDomainOSCaps(const char *machine,
-                      virDomainCapsOSPtr os,
-                      virFirmwarePtr *firmwares,
+                      virDomainCapsOS *os,
+                      virFirmware **firmwares,
                       size_t nfirmwares)
 {
-    virDomainCapsLoaderPtr capsLoader = &os->loader;
+    virDomainCapsLoader *capsLoader = &os->loader;
     size_t i;
 
     os->supported = VIR_TRISTATE_BOOL_YES;
@@ -615,13 +582,10 @@ libxlMakeDomainOSCaps(const char *machine,
         return 0;
 
     capsLoader->supported = VIR_TRISTATE_BOOL_YES;
-    if (VIR_ALLOC_N(capsLoader->values.values, nfirmwares) < 0)
-        return -1;
+    capsLoader->values.values = g_new0(char *, nfirmwares);
 
     for (i = 0; i < nfirmwares; i++) {
-        if (VIR_STRDUP(capsLoader->values.values[capsLoader->values.nvalues],
-                       firmwares[i]->name) < 0)
-            return -1;
+        capsLoader->values.values[capsLoader->values.nvalues] = g_strdup(firmwares[i]->name);
         capsLoader->values.nvalues++;
     }
 
@@ -635,7 +599,7 @@ libxlMakeDomainOSCaps(const char *machine,
 }
 
 static int
-libxlMakeDomainDeviceDiskCaps(virDomainCapsDeviceDiskPtr dev)
+libxlMakeDomainDeviceDiskCaps(virDomainCapsDeviceDisk *dev)
 {
     dev->supported = VIR_TRISTATE_BOOL_YES;
     dev->diskDevice.report = true;
@@ -655,7 +619,7 @@ libxlMakeDomainDeviceDiskCaps(virDomainCapsDeviceDiskPtr dev)
 }
 
 static int
-libxlMakeDomainDeviceGraphicsCaps(virDomainCapsDeviceGraphicsPtr dev)
+libxlMakeDomainDeviceGraphicsCaps(virDomainCapsDeviceGraphics *dev)
 {
     dev->supported = VIR_TRISTATE_BOOL_YES;
     dev->type.report = true;
@@ -669,7 +633,7 @@ libxlMakeDomainDeviceGraphicsCaps(virDomainCapsDeviceGraphicsPtr dev)
 }
 
 static int
-libxlMakeDomainDeviceVideoCaps(virDomainCapsDeviceVideoPtr dev)
+libxlMakeDomainDeviceVideoCaps(virDomainCapsDeviceVideo *dev)
 {
     dev->supported = VIR_TRISTATE_BOOL_YES;
     dev->modelType.report = true;
@@ -682,17 +646,8 @@ libxlMakeDomainDeviceVideoCaps(virDomainCapsDeviceVideoPtr dev)
     return 0;
 }
 
-bool libxlCapsHasPVUSB(void)
-{
-#ifdef LIBXL_HAVE_PVUSB
-    return true;
-#else
-    return false;
-#endif
-}
-
 static int
-libxlMakeDomainDeviceHostdevCaps(virDomainCapsDeviceHostdevPtr dev)
+libxlMakeDomainDeviceHostdevCaps(virDomainCapsDeviceHostdev *dev)
 {
     dev->supported = VIR_TRISTATE_BOOL_YES;
     dev->mode.report = true;
@@ -714,9 +669,8 @@ libxlMakeDomainDeviceHostdevCaps(virDomainCapsDeviceHostdevPtr dev)
     VIR_DOMAIN_CAPS_ENUM_SET(dev->subsysType,
                              VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI);
 
-    if (libxlCapsHasPVUSB())
-        VIR_DOMAIN_CAPS_ENUM_SET(dev->subsysType,
-                                 VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB);
+    VIR_DOMAIN_CAPS_ENUM_SET(dev->subsysType,
+                             VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB);
 
     /* No virDomainHostdevCapsType for libxl */
     virDomainCapsEnumClear(&dev->capsType);
@@ -727,10 +681,10 @@ libxlMakeDomainDeviceHostdevCaps(virDomainCapsDeviceHostdevPtr dev)
     return 0;
 }
 
-virCapsPtr
+virCaps *
 libxlMakeCapabilities(libxl_ctx *ctx)
 {
-    virCapsPtr caps;
+    virCaps *caps;
 
 #ifdef LIBXL_HAVE_NO_SUSPEND_RESUME
     if ((caps = virCapabilitiesNew(virArchFromHost(), false, false)) == NULL)
@@ -766,15 +720,15 @@ libxlMakeCapabilities(libxl_ctx *ctx)
 #define PV_MAX_VCPUS  512
 
 int
-libxlMakeDomainCapabilities(virDomainCapsPtr domCaps,
-                            virFirmwarePtr *firmwares,
+libxlMakeDomainCapabilities(virDomainCaps *domCaps,
+                            virFirmware **firmwares,
                             size_t nfirmwares)
 {
-    virDomainCapsOSPtr os = &domCaps->os;
-    virDomainCapsDeviceDiskPtr disk = &domCaps->disk;
-    virDomainCapsDeviceGraphicsPtr graphics = &domCaps->graphics;
-    virDomainCapsDeviceVideoPtr video = &domCaps->video;
-    virDomainCapsDeviceHostdevPtr hostdev = &domCaps->hostdev;
+    virDomainCapsOS *os = &domCaps->os;
+    virDomainCapsDeviceDisk *disk = &domCaps->disk;
+    virDomainCapsDeviceGraphics *graphics = &domCaps->graphics;
+    virDomainCapsDeviceVideo *video = &domCaps->video;
+    virDomainCapsDeviceHostdev *hostdev = &domCaps->hostdev;
 
     if (STREQ(domCaps->machine, "xenfv"))
         domCaps->maxvcpus = HVM_MAX_VCPUS;
@@ -790,9 +744,9 @@ libxlMakeDomainCapabilities(virDomainCapsPtr domCaps,
         libxlMakeDomainDeviceHostdevCaps(hostdev) < 0)
         return -1;
 
-    domCaps->iothreads = VIR_TRISTATE_BOOL_NO;
-    domCaps->vmcoreinfo = VIR_TRISTATE_BOOL_NO;
-    domCaps->genid = VIR_TRISTATE_BOOL_NO;
+    domCaps->features[VIR_DOMAIN_CAPS_FEATURE_IOTHREADS] = VIR_TRISTATE_BOOL_NO;
+    domCaps->features[VIR_DOMAIN_CAPS_FEATURE_VMCOREINFO] = VIR_TRISTATE_BOOL_NO;
+    domCaps->features[VIR_DOMAIN_CAPS_FEATURE_GENID] = VIR_TRISTATE_BOOL_NO;
     domCaps->gic.supported = VIR_TRISTATE_BOOL_NO;
 
     return 0;
@@ -804,8 +758,8 @@ int
 libxlDomainGetEmulatorType(const virDomainDef *def)
 {
     int ret = LIBXL_DEVICE_MODEL_VERSION_QEMU_XEN;
-    virCommandPtr cmd = NULL;
-    char *output = NULL;
+    virCommand *cmd = NULL;
+    g_autofree char *output = NULL;
 
     if (def->os.type == VIR_DOMAIN_OSTYPE_HVM) {
         if (def->emulator) {
@@ -826,7 +780,6 @@ libxlDomainGetEmulatorType(const virDomainDef *def)
     }
 
  cleanup:
-    VIR_FREE(output);
     virCommandFree(cmd);
     return ret;
 }

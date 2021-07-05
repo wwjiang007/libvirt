@@ -1,15 +1,48 @@
 #include <config.h>
 
+#include <dirent.h>
+
 #include "viralloc.h"
 #include "virstring.h"
 #include "virnetdev.h"
 #include "virnetdevtap.h"
+#include "virmock.h"
 #include "internal.h"
 
 #define VIR_FROM_THIS VIR_FROM_BHYVE
 
+static DIR * (*real_opendir)(const char *name);
+
+static void
+init_syms(void)
+{
+    VIR_MOCK_REAL_INIT(opendir);
+}
+
+#define FAKEFIRMWAREDIR abs_srcdir "/bhyvefirmwaredata/three_firmwares"
+#define FAKEFIRMWAREEMPTYDIR abs_srcdir "/bhyvefirmwaredata/empty"
+
+DIR *
+opendir(const char *path)
+{
+    init_syms();
+
+    g_autofree char *path_override = NULL;
+
+    if (STREQ(path, "fakefirmwaredir")) {
+        path_override = g_strdup(FAKEFIRMWAREDIR);
+    } else if (STREQ(path, "fakefirmwareemptydir")) {
+        path_override = g_strdup(FAKEFIRMWAREEMPTYDIR);
+    }
+
+    if (!path_override)
+        path_override = g_strdup(path);
+
+    return real_opendir(path_override);
+}
+
 void virMacAddrGenerate(const unsigned char prefix[VIR_MAC_PREFIX_BUFLEN],
-                        virMacAddrPtr addr)
+                        virMacAddr *addr)
 {
     addr->addr[0] = prefix[0];
     addr->addr[1] = prefix[1];
@@ -19,44 +52,43 @@ void virMacAddrGenerate(const unsigned char prefix[VIR_MAC_PREFIX_BUFLEN],
     addr->addr[5] = 0;
 }
 
-int virNetDevTapCreateInBridgePort(const char *brname ATTRIBUTE_UNUSED,
+int virNetDevTapCreateInBridgePort(const char *brname G_GNUC_UNUSED,
                                    char **ifname,
-                                   const virMacAddr *macaddr ATTRIBUTE_UNUSED,
-                                   const unsigned char *vmuuid ATTRIBUTE_UNUSED,
-                                   const char *tunpath ATTRIBUTE_UNUSED,
-                                   int *tapfd ATTRIBUTE_UNUSED,
-                                   size_t tapfdSize ATTRIBUTE_UNUSED,
-                                   virNetDevVPortProfilePtr virtPortProfile ATTRIBUTE_UNUSED,
-                                   virNetDevVlanPtr virtVlan ATTRIBUTE_UNUSED,
-                                   virNetDevCoalescePtr coalesce ATTRIBUTE_UNUSED,
-                                   unsigned int mtu ATTRIBUTE_UNUSED,
-                                   unsigned int *actualMTU ATTRIBUTE_UNUSED,
-                                   unsigned int fakeflags ATTRIBUTE_UNUSED)
+                                   const virMacAddr *macaddr G_GNUC_UNUSED,
+                                   const unsigned char *vmuuid G_GNUC_UNUSED,
+                                   const char *tunpath G_GNUC_UNUSED,
+                                   int *tapfd G_GNUC_UNUSED,
+                                   size_t tapfdSize G_GNUC_UNUSED,
+                                   const virNetDevVPortProfile *virtPortProfile G_GNUC_UNUSED,
+                                   const virNetDevVlan *virtVlan G_GNUC_UNUSED,
+                                   virTristateBool isolatedPort G_GNUC_UNUSED,
+                                   virNetDevCoalesce *coalesce G_GNUC_UNUSED,
+                                   unsigned int mtu G_GNUC_UNUSED,
+                                   unsigned int *actualMTU G_GNUC_UNUSED,
+                                   unsigned int fakeflags G_GNUC_UNUSED)
 {
     VIR_FREE(*ifname);
-    if (VIR_STRDUP(*ifname, "vnet0") < 0)
-        return -1;
+    *ifname = g_strdup("vnet0");
     return 0;
 }
 
-char *virNetDevTapGetRealDeviceName(char *name ATTRIBUTE_UNUSED)
+char *virNetDevTapGetRealDeviceName(char *name G_GNUC_UNUSED)
 {
     char *fakename;
 
-    if (VIR_STRDUP(fakename, "faketapdev") < 0)
-        return NULL;
+    fakename = g_strdup("faketapdev");
     return fakename;
 }
 
-int virNetDevSetOnline(const char *ifname ATTRIBUTE_UNUSED,
-                       bool online ATTRIBUTE_UNUSED)
+int virNetDevSetOnline(const char *ifname G_GNUC_UNUSED,
+                       bool online G_GNUC_UNUSED)
 {
     return 0;
 }
 
-int bind(int sockfd ATTRIBUTE_UNUSED,
-         const struct sockaddr *addr ATTRIBUTE_UNUSED,
-         socklen_t addrlen ATTRIBUTE_UNUSED)
+int bind(int sockfd G_GNUC_UNUSED,
+         const struct sockaddr *addr G_GNUC_UNUSED,
+         socklen_t addrlen G_GNUC_UNUSED)
 {
     return 0;
 }

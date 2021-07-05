@@ -22,11 +22,15 @@
 #include <config.h>
 
 #include "testutils.h"
+#include "viralloc.h"
 
 #if defined (__linux__)
 
+# include <gio/gio.h>
+
 # include "network/bridge_driver_platform.h"
 # include "virbuffer.h"
+# include "virmock.h"
 
 # define LIBVIRT_VIRFIREWALLPRIV_H_ALLOW
 # include "virfirewallpriv.h"
@@ -42,52 +46,81 @@
 #  error "test case not ported to this platform"
 # endif
 
+VIR_MOCK_WRAP_RET_ARGS(g_dbus_connection_call_sync,
+                       GVariant *,
+                       GDBusConnection *, connection,
+                       const gchar *, bus_name,
+                       const gchar *, object_path,
+                       const gchar *, interface_name,
+                       const gchar *, method_name,
+                       GVariant *, parameters,
+                       const GVariantType *, reply_type,
+                       GDBusCallFlags, flags,
+                       gint, timeout_msec,
+                       GCancellable *, cancellable,
+                       GError **, error)
+{
+    if (parameters) {
+        g_variant_ref_sink(parameters);
+        g_variant_unref(parameters);
+    }
+
+    VIR_MOCK_REAL_INIT(g_dbus_connection_call_sync);
+
+    *error = g_dbus_error_new_for_dbus_error("org.freedesktop.error",
+                                             "dbus is disabled");
+
+    return NULL;
+}
+
 static void
-testCommandDryRun(const char *const*args ATTRIBUTE_UNUSED,
-                  const char *const*env ATTRIBUTE_UNUSED,
-                  const char *input ATTRIBUTE_UNUSED,
+testCommandDryRun(const char *const*args G_GNUC_UNUSED,
+                  const char *const*env G_GNUC_UNUSED,
+                  const char *input G_GNUC_UNUSED,
                   char **output,
                   char **error,
                   int *status,
-                  void *opaque ATTRIBUTE_UNUSED)
+                  void *opaque G_GNUC_UNUSED)
 {
     *status = 0;
-    ignore_value(VIR_STRDUP_QUIET(*output, ""));
-    ignore_value(VIR_STRDUP_QUIET(*error, ""));
+    *output = g_strdup("");
+    *error = g_strdup("");
 }
 
 static int testCompareXMLToArgvFiles(const char *xml,
-                                     const char *cmdline)
+                                     const char *cmdline,
+                                     const char *baseargs)
 {
-    char *expectargv = NULL;
     char *actualargv = NULL;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
-    virNetworkDefPtr def = NULL;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+    virNetworkDef *def = NULL;
     int ret = -1;
+    char *actual;
+    g_autoptr(virCommandDryRunToken) dryRunToken = virCommandDryRunTokenNew();
 
-    virCommandSetDryRun(&buf, testCommandDryRun, NULL);
+    virCommandSetDryRun(dryRunToken, &buf, true, true, testCommandDryRun, NULL);
 
-    if (!(def = virNetworkDefParseFile(xml)))
+    if (!(def = virNetworkDefParseFile(xml, NULL)))
         goto cleanup;
 
     if (networkAddFirewallRules(def) < 0)
         goto cleanup;
 
-    if (virBufferError(&buf))
-        goto cleanup;
+    actual = actualargv = virBufferContentAndReset(&buf);
 
-    actualargv = virBufferContentAndReset(&buf);
-    virTestClearCommandPath(actualargv);
-    virCommandSetDryRun(NULL, NULL, NULL);
+    /* The first network to be created populates the
+     * libvirt global chains. We must skip args for
+     * that if present
+     */
+    if (STRPREFIX(actual, baseargs))
+        actual += strlen(baseargs);
 
-    if (virTestCompareToFile(actualargv, cmdline) < 0)
+    if (virTestCompareToFileFull(actual, cmdline, false) < 0)
         goto cleanup;
 
     ret = 0;
 
  cleanup:
-    virBufferFreeAndReset(&buf);
-    VIR_FREE(expectargv);
     VIR_FREE(actualargv);
     virNetworkDefFree(def);
     return ret;
@@ -95,6 +128,7 @@ static int testCompareXMLToArgvFiles(const char *xml,
 
 struct testInfo {
     const char *name;
+    const char *baseargs;
 };
 
 
@@ -106,26 +140,16 @@ testCompareXMLToIPTablesHelper(const void *data)
     char *xml = NULL;
     char *args = NULL;
 
-    if (virAsprintf(&xml, "%s/networkxml2firewalldata/%s.xml",
-                    abs_srcdir, info->name) < 0 ||
-        virAsprintf(&args, "%s/networkxml2firewalldata/%s-%s.args",
-                    abs_srcdir, info->name, RULESTYPE) < 0)
-        goto cleanup;
+    xml = g_strdup_printf("%s/networkxml2firewalldata/%s.xml",
+                          abs_srcdir, info->name);
+    args = g_strdup_printf("%s/networkxml2firewalldata/%s-%s.args",
+                           abs_srcdir, info->name, RULESTYPE);
 
-    result = testCompareXMLToArgvFiles(xml, args);
+    result = testCompareXMLToArgvFiles(xml, args, info->baseargs);
 
- cleanup:
     VIR_FREE(xml);
     VIR_FREE(args);
     return result;
-}
-
-static bool
-hasNetfilterTools(void)
-{
-    return virFileIsExecutable(IPTABLES_PATH) &&
-        virFileIsExecutable(IP6TABLES_PATH) &&
-        virFileIsExecutable(EBTABLES_PATH);
 }
 
 
@@ -133,41 +157,41 @@ static int
 mymain(void)
 {
     int ret = 0;
+    g_autofree char *basefile = NULL;
+    g_autofree char *baseargs = NULL;
 
 # define DO_TEST(name) \
     do { \
-        static struct testInfo info = { \
-            name, \
+        struct testInfo info = { \
+            name, baseargs, \
         }; \
         if (virTestRun("Network XML-2-iptables " name, \
                        testCompareXMLToIPTablesHelper, &info) < 0) \
             ret = -1; \
     } while (0)
 
-    virFirewallSetLockOverride(true);
-
     if (virFirewallSetBackend(VIR_FIREWALL_BACKEND_DIRECT) < 0) {
-        if (!hasNetfilterTools()) {
-            fprintf(stderr, "iptables/ip6tables/ebtables tools not present");
-            return EXIT_AM_SKIP;
-        }
-
-        ret = -1;
-        goto cleanup;
+        return EXIT_FAILURE;
     }
+
+    basefile = g_strdup_printf("%s/networkxml2firewalldata/base.args", abs_srcdir);
+
+    if (virFileReadAll(basefile, INT_MAX, &baseargs) < 0)
+        return EXIT_FAILURE;
 
     DO_TEST("nat-default");
     DO_TEST("nat-tftp");
     DO_TEST("nat-many-ips");
     DO_TEST("nat-no-dhcp");
     DO_TEST("nat-ipv6");
+    DO_TEST("nat-ipv6-masquerade");
     DO_TEST("route-default");
 
- cleanup:
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIR_TEST_MAIN(mymain)
+VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("virgdbus"),
+                      VIR_TEST_MOCK("virfirewall"))
 
 #else /* ! defined (__linux__) */
 

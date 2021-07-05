@@ -1,6 +1,6 @@
 #
 # Private symbols used in RPC operations. Add symbols here, and see
-# Makefile.am for more details.
+# src/remote/meson.build for more details.
 #
 # Keep this file sorted by header name, then by symbols with each header.
 #
@@ -13,6 +13,11 @@ xdr_*;
 # since there's no libvirtd built.
 xdr_virNetMessageError;
 
+
+# remote/remote_sockets.h
+remoteProbeSessionDriverFromBinary;
+remoteProbeSessionDriverFromSocket;
+remoteProbeSystemDriverFromSocket;
 
 # rpc/virnetclient.h
 virNetClientAddProgram;
@@ -42,6 +47,7 @@ virNetClientSendStream;
 virNetClientSendWithReply;
 virNetClientSetCloseCallback;
 virNetClientSetTLSSession;
+virNetClientSSHHelperCommand;
 
 
 # rpc/virnetclientprogram.h
@@ -75,7 +81,6 @@ virNetDaemonAddServer;
 virNetDaemonAddShutdownInhibition;
 virNetDaemonAddSignalHandler;
 virNetDaemonAutoShutdown;
-virNetDaemonClose;
 virNetDaemonGetServer;
 virNetDaemonGetServers;
 virNetDaemonHasClients;
@@ -85,8 +90,11 @@ virNetDaemonNew;
 virNetDaemonNewPostExecRestart;
 virNetDaemonPreExecRestart;
 virNetDaemonQuit;
+virNetDaemonQuitExecRestart;
 virNetDaemonRemoveShutdownInhibition;
 virNetDaemonRun;
+virNetDaemonSetShutdownCallbacks;
+virNetDaemonSetStateStopWorkerThread;
 virNetDaemonUpdateServices;
 
 
@@ -114,6 +122,8 @@ virNetMessageSaveError;
 virNetServerAddClient;
 virNetServerAddProgram;
 virNetServerAddService;
+virNetServerAddServiceTCP;
+virNetServerAddServiceUNIX;
 virNetServerClose;
 virNetServerGetClient;
 virNetServerGetClients;
@@ -124,6 +134,7 @@ virNetServerGetMaxUnauthClients;
 virNetServerGetName;
 virNetServerGetThreadPoolParameters;
 virNetServerHasClients;
+virNetServerNeedsAuth;
 virNetServerNew;
 virNetServerNewPostExecRestart;
 virNetServerNextClientID;
@@ -133,8 +144,8 @@ virNetServerSetClientAuthenticated;
 virNetServerSetClientLimits;
 virNetServerSetThreadPoolParameters;
 virNetServerSetTLSContext;
-virNetServerStart;
 virNetServerUpdateServices;
+virNetServerUpdateTlsFiles;
 
 
 # rpc/virnetserverclient.h
@@ -176,23 +187,11 @@ virNetServerClientSetAuthLocked;
 virNetServerClientSetAuthPendingLocked;
 virNetServerClientSetCloseHook;
 virNetServerClientSetDispatcher;
+virNetServerClientSetIdentity;
 virNetServerClientSetQuietEOF;
 virNetServerClientSetReadonly;
 virNetServerClientStartKeepAlive;
 virNetServerClientWantCloseLocked;
-
-
-# rpc/virnetservermdns.h
-virNetServerMDNSAddEntry;
-virNetServerMDNSAddGroup;
-virNetServerMDNSEntryFree;
-virNetServerMDNSFree;
-virNetServerMDNSGroupFree;
-virNetServerMDNSNew;
-virNetServerMDNSRemoveEntry;
-virNetServerMDNSRemoveGroup;
-virNetServerMDNSStart;
-virNetServerMDNSStop;
 
 
 # rpc/virnetserverprogram.h
@@ -216,8 +215,7 @@ virNetServerServiceGetMaxRequests;
 virNetServerServiceGetPort;
 virNetServerServiceGetTLSContext;
 virNetServerServiceIsReadonly;
-virNetServerServiceNewFD;
-virNetServerServiceNewFDOrUNIX;
+virNetServerServiceNewFDs;
 virNetServerServiceNewPostExecRestart;
 virNetServerServiceNewTCP;
 virNetServerServiceNewUNIX;
@@ -233,6 +231,7 @@ virNetSocketCheckProtocols;
 virNetSocketClose;
 virNetSocketDupFD;
 virNetSocketGetFD;
+virNetSocketGetPath;
 virNetSocketGetPort;
 virNetSocketGetSELinuxContext;
 virNetSocketGetUNIXIdentity;

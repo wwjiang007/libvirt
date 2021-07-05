@@ -21,24 +21,20 @@
 
 #include <config.h>
 
-#include <sys/socket.h>
-#ifdef HAVE_SYS_UN_H
-# include <sys/un.h>
-#endif
-
 #define LIBVIRT_VIRSYSTEMDPRIV_H_ALLOW
 #include "virsystemdpriv.h"
 
 #include "virsystemd.h"
-#include "viratomic.h"
 #include "virbuffer.h"
-#include "virdbus.h"
+#include "virgdbus.h"
 #include "virstring.h"
 #include "viralloc.h"
 #include "virutil.h"
 #include "virlog.h"
 #include "virerror.h"
 #include "virfile.h"
+#include "virhash.h"
+#include "virsocketaddr.h"
 
 #define VIR_FROM_THIS VIR_FROM_SYSTEMD
 
@@ -48,7 +44,17 @@ VIR_LOG_INIT("util.systemd");
 # define MSG_NOSIGNAL 0
 #endif
 
-static void virSystemdEscapeName(virBufferPtr buf,
+struct _virSystemdActivation {
+    GHashTable *fds;
+};
+
+typedef struct _virSystemdActivationEntry virSystemdActivationEntry;
+struct _virSystemdActivationEntry {
+    int *fds;
+    size_t nfds;
+};
+
+static void virSystemdEscapeName(virBuffer *buf,
                                  const char *name)
 {
     static const char hextable[16] = "0123456789abcdef";
@@ -92,7 +98,7 @@ char *virSystemdMakeScopeName(const char *name,
                               const char *drivername,
                               bool legacy_behaviour)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
     virBufferAddLit(&buf, "machine-");
     if (legacy_behaviour) {
@@ -102,16 +108,13 @@ char *virSystemdMakeScopeName(const char *name,
     virSystemdEscapeName(&buf, name);
     virBufferAddLit(&buf, ".scope");
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
 
 char *virSystemdMakeSliceName(const char *partition)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
     if (*partition == '/')
         partition++;
@@ -119,13 +122,11 @@ char *virSystemdMakeSliceName(const char *partition)
     virSystemdEscapeName(&buf, partition);
     virBufferAddLit(&buf, ".slice");
 
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buf);
 }
 
 static int virSystemdHasMachinedCachedValue = -1;
+static int virSystemdHasLogindCachedValue = -1;
 
 /* Reset the cache from tests for testing the underlying dbus calls
  * as well */
@@ -134,84 +135,193 @@ void virSystemdHasMachinedResetCachedValue(void)
     virSystemdHasMachinedCachedValue = -1;
 }
 
+void virSystemdHasLogindResetCachedValue(void)
+{
+    virSystemdHasLogindCachedValue = -1;
+}
+
+
 /* -2 = machine1 is not supported on this machine
  * -1 = error
  *  0 = machine1 is available
  */
-static int
+int
 virSystemdHasMachined(void)
 {
     int ret;
     int val;
 
-    val = virAtomicIntGet(&virSystemdHasMachinedCachedValue);
+    val = g_atomic_int_get(&virSystemdHasMachinedCachedValue);
     if (val != -1)
         return val;
 
-    if ((ret = virDBusIsServiceEnabled("org.freedesktop.machine1")) < 0) {
+    if ((ret = virGDBusIsServiceEnabled("org.freedesktop.machine1")) < 0) {
         if (ret == -2)
-            virAtomicIntSet(&virSystemdHasMachinedCachedValue, -2);
+            g_atomic_int_set(&virSystemdHasMachinedCachedValue, -2);
         return ret;
     }
 
-    if ((ret = virDBusIsServiceRegistered("org.freedesktop.systemd1")) == -1)
+    if ((ret = virGDBusIsServiceRegistered("org.freedesktop.systemd1")) == -1)
         return ret;
-    virAtomicIntSet(&virSystemdHasMachinedCachedValue, ret);
+    g_atomic_int_set(&virSystemdHasMachinedCachedValue, ret);
     return ret;
+}
+
+int
+virSystemdHasLogind(void)
+{
+    int ret;
+    int val;
+
+    val = g_atomic_int_get(&virSystemdHasLogindCachedValue);
+    if (val != -1)
+        return val;
+
+    ret = virGDBusIsServiceEnabled("org.freedesktop.login1");
+    if (ret < 0) {
+        if (ret == -2)
+            g_atomic_int_set(&virSystemdHasLogindCachedValue, -2);
+        return ret;
+    }
+
+    if ((ret = virGDBusIsServiceRegistered("org.freedesktop.login1")) == -1)
+        return ret;
+
+    g_atomic_int_set(&virSystemdHasLogindCachedValue, ret);
+    return ret;
+}
+
+
+/**
+ * virSystemdGetMachineByPID:
+ * @conn: dbus connection
+ * @pid: pid of running VM
+ *
+ * Returns dbus object path to VM registered with machined.
+ * On error returns NULL.
+ */
+static char *
+virSystemdGetMachineByPID(GDBusConnection *conn,
+                          pid_t pid)
+{
+    g_autoptr(GVariant) message = NULL;
+    g_autoptr(GVariant) reply = NULL;
+    char *object = NULL;
+
+    message = g_variant_new("(u)", pid);
+
+    if (virGDBusCallMethod(conn,
+                           &reply,
+                           G_VARIANT_TYPE("(o)"),
+                           NULL,
+                           "org.freedesktop.machine1",
+                           "/org/freedesktop/machine1",
+                           "org.freedesktop.machine1.Manager",
+                           "GetMachineByPID",
+                           message) < 0)
+        return NULL;
+
+    g_variant_get(reply, "(o)", &object);
+
+    VIR_DEBUG("Domain with pid %lld has object path '%s'",
+              (long long) pid, object);
+
+    return object;
 }
 
 
 char *
 virSystemdGetMachineNameByPID(pid_t pid)
 {
-    DBusConnection *conn;
-    DBusMessage *reply = NULL;
-    char *name = NULL, *object = NULL;
+    GDBusConnection *conn;
+    g_autoptr(GVariant) message = NULL;
+    g_autoptr(GVariant) reply = NULL;
+    g_autoptr(GVariant) gvar = NULL;
+    g_autofree char *object = NULL;
+    char *name = NULL;
 
     if (virSystemdHasMachined() < 0)
-        goto cleanup;
+        return NULL;
 
-    if (!(conn = virDBusGetSystemBus()))
-        goto cleanup;
+    if (!(conn = virGDBusGetSystemBus()))
+        return NULL;
 
-    if (virDBusCallMethod(conn, &reply, NULL,
-                          "org.freedesktop.machine1",
-                          "/org/freedesktop/machine1",
-                          "org.freedesktop.machine1.Manager",
-                          "GetMachineByPID",
-                          "u", pid) < 0)
-        goto cleanup;
+    object = virSystemdGetMachineByPID(conn, pid);
+    if (!object)
+        return NULL;
 
-    if (virDBusMessageDecode(reply, "o", &object) < 0)
-        goto cleanup;
+    message = g_variant_new("(ss)",
+                            "org.freedesktop.machine1.Machine", "Name");
 
-    virDBusMessageUnref(reply);
-    reply = NULL;
+    if (virGDBusCallMethod(conn,
+                           &reply,
+                           G_VARIANT_TYPE("(v)"),
+                           NULL,
+                           "org.freedesktop.machine1",
+                           object,
+                           "org.freedesktop.DBus.Properties",
+                           "Get",
+                           message) < 0)
+        return NULL;
 
-    VIR_DEBUG("Domain with pid %lld has object path '%s'",
-              (long long) pid, object);
-
-    if (virDBusCallMethod(conn, &reply, NULL,
-                          "org.freedesktop.machine1",
-                          object,
-                          "org.freedesktop.DBus.Properties",
-                          "Get",
-                          "ss",
-                          "org.freedesktop.machine1.Machine",
-                          "Name") < 0)
-        goto cleanup;
-
-    if (virDBusMessageDecode(reply, "v", "s", &name) < 0)
-        goto cleanup;
+    g_variant_get(reply, "(v)", &gvar);
+    g_variant_get(gvar, "s", &name);
 
     VIR_DEBUG("Domain with pid %lld has machine name '%s'",
               (long long) pid, name);
 
- cleanup:
-    VIR_FREE(object);
-    virDBusMessageUnref(reply);
-
     return name;
+}
+
+
+/**
+ * virSystemdGetMachineUnitByPID:
+ * @pid: pid of running VM
+ *
+ * Returns systemd Unit name of a running VM registered with machined.
+ * On error returns NULL.
+ */
+char *
+virSystemdGetMachineUnitByPID(pid_t pid)
+{
+    GDBusConnection *conn;
+    g_autoptr(GVariant) message = NULL;
+    g_autoptr(GVariant) reply = NULL;
+    g_autoptr(GVariant) gvar = NULL;
+    g_autofree char *object = NULL;
+    char *unit = NULL;
+
+    if (virSystemdHasMachined() < 0)
+        return NULL;
+
+    if (!(conn = virGDBusGetSystemBus()))
+        return NULL;
+
+    object = virSystemdGetMachineByPID(conn, pid);
+    if (!object)
+        return NULL;
+
+    message = g_variant_new("(ss)",
+                            "org.freedesktop.machine1.Machine", "Unit");
+
+    if (virGDBusCallMethod(conn,
+                           &reply,
+                           G_VARIANT_TYPE("(v)"),
+                           NULL,
+                           "org.freedesktop.machine1",
+                           object,
+                           "org.freedesktop.DBus.Properties",
+                           "Get",
+                           message) < 0)
+        return NULL;
+
+    g_variant_get(reply, "(v)", &gvar);
+    g_variant_get(gvar, "s", &unit);
+
+    VIR_DEBUG("Domain with pid %lld has unit name '%s'",
+              (long long) pid, unit);
+
+    return unit;
 }
 
 
@@ -238,31 +348,33 @@ int virSystemdCreateMachine(const char *name,
                             bool iscontainer,
                             size_t nnicindexes,
                             int *nicindexes,
-                            const char *partition)
+                            const char *partition,
+                            unsigned int maxthreads)
 {
-    int ret;
-    DBusConnection *conn;
-    char *creatorname = NULL;
-    char *slicename = NULL;
+    int rc;
+    GDBusConnection *conn;
+    GVariant *guuid;
+    GVariant *gnicindexes;
+    GVariant *gprops;
+    GVariant *message;
+    g_autofree char *creatorname = NULL;
+    g_autofree char *slicename = NULL;
+    g_autofree char *scopename = NULL;
     static int hasCreateWithNetwork = 1;
 
-    if ((ret = virSystemdHasMachined()) < 0)
-        return ret;
+    if ((rc = virSystemdHasMachined()) < 0)
+        return rc;
 
-    if (!(conn = virDBusGetSystemBus()))
+    if (!(conn = virGDBusGetSystemBus()))
         return -1;
 
-    ret = -1;
-
-    if (virAsprintf(&creatorname, "libvirt-%s", drivername) < 0)
-        goto cleanup;
+    creatorname = g_strdup_printf("libvirt-%s", drivername);
 
     if (partition) {
         if (!(slicename = virSystemdMakeSliceName(partition)))
-             goto cleanup;
+             return -1;
     } else {
-        if (VIR_STRDUP(slicename, "") < 0)
-            goto cleanup;
+        slicename = g_strdup("");
     }
 
     /*
@@ -318,103 +430,141 @@ int virSystemdCreateMachine(const char *name,
      */
 
     VIR_DEBUG("Attempting to create machine via systemd");
-    if (virAtomicIntGet(&hasCreateWithNetwork)) {
-        virError error;
-        memset(&error, 0, sizeof(error));
+    if (g_atomic_int_get(&hasCreateWithNetwork)) {
+        g_autoptr(virError) error = NULL;
 
-        if (virDBusCallMethod(conn,
-                              NULL,
-                              &error,
-                              "org.freedesktop.machine1",
-                              "/org/freedesktop/machine1",
-                              "org.freedesktop.machine1.Manager",
-                              "CreateMachineWithNetwork",
-                              "sayssusa&ia(sv)",
-                              name,
-                              16,
-                              uuid[0], uuid[1], uuid[2], uuid[3],
-                              uuid[4], uuid[5], uuid[6], uuid[7],
-                              uuid[8], uuid[9], uuid[10], uuid[11],
-                              uuid[12], uuid[13], uuid[14], uuid[15],
-                              creatorname,
-                              iscontainer ? "container" : "vm",
-                              (unsigned int)pidleader,
-                              NULLSTR_EMPTY(rootdir),
-                              nnicindexes, nicindexes,
-                              3,
-                              "Slice", "s", slicename,
-                              "After", "as", 1, "libvirtd.service",
-                              "Before", "as", 1, "virt-guest-shutdown.target") < 0)
-            goto cleanup;
+        error = g_new0(virError, 1);
 
-        if (error.level == VIR_ERR_ERROR) {
-            if (virDBusErrorIsUnknownMethod(&error)) {
+        guuid = g_variant_new_fixed_array(G_VARIANT_TYPE("y"),
+                                          uuid, 16, sizeof(unsigned char));
+        gnicindexes = g_variant_new_fixed_array(G_VARIANT_TYPE("i"),
+                                                nicindexes, nnicindexes, sizeof(int));
+        gprops = g_variant_new_parsed("[('Slice', <%s>),"
+                                      " ('After', <['libvirtd.service']>),"
+                                      " ('Before', <['virt-guest-shutdown.target']>)]",
+                                      slicename);
+        message = g_variant_new("(s@ayssus@ai@a(sv))",
+                                name,
+                                guuid,
+                                creatorname,
+                                iscontainer ? "container" : "vm",
+                                (unsigned int)pidleader,
+                                NULLSTR_EMPTY(rootdir),
+                                gnicindexes,
+                                gprops);
+
+        rc = virGDBusCallMethod(conn,
+                                NULL,
+                                NULL,
+                                error,
+                                "org.freedesktop.machine1",
+                                "/org/freedesktop/machine1",
+                                "org.freedesktop.machine1.Manager",
+                                "CreateMachineWithNetwork",
+                                message);
+
+        g_variant_unref(message);
+
+        if (rc < 0)
+            return -1;
+
+        if (error->level == VIR_ERR_ERROR) {
+            if (virGDBusErrorIsUnknownMethod(error)) {
                 VIR_INFO("CreateMachineWithNetwork isn't supported, switching "
                          "to legacy CreateMachine method for systemd-machined");
-                virResetError(&error);
-                virAtomicIntSet(&hasCreateWithNetwork, 0);
+                virResetError(error);
+                g_atomic_int_set(&hasCreateWithNetwork, 0);
                 /* Could re-structure without Using goto, but this
                  * avoids another atomic read which would trigger
                  * another memory barrier */
                 goto fallback;
             }
-            virReportErrorObject(&error);
-            virResetError(&error);
-            goto cleanup;
+            virReportErrorObject(error);
+            virResetError(error);
+            return -1;
         }
     } else {
     fallback:
-        if (virDBusCallMethod(conn,
-                              NULL,
-                              NULL,
-                              "org.freedesktop.machine1",
-                              "/org/freedesktop/machine1",
-                              "org.freedesktop.machine1.Manager",
-                              "CreateMachine",
-                              "sayssusa(sv)",
-                              name,
-                              16,
-                              uuid[0], uuid[1], uuid[2], uuid[3],
-                              uuid[4], uuid[5], uuid[6], uuid[7],
-                              uuid[8], uuid[9], uuid[10], uuid[11],
-                              uuid[12], uuid[13], uuid[14], uuid[15],
-                              creatorname,
-                              iscontainer ? "container" : "vm",
-                              (unsigned int)pidleader,
-                              NULLSTR_EMPTY(rootdir),
-                              3,
-                              "Slice", "s", slicename,
-                              "After", "as", 1, "libvirtd.service",
-                              "Before", "as", 1, "virt-guest-shutdown.target") < 0)
-            goto cleanup;
+        guuid = g_variant_new_fixed_array(G_VARIANT_TYPE("y"),
+                                          uuid, 16, sizeof(unsigned char));
+        gprops = g_variant_new_parsed("[('Slice', <%s>),"
+                                      " ('After', <['libvirtd.service']>),"
+                                      " ('Before', <['virt-guest-shutdown.target']>)]",
+                                      slicename);
+        message = g_variant_new("(s@ayssus@a(sv))",
+                                name,
+                                guuid,
+                                creatorname,
+                                iscontainer ? "container" : "vm",
+                                (unsigned int)pidleader,
+                                NULLSTR_EMPTY(rootdir),
+                                gprops);
+
+        rc = virGDBusCallMethod(conn,
+                                NULL,
+                                NULL,
+                                NULL,
+                                "org.freedesktop.machine1",
+                                "/org/freedesktop/machine1",
+                                "org.freedesktop.machine1.Manager",
+                                "CreateMachine",
+                                message);
+
+        g_variant_unref(message);
+
+        if (rc < 0)
+            return -1;
     }
 
-    ret = 0;
+    if (maxthreads > 0) {
+        uint64_t max = maxthreads;
 
- cleanup:
-    VIR_FREE(creatorname);
-    VIR_FREE(slicename);
-    return ret;
+        if (!(scopename = virSystemdMakeScopeName(name, drivername, false)))
+            return -1;
+
+        gprops = g_variant_new_parsed("[('TasksMax', <%t>)]", max);
+
+        message = g_variant_new("(sb@a(sv))",
+                                scopename,
+                                true,
+                                gprops);
+
+        rc = virGDBusCallMethod(conn,
+                                NULL,
+                                NULL,
+                                NULL,
+                                "org.freedesktop.systemd1",
+                                "/org/freedesktop/systemd1",
+                                "org.freedesktop.systemd1.Manager",
+                                "SetUnitProperties",
+                                message);
+
+        g_variant_unref(message);
+
+        if (rc < 0)
+            return -1;
+    }
+
+    return 0;
 }
 
 int virSystemdTerminateMachine(const char *name)
 {
-    int ret;
-    DBusConnection *conn;
-    virError error;
+    int rc;
+    GDBusConnection *conn;
+    g_autoptr(GVariant) message = NULL;
+    g_autoptr(virError) error = NULL;
 
     if (!name)
         return 0;
 
-    memset(&error, 0, sizeof(error));
+    if ((rc = virSystemdHasMachined()) < 0)
+        return rc;
 
-    if ((ret = virSystemdHasMachined()) < 0)
-        goto cleanup;
+    if (!(conn = virGDBusGetSystemBus()))
+        return -1;
 
-    ret = -1;
-
-    if (!(conn = virDBusGetSystemBus()))
-        goto cleanup;
+    error = g_new0(virError, 1);
 
     /*
      * The systemd DBus API we're invoking has the
@@ -426,37 +576,34 @@ int virSystemdTerminateMachine(const char *name)
      * in 'ps' listing & similar
      */
 
-    VIR_DEBUG("Attempting to terminate machine via systemd");
-    if (virDBusCallMethod(conn,
-                          NULL,
-                          &error,
-                          "org.freedesktop.machine1",
-                          "/org/freedesktop/machine1",
-                          "org.freedesktop.machine1.Manager",
-                          "TerminateMachine",
-                          "s",
-                          name) < 0)
-        goto cleanup;
+    message = g_variant_new("(s)", name);
 
-    if (error.level == VIR_ERR_ERROR &&
+    VIR_DEBUG("Attempting to terminate machine via systemd");
+    if (virGDBusCallMethod(conn,
+                           NULL,
+                           NULL,
+                           error,
+                           "org.freedesktop.machine1",
+                           "/org/freedesktop/machine1",
+                           "org.freedesktop.machine1.Manager",
+                           "TerminateMachine",
+                           message) < 0)
+        return -1;
+
+    if (error->level == VIR_ERR_ERROR &&
         STRNEQ_NULLABLE("org.freedesktop.machine1.NoSuchMachine",
-                        error.str1)) {
-        virReportErrorObject(&error);
-        goto cleanup;
+                        error->str1)) {
+        virReportErrorObject(error);
+        return -1;
     }
 
-    ret = 0;
-
- cleanup:
-    virResetError(&error);
-
-    return ret;
+    return 0;
 }
 
 void
 virSystemdNotifyStartup(void)
 {
-#ifdef HAVE_SYS_UN_H
+#ifndef WIN32
     const char *path;
     const char *msg = "READY=1";
     int fd;
@@ -473,7 +620,7 @@ virSystemdNotifyStartup(void)
         .msg_iovlen = 1,
     };
 
-    if (!(path = virGetEnvBlockSUID("NOTIFY_SOCKET"))) {
+    if (!(path = getenv("NOTIFY_SOCKET"))) {
         VIR_DEBUG("Skipping systemd notify, not requested");
         return;
     }
@@ -500,51 +647,39 @@ virSystemdNotifyStartup(void)
         VIR_WARN("Failed to notify systemd");
 
     VIR_FORCE_CLOSE(fd);
-#endif /* HAVE_SYS_UN_H */
+#endif /* !WIN32 */
 }
 
 static int
 virSystemdPMSupportTarget(const char *methodName, bool *result)
 {
-    int ret;
-    DBusConnection *conn;
-    DBusMessage *message = NULL;
+    int rc;
+    GDBusConnection *conn;
+    g_autoptr(GVariant) reply = NULL;
     char *response;
 
-    ret = virDBusIsServiceEnabled("org.freedesktop.login1");
-    if (ret < 0)
-        return ret;
+    if ((rc = virSystemdHasLogind()) < 0)
+        return rc;
 
-    if ((ret = virDBusIsServiceRegistered("org.freedesktop.login1")) < 0)
-        return ret;
-
-    if (!(conn = virDBusGetSystemBus()))
+    if (!(conn = virGDBusGetSystemBus()))
         return -1;
 
-    ret = -1;
+    if (virGDBusCallMethod(conn,
+                           &reply,
+                           G_VARIANT_TYPE("(s)"),
+                           NULL,
+                           "org.freedesktop.login1",
+                           "/org/freedesktop/login1",
+                           "org.freedesktop.login1.Manager",
+                           methodName,
+                           NULL) < 0)
+        return -1;
 
-    if (virDBusCallMethod(conn,
-                          &message,
-                          NULL,
-                          "org.freedesktop.login1",
-                          "/org/freedesktop/login1",
-                          "org.freedesktop.login1.Manager",
-                          methodName,
-                          NULL) < 0)
-        return ret;
-
-    if ((ret = virDBusMessageDecode(message, "s", &response)) < 0)
-        goto cleanup;
+    g_variant_get(reply, "(&s)", &response);
 
     *result = STREQ("yes", response) || STREQ("challenge", response);
 
-    ret = 0;
-
- cleanup:
-    virDBusMessageUnref(message);
-    VIR_FREE(response);
-
-    return ret;
+    return 0;
 }
 
 int virSystemdCanSuspend(bool *result)
@@ -560,4 +695,426 @@ int virSystemdCanHibernate(bool *result)
 int virSystemdCanHybridSleep(bool *result)
 {
     return virSystemdPMSupportTarget("CanHybridSleep", result);
+}
+
+
+static void
+virSystemdActivationEntryFree(void *data)
+{
+    virSystemdActivationEntry *ent = data;
+    size_t i;
+
+    VIR_DEBUG("Closing activation FDs");
+    for (i = 0; i < ent->nfds; i++) {
+        VIR_DEBUG("Closing activation FD %d", ent->fds[i]);
+        VIR_FORCE_CLOSE(ent->fds[i]);
+    }
+
+    g_free(ent->fds);
+    g_free(ent);
+}
+
+
+static int
+virSystemdActivationAddFD(virSystemdActivation *act,
+                          const char *name,
+                          int fd)
+{
+    virSystemdActivationEntry *ent = virHashLookup(act->fds, name);
+
+    if (!ent) {
+        ent = g_new0(virSystemdActivationEntry, 1);
+        ent->fds = g_new0(int, 1);
+        ent->fds[ent->nfds++] = fd;
+
+        VIR_DEBUG("Record first FD %d with name %s", fd, name);
+        if (virHashAddEntry(act->fds, name, ent) < 0) {
+            virSystemdActivationEntryFree(ent);
+            return -1;
+        }
+
+        return 0;
+    }
+
+    VIR_EXPAND_N(ent->fds, ent->nfds, 1);
+
+    VIR_DEBUG("Record extra FD %d with name %s", fd, name);
+    ent->fds[ent->nfds - 1] = fd;
+
+    return 0;
+}
+
+
+static int
+virSystemdActivationInitFromNames(virSystemdActivation *act,
+                                  int nfds,
+                                  const char *fdnames)
+{
+    g_auto(GStrv) fdnamelistptr = NULL;
+    char **fdnamelist;
+    size_t i;
+    int nextfd = STDERR_FILENO + 1;
+
+    VIR_DEBUG("FD names %s", fdnames);
+
+    if (!(fdnamelistptr = g_strsplit(fdnames, ":", 0)))
+        goto error;
+
+    if (g_strv_length(fdnamelistptr) != nfds) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Expecting %d FD names but got %u"),
+                       nfds, g_strv_length(fdnamelistptr));
+        goto error;
+    }
+
+    fdnamelist = fdnamelistptr;
+    while (nfds) {
+        if (virSystemdActivationAddFD(act, *fdnamelist, nextfd) < 0)
+            goto error;
+
+        fdnamelist++;
+        nextfd++;
+        nfds--;
+    }
+
+    return 0;
+
+ error:
+    for (i = 0; i < nfds; i++) {
+        int fd = nextfd + i;
+        VIR_FORCE_CLOSE(fd);
+    }
+    return -1;
+}
+
+
+/*
+ * Back compat for systemd < v227 which lacks LISTEN_FDNAMES.
+ * Delete when min systemd is increased ie RHEL7 dropped
+ */
+static int
+virSystemdActivationInitFromMap(virSystemdActivation *act,
+                                int nfds,
+                                virSystemdActivationMap *map,
+                                size_t nmap)
+{
+    int nextfd = STDERR_FILENO + 1;
+    size_t i;
+
+    while (nfds) {
+        virSocketAddr addr;
+        const char *name = NULL;
+
+        memset(&addr, 0, sizeof(addr));
+
+        addr.len = sizeof(addr.data);
+        if (getsockname(nextfd, &addr.data.sa, &addr.len) < 0) {
+            virReportSystemError(errno, "%s", _("Unable to get local socket name"));
+            goto error;
+        }
+
+        VIR_DEBUG("Got socket family %d for FD %d",
+                  addr.data.sa.sa_family, nextfd);
+
+        for (i = 0; i < nmap && !name; i++) {
+            if (map[i].name == NULL)
+                continue;
+
+            if (addr.data.sa.sa_family == AF_INET) {
+                if (map[i].family == AF_INET) {
+                    VIR_DEBUG("Expect %d got %d",
+                              map[i].port, ntohs(addr.data.inet4.sin_port));
+                    if (addr.data.inet4.sin_port == htons(map[i].port))
+                        name = map[i].name;
+                }
+            } else if (addr.data.sa.sa_family == AF_INET6) {
+                /* NB use of AF_INET here is correct. The "map" struct
+                 * only refers to AF_INET. The socket may be AF_INET
+                 * or AF_INET6
+                 */
+                if (map[i].family == AF_INET) {
+                    VIR_DEBUG("Expect %d got %d",
+                              map[i].port, ntohs(addr.data.inet6.sin6_port));
+                    if (addr.data.inet6.sin6_port == htons(map[i].port))
+                        name = map[i].name;
+                }
+#ifndef WIN32
+            } else if (addr.data.sa.sa_family == AF_UNIX) {
+                if (map[i].family == AF_UNIX) {
+                    VIR_DEBUG("Expect %s got %s", map[i].path, addr.data.un.sun_path);
+                    if (STREQLEN(map[i].path,
+                                 addr.data.un.sun_path,
+                                 sizeof(addr.data.un.sun_path)))
+                        name = map[i].name;
+                }
+#endif
+            } else {
+                virReportError(VIR_ERR_INTERNAL_ERROR,
+                               _("Unexpected socket family %d"),
+                               addr.data.sa.sa_family);
+                goto error;
+            }
+        }
+
+        if (!name) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Cannot find name for FD %d socket family %d"),
+                           nextfd, addr.data.sa.sa_family);
+            goto error;
+        }
+
+        if (virSystemdActivationAddFD(act, name, nextfd) < 0)
+            goto error;
+
+        nfds--;
+        nextfd++;
+    }
+
+    return 0;
+
+ error:
+    for (i = 0; i < nfds; i++) {
+        int fd = nextfd + i;
+        VIR_FORCE_CLOSE(fd);
+    }
+    return -1;
+}
+
+#ifndef WIN32
+
+/**
+ * virSystemdGetListenFDs:
+ *
+ * Parse LISTEN_PID and LISTEN_FDS passed from caller.
+ *
+ * Returns number of passed FDs.
+ */
+static unsigned int
+virSystemdGetListenFDs(void)
+{
+    const char *pidstr;
+    const char *fdstr;
+    size_t i = 0;
+    unsigned long long procid;
+    unsigned int nfds;
+
+    VIR_DEBUG("Setting up networking from caller");
+
+    if (!(pidstr = getenv("LISTEN_PID"))) {
+        VIR_DEBUG("No LISTEN_PID from caller");
+        return 0;
+    }
+
+    if (virStrToLong_ull(pidstr, NULL, 10, &procid) < 0) {
+        VIR_DEBUG("Malformed LISTEN_PID from caller %s", pidstr);
+        return 0;
+    }
+
+    if ((pid_t)procid != getpid()) {
+        VIR_DEBUG("LISTEN_PID %s is not for us %lld",
+                  pidstr, (long long) getpid());
+        return 0;
+    }
+
+    if (!(fdstr = getenv("LISTEN_FDS"))) {
+        VIR_DEBUG("No LISTEN_FDS from caller");
+        return 0;
+    }
+
+    if (virStrToLong_ui(fdstr, NULL, 10, &nfds) < 0) {
+        VIR_DEBUG("Malformed LISTEN_FDS from caller %s", fdstr);
+        return 0;
+    }
+
+    g_unsetenv("LISTEN_PID");
+    g_unsetenv("LISTEN_FDS");
+
+    VIR_DEBUG("Got %u file descriptors", nfds);
+
+    for (i = 0; i < nfds; i++) {
+        int fd = STDERR_FILENO + i + 1;
+
+        VIR_DEBUG("Disabling inheritance of passed FD %d", fd);
+
+        if (virSetInherit(fd, false) < 0)
+            VIR_WARN("Couldn't disable inheritance of passed FD %d", fd);
+    }
+
+    return nfds;
+}
+
+#else /* WIN32 */
+
+static unsigned int
+virSystemdGetListenFDs(void)
+{
+    return 0;
+}
+
+#endif /* WIN32 */
+
+static virSystemdActivation *
+virSystemdActivationNew(virSystemdActivationMap *map,
+                        size_t nmap,
+                        int nfds)
+{
+    virSystemdActivation *act;
+    const char *fdnames;
+
+    VIR_DEBUG("Activated with %d FDs", nfds);
+    act = g_new0(virSystemdActivation, 1);
+
+    if (!(act->fds = virHashNew(virSystemdActivationEntryFree)))
+        goto error;
+
+    fdnames = getenv("LISTEN_FDNAMES");
+    if (fdnames) {
+        if (virSystemdActivationInitFromNames(act, nfds, fdnames) < 0)
+            goto error;
+    } else {
+        if (virSystemdActivationInitFromMap(act, nfds, map, nmap) < 0)
+            goto error;
+    }
+
+    VIR_DEBUG("Created activation object for %d FDs", nfds);
+    return act;
+
+ error:
+    virSystemdActivationFree(act);
+    return NULL;
+}
+
+
+/**
+ * virSystemdGetActivation:
+ * @map: mapping of socket addresses to names
+ * @nmap: number of entries in @map
+ * @act: filled with allocated activation object
+ *
+ * Acquire an object for handling systemd activation.
+ * If no activation FDs have been provided the returned object
+ * will be NULL, indicating normal service setup can be performed
+ * If the returned object is non-NULL then at least one file
+ * descriptor will be present. No normal service setup should
+ * be performed.
+ *
+ * Returns: 0 on success, -1 on failure
+ */
+int
+virSystemdGetActivation(virSystemdActivationMap *map,
+                        size_t nmap,
+                        virSystemdActivation **act)
+{
+    int nfds = 0;
+
+    if ((nfds = virSystemdGetListenFDs()) < 0)
+        return -1;
+
+    if (nfds == 0) {
+        VIR_DEBUG("No activation FDs present");
+        *act = NULL;
+        return 0;
+    }
+
+    *act = virSystemdActivationNew(map, nmap, nfds);
+    return 0;
+}
+
+
+/**
+ * virSystemdActivationHasName:
+ * @act: the activation object
+ * @name: the file descriptor name
+ *
+ * Check whether there is a file descriptor present
+ * for the requested name.
+ *
+ * Returns: true if a FD is present, false otherwise
+ */
+bool
+virSystemdActivationHasName(virSystemdActivation *act,
+                            const char *name)
+{
+    return virHashLookup(act->fds, name) != NULL;
+}
+
+
+/**
+ * virSystemdActivationComplete:
+ * @act: the activation object
+ *
+ * Indicate that processing of activation has been
+ * completed. All provided file descriptors should
+ * have been claimed. If any are unclaimed then
+ * an error will be reported
+ *
+ * Returns: 0 on success, -1 if some FDs are unclaimed
+ */
+int
+virSystemdActivationComplete(virSystemdActivation *act)
+{
+    if (virHashSize(act->fds) != 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Some activation file descriptors are unclaimed"));
+        return -1;
+    }
+
+    return 0;
+}
+
+
+/**
+ * virSystemdActivationClaimFDs:
+ * @act: the activation object
+ * @name: the file descriptor name
+ * @fds: to be filled with claimed FDs
+ * @nfds: to be filled with number of FDs in @fds
+ *
+ * Claims the file descriptors associated with
+ * @name.
+ *
+ * The caller is responsible for closing all
+ * returned file descriptors when they are no
+ * longer required. The caller must also free
+ * the array memory in @fds.
+ */
+void
+virSystemdActivationClaimFDs(virSystemdActivation *act,
+                             const char *name,
+                             int **fds,
+                             size_t *nfds)
+{
+    virSystemdActivationEntry *ent = virHashSteal(act->fds, name);
+
+    if (!ent) {
+        *fds = NULL;
+        *nfds = 0;
+        VIR_DEBUG("No FD with name %s", name);
+        return;
+    }
+
+    VIR_DEBUG("Found %zu FDs with name %s", ent->nfds, name);
+    *fds = ent->fds;
+    *nfds = ent->nfds;
+
+    VIR_FREE(ent);
+}
+
+
+/**
+ * virSystemdActivationFree:
+ * @act: the activation object
+ *
+ * Free memory and close unclaimed file descriptors
+ * associated with the activation object
+ */
+void
+virSystemdActivationFree(virSystemdActivation *act)
+{
+    if (!act)
+        return;
+
+    virHashFree(act->fds);
+
+    g_free(act);
 }

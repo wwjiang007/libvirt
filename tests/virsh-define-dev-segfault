@@ -31,7 +31,7 @@ cat <<\EOF > D.xml || fail=1
   <on_reboot>restart</on_reboot>
   <on_crash>destroy</on_crash>
   <devices>
-    <emulator>/usr/bin/qemu-system-i686</emulator>
+    <emulator>/usr/bin/qemu-system-i386</emulator>
     <controller type='usb' index='0'/>
     <serial type='pty'>
       <target port='0'/>
@@ -65,7 +65,7 @@ url=test:///default
 $abs_top_builddir/tools/virsh --connect "$url" 'define D.xml; dumpxml D' > out 2>&1 || fail=1
 
 cat > exp <<EOF || fail=1
-Domain D defined from D.xml
+Domain 'D' defined from D.xml
 
 $(cat D.xml)
 

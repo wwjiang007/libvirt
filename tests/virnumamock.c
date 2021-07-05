@@ -43,8 +43,7 @@ virNumaIsAvailable(void)
     if (numa_avail < 0) {
         char *sysfs_node_path = NULL;
 
-        if (virAsprintfQuiet(&sysfs_node_path, "%s/node", SYSFS_SYSTEM_PATH) < 0)
-            return false;
+        sysfs_node_path = g_strdup_printf("%s/node", SYSFS_SYSTEM_PATH);
 
         numa_avail = virFileExists(sysfs_node_path);
 
@@ -67,7 +66,7 @@ int
 virNumaGetMaxNode(void)
 {
     int ret = -1;
-    virBitmapPtr map = NULL;
+    virBitmap *map = NULL;
 
     if (virFileReadValueBitmap(&map, "%s/node/online", SYSFS_SYSTEM_PATH) < 0)
         return -1;
@@ -81,7 +80,7 @@ bool
 virNumaNodeIsAvailable(int node)
 {
     bool ret = false;
-    virBitmapPtr map = NULL;
+    virBitmap *map = NULL;
 
     if (virFileReadValueBitmap(&map, "%s/node/online", SYSFS_SYSTEM_PATH) < 0)
         return false;
@@ -108,7 +107,7 @@ virNumaGetNodeMemory(int node,
 }
 
 int
-virNumaGetDistances(int node ATTRIBUTE_UNUSED,
+virNumaGetDistances(int node G_GNUC_UNUSED,
                     int **distances,
                     int *ndistances)
 {
@@ -130,27 +129,17 @@ virNumaGetPages(int node,
                 size_t *npages)
 {
     const int pages_def[] = { 4, 2 * 1024, 1 * 1024 * 1024};
-    const int npages_def = ARRAY_CARDINALITY(pages_def);
+    const int npages_def = G_N_ELEMENTS(pages_def);
     size_t i = 0;
 
     if (pages_size)
-        *pages_size = NULL;
+        *pages_size = g_new0(unsigned int, npages_def);
 
     if (pages_avail)
-        *pages_avail = NULL;
+        *pages_avail = g_new0(unsigned long long, npages_def);
 
     if (pages_free)
-        *pages_free = NULL;
-
-    *npages = 0;
-
-    if ((pages_size && VIR_ALLOC_N(*pages_size, npages_def) < 0) ||
-        (pages_avail && VIR_ALLOC_N(*pages_avail, npages_def) < 0) ||
-        (pages_free && VIR_ALLOC_N(*pages_free, npages_def) < 0)) {
-        VIR_FREE(*pages_size);
-        VIR_FREE(*pages_avail);
-        return -1;
-    }
+        *pages_free = g_new0(unsigned long long, npages_def);
 
     *npages = npages_def;
     if (pages_size)
@@ -173,7 +162,7 @@ virNumaGetPages(int node,
 }
 
 int
-virNumaGetNodeCPUs(int node, virBitmapPtr *cpus)
+virNumaGetNodeCPUs(int node, virBitmap **cpus)
 {
     int ret = -1;
     char *cpulist = NULL;
@@ -183,7 +172,12 @@ virNumaGetNodeCPUs(int node, virBitmapPtr *cpus)
                                SYSFS_SYSTEM_PATH, node) < 0)
         return -1;
 
-    *cpus = virBitmapParseUnlimited(cpulist);
+    if (STREQ(cpulist, "")) {
+        unsigned int max_n_cpus = virNumaGetMaxCPUs();
+        *cpus = virBitmapNew(max_n_cpus);
+    } else {
+        *cpus = virBitmapParseUnlimited(cpulist);
+    }
     if (!*cpus)
         goto cleanup;
 

@@ -42,7 +42,7 @@
     <p>
       Information for all historical security issues is maintained in
       machine parsable format in the
-      <a href="https://libvirt.org/git/?p=libvirt-security-notice.git;a=log">libvirt-security-notice GIT repository</a> and
+      <a href="https://gitlab.com/libvirt/libvirt-security-notice">libvirt-security-notice GIT repository</a> and
       <a href="https://security.libvirt.org">published online</a>
       in text, HTML and XML formats. Security notices are published
       on the <a href="https://libvirt.org/contact.html#email">libvirt-announce mailing list</a>
@@ -59,7 +59,7 @@
       the various vendors who distribute libvirt. The team is responsible
       for analysing incoming reports from users to identify whether a
       security problem exists and its severity. It then works to produce
-      a fix for all official stable branches of libvirt and co-ordinate
+      a fix for all official stable branches of libvirt and coordinate
       embargo dates between vendors to allow simultaneous release of the
       fix by all affected parties.
     </p>
@@ -78,7 +78,7 @@
 
     <p>
       The libvirt security team operates a policy of
-      <a href="http://en.wikipedia.org/wiki/Responsible_disclosure">responsible disclosure</a>.
+      <a href="https://en.wikipedia.org/wiki/Responsible_disclosure">responsible disclosure</a>.
       As such any security issue reported, that is not already publicly disclosed
       elsewhere, will have an embargo date assigned. Members of the security team agree
       not to publicly disclose any details of the security issue until the embargo

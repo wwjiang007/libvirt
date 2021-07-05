@@ -18,16 +18,15 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_LXC_FUSE_H
-# define LIBVIRT_LXC_FUSE_H
+#pragma once
 
-# define FUSE_USE_VERSION 26
+#define FUSE_USE_VERSION 26
 
-# if WITH_FUSE
-#  include <fuse.h>
-# endif
+#if WITH_FUSE
+# include <fuse.h>
+#endif
 
-# include "lxc_conf.h"
+#include "lxc_conf.h"
 
 struct virLXCMeminfo {
     unsigned long long memtotal;
@@ -41,20 +40,17 @@ struct virLXCMeminfo {
     unsigned long long swaptotal;
     unsigned long long swapusage;
 };
-typedef struct virLXCMeminfo *virLXCMeminfoPtr;
 
 struct virLXCFuse {
-    virDomainDefPtr def;
+    virDomainDef *def;
     virThread thread;
     char *mountpoint;
     struct fuse *fuse;
     struct fuse_chan *ch;
     virMutex lock;
 };
-typedef struct virLXCFuse *virLXCFusePtr;
+typedef struct virLXCFuse virLXCFuse;
 
-int lxcSetupFuse(virLXCFusePtr *f, virDomainDefPtr def);
-int lxcStartFuse(virLXCFusePtr f);
-void lxcFreeFuse(virLXCFusePtr *f);
-
-#endif /* LIBVIRT_LXC_FUSE_H */
+int lxcSetupFuse(struct virLXCFuse **f, virDomainDef *def);
+int lxcStartFuse(struct virLXCFuse *f);
+void lxcFreeFuse(struct virLXCFuse **f);

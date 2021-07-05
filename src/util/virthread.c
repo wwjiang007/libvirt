@@ -23,9 +23,13 @@
 
 #include "virthread.h"
 
+#ifdef __FreeBSD__
+# include <pthread_np.h>
+#endif
+
 #include <unistd.h>
 #include <inttypes.h>
-#if HAVE_SYS_SYSCALL_H
+#if WITH_SYS_SYSCALL_H
 # include <sys/syscall.h>
 #endif
 
@@ -33,23 +37,21 @@
 #include "virthreadjob.h"
 
 
-/* Nothing special required for pthreads */
-int virThreadInitialize(void)
+int virOnce(virOnceControl *once, virOnceFunc init)
 {
+    int ret;
+
+    ret = pthread_once(&once->once, init);
+    if (ret != 0) {
+        errno = ret;
+        return -1;
+    }
+
     return 0;
 }
 
-void virThreadOnExit(void)
-{
-}
 
-int virOnce(virOnceControlPtr once, virOnceFunc init)
-{
-    return pthread_once(&once->once, init);
-}
-
-
-int virMutexInit(virMutexPtr m)
+int virMutexInit(virMutex *m)
 {
     int ret;
     pthread_mutexattr_t attr;
@@ -64,7 +66,7 @@ int virMutexInit(virMutexPtr m)
     return 0;
 }
 
-int virMutexInitRecursive(virMutexPtr m)
+int virMutexInitRecursive(virMutex *m)
 {
     int ret;
     pthread_mutexattr_t attr;
@@ -79,23 +81,23 @@ int virMutexInitRecursive(virMutexPtr m)
     return 0;
 }
 
-void virMutexDestroy(virMutexPtr m)
+void virMutexDestroy(virMutex *m)
 {
     pthread_mutex_destroy(&m->lock);
 }
 
-void virMutexLock(virMutexPtr m)
+void virMutexLock(virMutex *m)
 {
     pthread_mutex_lock(&m->lock);
 }
 
-void virMutexUnlock(virMutexPtr m)
+void virMutexUnlock(virMutex *m)
 {
     pthread_mutex_unlock(&m->lock);
 }
 
 
-int virRWLockInit(virRWLockPtr m)
+int virRWLockInit(virRWLock *m)
 {
     int ret;
     ret = pthread_rwlock_init(&m->lock, NULL);
@@ -106,29 +108,29 @@ int virRWLockInit(virRWLockPtr m)
     return 0;
 }
 
-void virRWLockDestroy(virRWLockPtr m)
+void virRWLockDestroy(virRWLock *m)
 {
     pthread_rwlock_destroy(&m->lock);
 }
 
 
-void virRWLockRead(virRWLockPtr m)
+void virRWLockRead(virRWLock *m)
 {
     pthread_rwlock_rdlock(&m->lock);
 }
 
-void virRWLockWrite(virRWLockPtr m)
+void virRWLockWrite(virRWLock *m)
 {
     pthread_rwlock_wrlock(&m->lock);
 }
 
 
-void virRWLockUnlock(virRWLockPtr m)
+void virRWLockUnlock(virRWLock *m)
 {
     pthread_rwlock_unlock(&m->lock);
 }
 
-int virCondInit(virCondPtr c)
+int virCondInit(virCond *c)
 {
     int ret;
     if ((ret = pthread_cond_init(&c->cond, NULL)) != 0) {
@@ -138,7 +140,7 @@ int virCondInit(virCondPtr c)
     return 0;
 }
 
-int virCondDestroy(virCondPtr c)
+int virCondDestroy(virCond *c)
 {
     int ret;
     if ((ret = pthread_cond_destroy(&c->cond)) != 0) {
@@ -148,7 +150,7 @@ int virCondDestroy(virCondPtr c)
     return 0;
 }
 
-int virCondWait(virCondPtr c, virMutexPtr m)
+int virCondWait(virCond *c, virMutex *m)
 {
     int ret;
     if ((ret = pthread_cond_wait(&c->cond, &m->lock)) != 0) {
@@ -158,7 +160,7 @@ int virCondWait(virCondPtr c, virMutexPtr m)
     return 0;
 }
 
-int virCondWaitUntil(virCondPtr c, virMutexPtr m, unsigned long long whenms)
+int virCondWaitUntil(virCond *c, virMutex *m, unsigned long long whenms)
 {
     int ret;
     struct timespec ts;
@@ -173,48 +175,82 @@ int virCondWaitUntil(virCondPtr c, virMutexPtr m, unsigned long long whenms)
     return 0;
 }
 
-void virCondSignal(virCondPtr c)
+void virCondSignal(virCond *c)
 {
     pthread_cond_signal(&c->cond);
 }
 
-void virCondBroadcast(virCondPtr c)
+void virCondBroadcast(virCond *c)
 {
     pthread_cond_broadcast(&c->cond);
 }
 
 struct virThreadArgs {
     virThreadFunc func;
-    const char *funcName;
+    char *name;
     bool worker;
     void *opaque;
 };
+
+size_t virThreadMaxName(void)
+{
+#if defined(__FreeBSD__) || defined(__APPLE__)
+    return 63;
+#else
+# ifdef __linux__
+    return 15;
+# else
+    return 0; /* unlimited */
+# endif
+#endif
+}
 
 static void *virThreadHelper(void *data)
 {
     struct virThreadArgs *args = data;
     struct virThreadArgs local = *args;
+    g_autofree char *thname = NULL;
+    size_t maxname = virThreadMaxName();
 
     /* Free args early, rather than tying it up during the entire thread.  */
-    VIR_FREE(args);
+    g_free(args);
 
     if (local.worker)
-        virThreadJobSetWorker(local.funcName);
+        virThreadJobSetWorker(local.name);
     else
-        virThreadJobSet(local.funcName);
+        virThreadJobSet(local.name);
+
+    if (maxname) {
+        thname = g_strndup(local.name, maxname);
+    } else {
+        thname = g_strdup(local.name);
+    }
+
+#if defined(__linux__) || defined(WIN32)
+    pthread_setname_np(pthread_self(), thname);
+#else
+# ifdef __FreeBSD__
+    pthread_set_name_np(pthread_self(), thname);
+# else
+#  ifdef __APPLE__
+    pthread_setname_np(thname);
+#  endif
+# endif
+#endif
 
     local.func(local.opaque);
 
     if (!local.worker)
         virThreadJobClear(0);
 
+    g_free(local.name);
     return NULL;
 }
 
-int virThreadCreateFull(virThreadPtr thread,
+int virThreadCreateFull(virThread *thread,
                         bool joinable,
                         virThreadFunc func,
-                        const char *funcName,
+                        const char *name,
                         bool worker,
                         void *opaque)
 {
@@ -225,13 +261,10 @@ int virThreadCreateFull(virThreadPtr thread,
 
     if ((err = pthread_attr_init(&attr)) != 0)
         goto cleanup;
-    if (VIR_ALLOC_QUIET(args) < 0) {
-        err = ENOMEM;
-        goto cleanup;
-    }
 
+    args = g_new0(struct virThreadArgs, 1);
     args->func = func;
-    args->funcName = funcName;
+    args->name = g_strdup(name);
     args->worker = worker;
     args->opaque = opaque;
 
@@ -240,7 +273,8 @@ int virThreadCreateFull(virThreadPtr thread,
 
     err = pthread_create(&thread->thread, &attr, virThreadHelper, args);
     if (err != 0) {
-        VIR_FREE(args);
+        g_free(args->name);
+        g_free(args);
         goto cleanup;
     }
     /* New thread owns 'args' in success case, so don't free */
@@ -253,12 +287,12 @@ int virThreadCreateFull(virThreadPtr thread,
     return ret;
 }
 
-void virThreadSelf(virThreadPtr thread)
+void virThreadSelf(virThread *thread)
 {
     thread->thread = pthread_self();
 }
 
-bool virThreadIsSelf(virThreadPtr thread)
+bool virThreadIsSelf(virThread *thread)
 {
     return pthread_equal(pthread_self(), thread->thread) ? true : false;
 }
@@ -268,7 +302,7 @@ bool virThreadIsSelf(virThreadPtr thread)
  * the pthread_self() id on Linux.  */
 unsigned long long virThreadSelfID(void)
 {
-#if defined(HAVE_SYS_SYSCALL_H) && defined(SYS_gettid) && defined(__linux__)
+#if defined(WITH_SYS_SYSCALL_H) && defined(SYS_gettid) && defined(__linux__)
     pid_t tid = syscall(SYS_gettid);
     return tid;
 #else
@@ -284,7 +318,7 @@ unsigned long long virThreadSelfID(void)
 /* For debugging use only; this result is not guaranteed unique if
  * pthread_t is larger than a 64-bit pointer, nor does it always match
  * the thread id of virThreadSelfID on Linux.  */
-unsigned long long virThreadID(virThreadPtr thread)
+unsigned long long virThreadID(virThread *thread)
 {
     union {
         unsigned long long l;
@@ -294,17 +328,17 @@ unsigned long long virThreadID(virThreadPtr thread)
     return u.l;
 }
 
-void virThreadJoin(virThreadPtr thread)
+void virThreadJoin(virThread *thread)
 {
     pthread_join(thread->thread, NULL);
 }
 
-void virThreadCancel(virThreadPtr thread)
+void virThreadCancel(virThread *thread)
 {
     pthread_cancel(thread->thread);
 }
 
-int virThreadLocalInit(virThreadLocalPtr l,
+int virThreadLocalInit(virThreadLocal *l,
                        virThreadLocalCleanup c)
 {
     int ret;
@@ -315,12 +349,12 @@ int virThreadLocalInit(virThreadLocalPtr l,
     return 0;
 }
 
-void *virThreadLocalGet(virThreadLocalPtr l)
+void *virThreadLocalGet(virThreadLocal *l)
 {
     return pthread_getspecific(l->key);
 }
 
-int virThreadLocalSet(virThreadLocalPtr l, void *val)
+int virThreadLocalSet(virThreadLocal *l, void *val)
 {
     int err = pthread_setspecific(l->key, val);
     if (err) {

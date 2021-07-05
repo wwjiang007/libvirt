@@ -31,13 +31,13 @@
 
 VIR_LOG_INIT("conf.storage_capabilities");
 
-static virClassPtr virStoragePoolCapsClass;
+static virClass *virStoragePoolCapsClass;
 
 
 static void
 virStoragePoolCapsDispose(void *obj)
 {
-    virStoragePoolCapsPtr caps = obj;
+    virStoragePoolCaps *caps = obj;
     VIR_DEBUG("obj=%p", caps);
 
     virObjectUnref(caps->driverCaps);
@@ -55,10 +55,10 @@ virStoragePoolCapsOnceInit(void)
 VIR_ONCE_GLOBAL_INIT(virStoragePoolCaps);
 
 
-virStoragePoolCapsPtr
-virStoragePoolCapsNew(virCapsPtr driverCaps)
+virStoragePoolCaps *
+virStoragePoolCapsNew(virCaps *driverCaps)
 {
-    virStoragePoolCapsPtr caps = NULL;
+    virStoragePoolCaps *caps = NULL;
 
     if (virStoragePoolCapsInitialize() < 0)
         return NULL;
@@ -73,7 +73,7 @@ virStoragePoolCapsNew(virCapsPtr driverCaps)
 
 
 static bool
-virStoragePoolCapsIsLoaded(virCapsPtr driverCaps,
+virStoragePoolCapsIsLoaded(virCaps *driverCaps,
                            int poolType)
 {
     size_t i;
@@ -91,9 +91,9 @@ virStoragePoolCapsIsLoaded(virCapsPtr driverCaps,
 
 
 static int
-virStoragePoolCapsFormatPool(virBufferPtr buf,
+virStoragePoolCapsFormatPool(virBuffer *buf,
                              int poolType,
-                             virStoragePoolCapsPtr const caps)
+                             const virStoragePoolCaps *caps)
 {
     bool isLoaded = virStoragePoolCapsIsLoaded(caps->driverCaps, poolType);
 
@@ -115,18 +115,16 @@ virStoragePoolCapsFormatPool(virBufferPtr buf,
 
 
 char *
-virStoragePoolCapsFormat(virStoragePoolCapsPtr const caps)
+virStoragePoolCapsFormat(const virStoragePoolCaps *caps)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     size_t i;
 
     virBufferAddLit(&buf, "<storagepoolCapabilities>\n");
     virBufferAdjustIndent(&buf, 2);
     for (i = 0; i < VIR_STORAGE_POOL_LAST; i++) {
-        if (virStoragePoolCapsFormatPool(&buf, i, caps) < 0) {
-            virBufferFreeAndReset(&buf);
+        if (virStoragePoolCapsFormatPool(&buf, i, caps) < 0)
             return NULL;
-        }
     }
     virBufferAdjustIndent(&buf, -2);
     virBufferAddLit(&buf, "</storagepoolCapabilities>\n");

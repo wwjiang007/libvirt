@@ -23,7 +23,7 @@
 #include <signal.h>
 #include <time.h>
 
-#if HAVE_MACH_CLOCK_ROUTINES
+#if WITH_MACH_CLOCK_ROUTINES
 # include <mach/clock.h>
 # include <mach/mach.h>
 #endif
@@ -34,12 +34,16 @@
 #include "virthread.h"
 #include "virlog.h"
 #include "virutil.h"
-#include "vireventpoll.h"
+#include "virevent.h"
 
 VIR_LOG_INIT("tests.eventtest");
 
 #define NUM_FDS 31
 #define NUM_TIME 31
+
+static pthread_mutex_t eventThreadMutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t eventThreadCond = PTHREAD_COND_INITIALIZER;
+static bool eventThreadSignaled;
 
 static struct handleInfo {
     int pipeFD[2];
@@ -81,16 +85,17 @@ testEventResultCallback(const void *opaque)
 }
 
 static void
-ATTRIBUTE_FMT_PRINTF(3, 4)
+G_GNUC_PRINTF(3, 4)
 testEventReport(const char *name, bool failed, const char *msg, ...)
 {
     va_list vargs;
-    va_start(vargs, msg);
     char *str = NULL;
     struct testEventResultData data;
 
-    if (msg && virVasprintfQuiet(&str, msg, vargs) != 0)
-        failed = true;
+    va_start(vargs, msg);
+
+    if (msg)
+        str = g_strdup_vprintf(msg, vargs);
 
     data.failed = failed;
     data.msg = str;
@@ -106,30 +111,38 @@ testPipeReader(int watch, int fd, int events, void *data)
     struct handleInfo *info = data;
     char one;
 
+    VIR_DEBUG("Handle callback watch=%d fd=%d ev=%d", watch, fd, events);
+    pthread_mutex_lock(&eventThreadMutex);
+
     info->fired = 1;
 
     if (watch != info->watch) {
         info->error = EV_ERROR_WATCH;
-        return;
+        goto cleanup;
     }
 
     if (fd != info->pipeFD[0]) {
         info->error = EV_ERROR_FD;
-        return;
+        goto cleanup;
     }
 
     if (!(events & VIR_EVENT_HANDLE_READABLE)) {
         info->error = EV_ERROR_EVENT;
-        return;
+        goto cleanup;
     }
     if (read(fd, &one, 1) != 1) {
         info->error = EV_ERROR_DATA;
-        return;
+        goto cleanup;
     }
     info->error = EV_ERROR_NONE;
 
     if (info->delete != -1)
-        virEventPollRemoveHandle(info->delete);
+        virEventRemoveHandle(info->delete);
+
+ cleanup:
+    pthread_cond_signal(&eventThreadCond);
+    eventThreadSignaled = true;
+    pthread_mutex_unlock(&eventThreadMutex);
 }
 
 
@@ -138,41 +151,63 @@ testTimer(int timer, void *data)
 {
     struct timerInfo *info = data;
 
+    VIR_DEBUG("Timer callback timer=%d", timer);
+    pthread_mutex_lock(&eventThreadMutex);
+
     info->fired = 1;
 
     if (timer != info->timer) {
         info->error = EV_ERROR_WATCH;
-        return;
+        goto cleanup;
     }
 
     info->error = EV_ERROR_NONE;
 
     if (info->delete != -1)
-        virEventPollRemoveTimeout(info->delete);
+        virEventRemoveTimeout(info->delete);
+
+ cleanup:
+    pthread_cond_signal(&eventThreadCond);
+    eventThreadSignaled = true;
+    pthread_mutex_unlock(&eventThreadMutex);
 }
 
-static pthread_mutex_t eventThreadMutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t eventThreadRunCond = PTHREAD_COND_INITIALIZER;
-static int eventThreadRunOnce;
-static pthread_cond_t eventThreadJobCond = PTHREAD_COND_INITIALIZER;
-static int eventThreadJobDone;
+G_GNUC_NORETURN static void *eventThreadLoop(void *data G_GNUC_UNUSED) {
+    while (1)
+        virEventRunDefaultImpl();
+    abort();
+}
 
 
-ATTRIBUTE_NORETURN static void *eventThreadLoop(void *data ATTRIBUTE_UNUSED) {
-    while (1) {
-        pthread_mutex_lock(&eventThreadMutex);
-        while (!eventThreadRunOnce)
-            pthread_cond_wait(&eventThreadRunCond, &eventThreadMutex);
-        eventThreadRunOnce = 0;
-        pthread_mutex_unlock(&eventThreadMutex);
+static void
+waitEvents(int nhandle, int ntimer)
+{
+    int ngothandle = 0;
+    int ngottimer = 0;
+    size_t i;
 
-        virEventPollRunOnce();
+    VIR_DEBUG("Wait events nhandle %d ntimer %d",
+              nhandle, ntimer);
+    while (ngothandle != nhandle || ngottimer != ntimer) {
+        while (!eventThreadSignaled)
+            pthread_cond_wait(&eventThreadCond, &eventThreadMutex);
 
-        pthread_mutex_lock(&eventThreadMutex);
-        eventThreadJobDone = 1;
-        pthread_cond_signal(&eventThreadJobCond);
-        pthread_mutex_unlock(&eventThreadMutex);
+        eventThreadSignaled = false;
+
+        ngothandle = ngottimer = 0;
+        for (i = 0; i < NUM_FDS; i++) {
+            if (handles[i].fired)
+                ngothandle++;
+        }
+        for (i = 0; i < NUM_TIME; i++) {
+            if (timers[i].fired)
+                ngottimer++;
+        }
+
+        VIR_DEBUG("Wait events ngothandle %d ngottimer %d",
+                  ngothandle, ngottimer);
     }
+
 }
 
 
@@ -182,6 +217,7 @@ verifyFired(const char *name, int handle, int timer)
     int handleFired = 0;
     int timerFired = 0;
     size_t i;
+    VIR_DEBUG("Verify fired handle %d timer %d", handle, timer);
     for (i = 0; i < NUM_FDS; i++) {
         if (handles[i].fired) {
             if (i != handle) {
@@ -248,48 +284,23 @@ verifyFired(const char *name, int handle, int timer)
     return EXIT_SUCCESS;
 }
 
-static void
-startJob(void)
-{
-    eventThreadRunOnce = 1;
-    eventThreadJobDone = 0;
-    pthread_cond_signal(&eventThreadRunCond);
-    pthread_mutex_unlock(&eventThreadMutex);
-    sched_yield();
-    pthread_mutex_lock(&eventThreadMutex);
-}
 
 static int
 finishJob(const char *name, int handle, int timer)
 {
-    struct timespec waitTime;
-    int rc;
-#if HAVE_MACH_CLOCK_ROUTINES
-    clock_serv_t cclock;
-    mach_timespec_t mts;
+    pthread_mutex_lock(&eventThreadMutex);
 
-    host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
-    clock_get_time(cclock, &mts);
-    mach_port_deallocate(mach_task_self(), cclock);
-    waitTime.tv_sec = mts.tv_sec;
-    waitTime.tv_nsec = mts.tv_nsec;
-#else
-    clock_gettime(CLOCK_REALTIME, &waitTime);
-#endif
-    waitTime.tv_sec += 5;
-    rc = 0;
-    while (!eventThreadJobDone && rc == 0)
-        rc = pthread_cond_timedwait(&eventThreadJobCond, &eventThreadMutex,
-                                    &waitTime);
-    if (rc != 0) {
-        testEventReport(name, 1, "Timed out waiting for pipe event\n");
+    waitEvents(handle == -1 ? 0 : 1,
+               timer == -1 ? 0 : 1);
+
+    if (verifyFired(name, handle, timer) != EXIT_SUCCESS) {
+        pthread_mutex_unlock(&eventThreadMutex);
         return EXIT_FAILURE;
     }
 
-    if (verifyFired(name, handle, timer) != EXIT_SUCCESS)
-        return EXIT_FAILURE;
-
     testEventReport(name, 0, NULL);
+
+    pthread_mutex_unlock(&eventThreadMutex);
     return EXIT_SUCCESS;
 }
 
@@ -297,6 +308,7 @@ static void
 resetAll(void)
 {
     size_t i;
+    pthread_mutex_lock(&eventThreadMutex);
     for (i = 0; i < NUM_FDS; i++) {
         handles[i].fired = 0;
         handles[i].error = EV_ERROR_NONE;
@@ -305,6 +317,7 @@ resetAll(void)
         timers[i].fired = 0;
         timers[i].error = EV_ERROR_NONE;
     }
+    pthread_mutex_unlock(&eventThreadMutex);
 }
 
 static int
@@ -313,50 +326,45 @@ mymain(void)
     size_t i;
     pthread_t eventThread;
     char one = '1';
+    char *debugEnv = getenv("LIBVIRT_DEBUG");
 
     for (i = 0; i < NUM_FDS; i++) {
-        if (pipe(handles[i].pipeFD) < 0) {
+        if (virPipeQuiet(handles[i].pipeFD) < 0) {
             fprintf(stderr, "Cannot create pipe: %d", errno);
             return EXIT_FAILURE;
         }
     }
 
-    if (virThreadInitialize() < 0)
-        return EXIT_FAILURE;
-    char *debugEnv = getenv("LIBVIRT_DEBUG");
     if (debugEnv && *debugEnv &&
         (virLogSetDefaultPriority(virLogParseDefaultPriority(debugEnv)) < 0)) {
         fprintf(stderr, "Invalid log level setting.\n");
         return EXIT_FAILURE;
     }
 
-    virEventPollInit();
+    virEventRegisterDefaultImpl();
 
     for (i = 0; i < NUM_FDS; i++) {
         handles[i].delete = -1;
         handles[i].watch =
-            virEventPollAddHandle(handles[i].pipeFD[0],
-                                  VIR_EVENT_HANDLE_READABLE,
-                                  testPipeReader,
-                                  &handles[i], NULL);
+            virEventAddHandle(handles[i].pipeFD[0],
+                              VIR_EVENT_HANDLE_READABLE,
+                              testPipeReader,
+                              &handles[i], NULL);
     }
 
     for (i = 0; i < NUM_TIME; i++) {
         timers[i].delete = -1;
         timers[i].timeout = -1;
         timers[i].timer =
-            virEventPollAddTimeout(timers[i].timeout,
-                                   testTimer,
-                                   &timers[i], NULL);
+            virEventAddTimeout(timers[i].timeout,
+                               testTimer,
+                               &timers[i], NULL);
     }
 
     pthread_create(&eventThread, NULL, eventThreadLoop, NULL);
 
-    pthread_mutex_lock(&eventThreadMutex);
-
     /* First time, is easy - just try triggering one of our
      * registered handles */
-    startJob();
     if (safewrite(handles[1].pipeFD[1], &one, 1) != 1)
         return EXIT_FAILURE;
     if (finishJob("Simple write", 1, -1) != EXIT_SUCCESS)
@@ -366,8 +374,7 @@ mymain(void)
 
     /* Now lets delete one before starting poll(), and
      * try triggering another handle */
-    virEventPollRemoveHandle(handles[0].watch);
-    startJob();
+    virEventRemoveHandle(handles[0].watch);
     if (safewrite(handles[1].pipeFD[1], &one, 1) != 1)
         return EXIT_FAILURE;
     if (finishJob("Deleted before poll", 1, -1) != EXIT_SUCCESS)
@@ -378,15 +385,7 @@ mymain(void)
     /* Next lets delete *during* poll, which should interrupt
      * the loop with no event showing */
 
-    /* NB: this case is subject to a bit of a race condition.
-     * We yield & sleep, and pray that the other thread gets
-     * scheduled before we run EventRemoveHandle */
-    startJob();
-    pthread_mutex_unlock(&eventThreadMutex);
-    sched_yield();
-    usleep(100 * 1000);
-    pthread_mutex_lock(&eventThreadMutex);
-    virEventPollRemoveHandle(handles[1].watch);
+    virEventRemoveHandle(handles[1].watch);
     if (finishJob("Interrupted during poll", -1, -1) != EXIT_SUCCESS)
         return EXIT_FAILURE;
 
@@ -394,12 +393,6 @@ mymain(void)
 
     /* Getting more fun, lets delete a later handle during dispatch */
 
-    /* NB: this case is subject to a bit of a race condition.
-     * Only 1 time in 3 does the 2nd write get triggered by
-     * before poll() exits for the first safewrite(). We don't
-     * see a hard failure in other cases, so nothing to worry
-     * about */
-    startJob();
     handles[2].delete = handles[3].watch;
     if (safewrite(handles[2].pipeFD[1], &one, 1) != 1
         || safewrite(handles[3].pipeFD[1], &one, 1) != 1)
@@ -410,7 +403,6 @@ mymain(void)
     resetAll();
 
     /* Extreme fun, lets delete ourselves during dispatch */
-    startJob();
     handles[2].delete = handles[2].watch;
     if (safewrite(handles[2].pipeFD[1], &one, 1) != 1)
         return EXIT_FAILURE;
@@ -422,37 +414,27 @@ mymain(void)
 
 
     /* Run a timer on its own */
-    virEventPollUpdateTimeout(timers[1].timer, 100);
-    startJob();
+    virEventUpdateTimeout(timers[1].timer, 100);
     if (finishJob("Firing a timer", -1, 1) != EXIT_SUCCESS)
         return EXIT_FAILURE;
-    virEventPollUpdateTimeout(timers[1].timer, -1);
+    virEventUpdateTimeout(timers[1].timer, -1);
 
     resetAll();
 
     /* Now lets delete one before starting poll(), and
      * try triggering another timer */
-    virEventPollUpdateTimeout(timers[1].timer, 100);
-    virEventPollRemoveTimeout(timers[0].timer);
-    startJob();
+    virEventUpdateTimeout(timers[1].timer, 100);
+    virEventRemoveTimeout(timers[0].timer);
     if (finishJob("Deleted before poll", -1, 1) != EXIT_SUCCESS)
         return EXIT_FAILURE;
-    virEventPollUpdateTimeout(timers[1].timer, -1);
+    virEventUpdateTimeout(timers[1].timer, -1);
 
     resetAll();
 
     /* Next lets delete *during* poll, which should interrupt
      * the loop with no event showing */
 
-    /* NB: this case is subject to a bit of a race condition.
-     * We yield & sleep, and pray that the other thread gets
-     * scheduled before we run EventRemoveTimeout */
-    startJob();
-    pthread_mutex_unlock(&eventThreadMutex);
-    sched_yield();
-    usleep(100 * 1000);
-    pthread_mutex_lock(&eventThreadMutex);
-    virEventPollRemoveTimeout(timers[1].timer);
+    virEventRemoveTimeout(timers[1].timer);
     if (finishJob("Interrupted during poll", -1, -1) != EXIT_SUCCESS)
         return EXIT_FAILURE;
 
@@ -460,38 +442,30 @@ mymain(void)
 
     /* Getting more fun, lets delete a later timer during dispatch */
 
-    /* NB: this case is subject to a bit of a race condition.
-     * Only 1 time in 3 does the 2nd write get triggered by
-     * before poll() exits for the first safewrite(). We don't
-     * see a hard failure in other cases, so nothing to worry
-     * about */
-    virEventPollUpdateTimeout(timers[2].timer, 100);
-    virEventPollUpdateTimeout(timers[3].timer, 100);
-    startJob();
+    virEventUpdateTimeout(timers[2].timer, 100);
+    virEventUpdateTimeout(timers[3].timer, 100);
     timers[2].delete = timers[3].timer;
     if (finishJob("Deleted during dispatch", -1, 2) != EXIT_SUCCESS)
         return EXIT_FAILURE;
-    virEventPollUpdateTimeout(timers[2].timer, -1);
+    virEventUpdateTimeout(timers[2].timer, -1);
 
     resetAll();
 
     /* Extreme fun, lets delete ourselves during dispatch */
-    virEventPollUpdateTimeout(timers[2].timer, 100);
-    startJob();
+    virEventUpdateTimeout(timers[2].timer, 100);
     timers[2].delete = timers[2].timer;
     if (finishJob("Deleted during dispatch", -1, 2) != EXIT_SUCCESS)
         return EXIT_FAILURE;
 
     for (i = 0; i < NUM_FDS - 1; i++)
-        virEventPollRemoveHandle(handles[i].watch);
+        virEventRemoveHandle(handles[i].watch);
     for (i = 0; i < NUM_TIME - 1; i++)
-        virEventPollRemoveTimeout(timers[i].timer);
+        virEventRemoveTimeout(timers[i].timer);
 
     resetAll();
 
     /* Make sure the last handle still works several times in a row.  */
     for (i = 0; i < 4; i++) {
-        startJob();
         if (safewrite(handles[NUM_FDS - 1].pipeFD[1], &one, 1) != 1)
             return EXIT_FAILURE;
         if (finishJob("Simple write", NUM_FDS - 1, -1) != EXIT_SUCCESS)
@@ -506,15 +480,15 @@ mymain(void)
     handles[0].pipeFD[0] = handles[1].pipeFD[0];
     handles[0].pipeFD[1] = handles[1].pipeFD[1];
 
-    handles[0].watch = virEventPollAddHandle(handles[0].pipeFD[0],
-                                             0,
-                                             testPipeReader,
-                                             &handles[0], NULL);
-    handles[1].watch = virEventPollAddHandle(handles[1].pipeFD[0],
-                                             VIR_EVENT_HANDLE_READABLE,
-                                             testPipeReader,
-                                             &handles[1], NULL);
-    startJob();
+    handles[0].watch = virEventAddHandle(handles[0].pipeFD[0],
+                                         0,
+                                         testPipeReader,
+                                         &handles[0], NULL);
+    handles[1].watch = virEventAddHandle(handles[1].pipeFD[0],
+                                         VIR_EVENT_HANDLE_READABLE,
+                                         testPipeReader,
+                                         &handles[1], NULL);
+
     if (safewrite(handles[1].pipeFD[1], &one, 1) != 1)
         return EXIT_FAILURE;
     if (finishJob("Write duplicate", 1, -1) != EXIT_SUCCESS)

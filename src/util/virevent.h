@@ -19,8 +19,7 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIREVENT_H
-# define LIBVIRT_VIREVENT_H
-# include "internal.h"
+#pragma once
+#include "internal.h"
 
-#endif /* LIBVIRT_VIREVENT_H */
+int virEventRequireImpl(void);

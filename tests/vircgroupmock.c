@@ -23,18 +23,13 @@
 # include <unistd.h>
 # include <fcntl.h>
 # include <sys/stat.h>
-
-# ifdef MAJOR_IN_MKDEV
-#  include <sys/mkdev.h>
-# elif MAJOR_IN_SYSMACROS
-#  include <sys/sysmacros.h>
-# endif
-
+# include <sys/sysmacros.h>
 # include <stdarg.h>
 # include "testutilslxc.h"
 # include "virstring.h"
 # include "virfile.h"
 # include "viralloc.h"
+# include "vircgroupv2devices.h"
 
 static int (*real_open)(const char *path, int flags, ...);
 static FILE *(*real_fopen)(const char *path, const char *mode);
@@ -63,7 +58,7 @@ const char *fakedevicedir1 = FAKEDEVDIR1;
  * use /sys/fs/cgroup, because we want to make it easy to
  * detect places where we've not mocked enough syscalls.
  *
- * In any open/acces/mkdir calls we look at path and if
+ * In any open/access/mkdir calls we look at path and if
  * it starts with /not/really/sys/fs/cgroup, we rewrite
  * the path to point at a subdirectory of the temporary
  * directory referred to by LIBVIRT_FAKE_ROOT_DIR env
@@ -103,7 +98,6 @@ static int make_file(const char *path,
 
 static int make_controller_v1(const char *path, mode_t mode)
 {
-    int ret = -1;
     const char *controller;
 
     if (!STRPREFIX(path, fakesysfscgroupdir)) {
@@ -118,12 +112,12 @@ static int make_controller_v1(const char *path, mode_t mode)
         return symlink("cpu,cpuacct", path);
 
     if (real_mkdir(path, mode) < 0)
-        goto cleanup;
+        return -1;
 
 # define MAKE_FILE(name, value) \
     do { \
         if (make_file(path, name, value) < 0) \
-            goto cleanup; \
+            return -1; \
     } while (0)
 
     if (STRPREFIX(controller, "cpu,cpuacct")) {
@@ -224,14 +218,12 @@ static int make_controller_v1(const char *path, mode_t mode)
 
     } else {
         errno = EINVAL;
-        goto cleanup;
+        return -1;
     }
 
 # undef MAKE_FILE
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -376,11 +368,10 @@ static void init_sysfs(void)
 
     VIR_FREE(fakesysfscgroupdir);
 
-    if (virAsprintfQuiet(&fakesysfscgroupdir, "%s%s",
-                         fakerootdir, SYSFS_CGROUP_PREFIX) < 0)
-        abort();
+    fakesysfscgroupdir = g_strdup_printf("%s%s",
+                                         fakerootdir, SYSFS_CGROUP_PREFIX);
 
-    if (virFileMakePath(fakesysfscgroupdir) < 0) {
+    if (g_mkdir_with_parents(fakesysfscgroupdir, 0777) < 0) {
         fprintf(stderr, "Cannot create %s\n", fakesysfscgroupdir);
         abort();
     }
@@ -459,10 +450,8 @@ FILE *fopen(const char *path, const char *mode)
             errno = EACCES;
             return NULL;
         }
-        if (virAsprintfQuiet(&filepath, "%s/vircgroupdata/%s.%s",
-                             abs_srcdir, filename, type) < 0) {
-            abort();
-        }
+        filepath = g_strdup_printf("%s/vircgroupdata/%s.%s",
+                                   abs_srcdir, filename, type);
         rc = real_fopen(filepath, mode);
         free(filepath);
         return rc;
@@ -478,8 +467,10 @@ int access(const char *path, int mode)
     init_syms();
 
     if (STRPREFIX(path, SYSFS_CGROUP_PREFIX)) {
-        init_sysfs();
         char *newpath;
+
+        init_sysfs();
+
         if (asprintf(&newpath, "%s%s",
                      fakesysfscgroupdir,
                      path + strlen(SYSFS_CGROUP_PREFIX)) < 0) {
@@ -545,8 +536,10 @@ int mkdir(const char *path, mode_t mode)
     init_syms();
 
     if (STRPREFIX(path, SYSFS_CGROUP_PREFIX)) {
-        init_sysfs();
         char *newpath;
+
+        init_sysfs();
+
         if (asprintf(&newpath, "%s%s",
                      fakesysfscgroupdir,
                      path + strlen(SYSFS_CGROUP_PREFIX)) < 0) {
@@ -599,6 +592,12 @@ int open(const char *path, int flags, ...)
     }
     free(newpath);
     return ret;
+}
+
+bool
+virCgroupV2DevicesAvailable(virCgroup *group G_GNUC_UNUSED)
+{
+    return true;
 }
 #else
 /* Nothing to override on non-__linux__ platforms */

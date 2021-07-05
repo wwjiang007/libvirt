@@ -73,10 +73,10 @@ struct testIscsiadmCbData {
 };
 
 static void testIscsiadmCb(const char *const*args,
-                           const char *const*env ATTRIBUTE_UNUSED,
-                           const char *input ATTRIBUTE_UNUSED,
+                           const char *const*env G_GNUC_UNUSED,
+                           const char *input G_GNUC_UNUSED,
                            char **output,
-                           char **error ATTRIBUTE_UNUSED,
+                           char **error G_GNUC_UNUSED,
                            int *status,
                            void *opaque)
 {
@@ -87,9 +87,9 @@ static void testIscsiadmCb(const char *const*args,
         args[2] && STREQ(args[2], "session") &&
         args[3] == NULL) {
         if (data->output_version)
-            ignore_value(VIR_STRDUP(*output, iscsiadmSessionOutputNonFlash));
+            *output = g_strdup(iscsiadmSessionOutputNonFlash);
         else
-            ignore_value(VIR_STRDUP(*output, iscsiadmSessionOutput));
+            *output = g_strdup(iscsiadmSessionOutput);
     } else if (args[0] && STREQ(args[0], ISCSIADM) &&
                args[1] && STREQ(args[1], "--mode") &&
                args[2] && STREQ(args[2], "discovery") &&
@@ -100,7 +100,7 @@ static void testIscsiadmCb(const char *const*args,
                args[7] && STREQ(args[7], "--op") &&
                args[8] && STREQ(args[8], "nonpersistent") &&
                args[9] == NULL) {
-        ignore_value(VIR_STRDUP(*output, iscsiadmSendtargetsOutput));
+        *output = g_strdup(iscsiadmSendtargetsOutput);
     } else if (args[0] && STREQ(args[0], ISCSIADM) &&
                args[1] && STREQ(args[1], "--mode") &&
                args[2] && STREQ(args[2], "node") &&
@@ -125,9 +125,9 @@ static void testIscsiadmCb(const char *const*args,
                args[2] && STREQ(args[2], "iface") &&
                args[3] == NULL) {
         if (data->iface_created)
-            ignore_value(VIR_STRDUP(*output, iscsiadmIfaceIfaceOutput));
+            *output = g_strdup(iscsiadmIfaceIfaceOutput);
         else
-            ignore_value(VIR_STRDUP(*output, iscsiadmIfaceDefaultOutput));
+            *output = g_strdup(iscsiadmIfaceDefaultOutput);
     } else if (args[0] && STREQ(args[0], ISCSIADM) &&
                args[1] && STREQ(args[1], "--mode") &&
                args[2] && STREQ(args[2], "iface") &&
@@ -171,7 +171,7 @@ static void testIscsiadmCb(const char *const*args,
                args[8] && STREQ(args[8], "libvirt-iface-03020100") &&
                args[9] == NULL &&
                data->iface_created) {
-        ignore_value(VIR_STRDUP(*output, iscsiadmSendtargetsOutput));
+        *output = g_strdup(iscsiadmSendtargetsOutput);
     } else if (args[0] && STREQ(args[0], ISCSIADM) &&
                args[1] && STREQ(args[1], "--mode") &&
                args[2] && STREQ(args[2], "node") &&
@@ -212,10 +212,11 @@ testISCSIGetSession(const void *data)
     struct testIscsiadmCbData cbData = { 0 };
     char *actual_session = NULL;
     int ret = -1;
+    g_autoptr(virCommandDryRunToken) dryRunToken = virCommandDryRunTokenNew();
 
     cbData.output_version = info->output_version;
 
-    virCommandSetDryRun(NULL, testIscsiadmCb, &cbData);
+    virCommandSetDryRun(dryRunToken, NULL, false, false, testIscsiadmCb, &cbData);
 
     actual_session = virISCSIGetSession(info->device_path, true);
 
@@ -230,7 +231,6 @@ testISCSIGetSession(const void *data)
     ret = 0;
 
  cleanup:
-    virCommandSetDryRun(NULL, NULL, NULL);
     VIR_FREE(actual_session);
     return ret;
 }
@@ -250,8 +250,9 @@ testISCSIScanTargets(const void *data)
     char **targets = NULL;
     int ret = -1;
     size_t i;
+    g_autoptr(virCommandDryRunToken) dryRunToken = virCommandDryRunTokenNew();
 
-    virCommandSetDryRun(NULL, testIscsiadmCb, NULL);
+    virCommandSetDryRun(dryRunToken, NULL, false, false, testIscsiadmCb, NULL);
 
     if (virISCSIScanTargets(info->portal, NULL,
                             false, &ntargets, &targets) < 0)
@@ -276,7 +277,6 @@ testISCSIScanTargets(const void *data)
     ret = 0;
 
  cleanup:
-    virCommandSetDryRun(NULL, NULL, NULL);
     for (i = 0; i < ntargets; i++)
         VIR_FREE(targets[i]);
     VIR_FREE(targets);
@@ -297,16 +297,39 @@ testISCSIConnectionLogin(const void *data)
     const struct testConnectionInfoLogin *info = data;
     struct testIscsiadmCbData cbData = { 0 };
     int ret = -1;
+    g_autoptr(virCommandDryRunToken) dryRunToken = virCommandDryRunTokenNew();
 
-    virCommandSetDryRun(NULL, testIscsiadmCb, &cbData);
+    virCommandSetDryRun(dryRunToken, NULL, false, false, testIscsiadmCb, &cbData);
 
     if (virISCSIConnectionLogin(info->portal, info->initiatoriqn, info->target) < 0)
         goto cleanup;
 
     ret = 0;
  cleanup:
-    virCommandSetDryRun(NULL, NULL, NULL);
     return ret;
+}
+
+
+static int
+testISCSIScanTargetsTests(void)
+{
+    const char *targets[] = {
+        "iqn.2004-06.example:example1:iscsi.test",
+        "iqn.2005-05.example:example1:iscsi.hello",
+        "iqn.2006-04.example:example1:iscsi.world",
+        "iqn.2007-04.example:example1:iscsi.foo",
+        "iqn.2008-04.example:example1:iscsi.bar",
+        "iqn.2009-04.example:example1:iscsi.seven"
+    };
+    struct testScanTargetsInfo infoTargets = {
+        .fake_cmd_output = "iscsiadm_sendtargets",
+        .portal = "10.20.30.40:3260,1",
+        .expected_targets = targets,
+        .nexpected = G_N_ELEMENTS(targets),
+    };
+    if (virTestRun("ISCSI scan targets", testISCSIScanTargets, &infoTargets) < 0)
+        return -1;
+    return 0;
 }
 
 
@@ -331,21 +354,7 @@ mymain(void)
     DO_SESSION_TEST("iqn.2009-04.example:example1:iscsi.seven", "7");
     DO_SESSION_TEST("iqn.2009-04.example:example1:iscsi.eight", NULL);
 
-    const char *targets[] = {
-        "iqn.2004-06.example:example1:iscsi.test",
-        "iqn.2005-05.example:example1:iscsi.hello",
-        "iqn.2006-04.example:example1:iscsi.world",
-        "iqn.2007-04.example:example1:iscsi.foo",
-        "iqn.2008-04.example:example1:iscsi.bar",
-        "iqn.2009-04.example:example1:iscsi.seven"
-    };
-    struct testScanTargetsInfo infoTargets = {
-        .fake_cmd_output = "iscsiadm_sendtargets",
-        .portal = "10.20.30.40:3260,1",
-        .expected_targets = targets,
-        .nexpected = ARRAY_CARDINALITY(targets),
-    };
-    if (virTestRun("ISCSI scan targets", testISCSIScanTargets, &infoTargets) < 0)
+    if (testISCSIScanTargetsTests() < 0)
         rv = -1;
 
 # define DO_LOGIN_TEST(portal, iqn, target) \
@@ -365,6 +374,5 @@ mymain(void)
     return EXIT_SUCCESS;
 }
 
-VIR_TEST_MAIN_PRELOAD(mymain,
-                      abs_builddir "/.libs/virrandommock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("virrandom"))
 #endif /* WIN32 */

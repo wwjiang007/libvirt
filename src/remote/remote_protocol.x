@@ -37,7 +37,7 @@
 %#include <libvirt/libvirt.h>
 %#include "internal.h"
 %#include "virxdrdefs.h"
-%#include <arpa/inet.h>
+%#include "virsocket.h"
 
 /*----- Data types. -----*/
 
@@ -52,6 +52,9 @@ typedef string remote_nonnull_string<REMOTE_STRING_MAX>;
 
 /* A long string, which may be NULL. */
 typedef remote_nonnull_string *remote_string;
+
+/* Upper limit on identity parameters */
+const REMOTE_CONNECT_IDENTITY_PARAMS_MAX = 20;
 
 /* Upper limit on lists of domains. */
 const REMOTE_DOMAIN_LIST_MAX = 16384;
@@ -73,6 +76,9 @@ const REMOTE_MIGRATE_COOKIE_MAX = 4194304;
 
 /* Upper limit on lists of networks. */
 const REMOTE_NETWORK_LIST_MAX = 16384;
+
+/* Upper limit on lists of network ports. */
+const REMOTE_NETWORK_PORT_LIST_MAX = 16384;
 
 /* Upper limit on lists of interfaces. */
 const REMOTE_INTERFACE_LIST_MAX = 16384;
@@ -136,6 +142,9 @@ const REMOTE_AUTH_TYPE_LIST_MAX = 20;
 
 /* Upper limit on list of memory stats */
 const REMOTE_DOMAIN_MEMORY_STATS_MAX = 1024;
+
+/* Upper limit on lists of domain checkpoints. */
+const REMOTE_DOMAIN_CHECKPOINT_LIST_MAX = 16384;
 
 /* Upper limit on lists of domain snapshots. */
 const REMOTE_DOMAIN_SNAPSHOT_LIST_MAX = 16384;
@@ -263,6 +272,21 @@ const REMOTE_NODE_SEV_INFO_MAX = 64;
 /* Upper limit on number of launch security information entries */
 const REMOTE_DOMAIN_LAUNCH_SECURITY_INFO_PARAMS_MAX = 64;
 
+/* Upper limit on number of parameters describing a guest */
+const REMOTE_DOMAIN_GUEST_INFO_PARAMS_MAX = 2048;
+
+/*
+ * Upper limit on list of network port parameters
+ */
+const REMOTE_NETWORK_PORT_PARAMETERS_MAX = 16;
+
+/* Upper limit on number of SSH keys */
+const REMOTE_DOMAIN_AUTHORIZED_SSH_KEYS_MAX = 2048;
+
+/* Upper limit on number of messages */
+const REMOTE_DOMAIN_MESSAGES_MAX = 2048;
+
+
 /* UUID.  VIR_UUID_BUFLEN definition comes from libvirt.h */
 typedef opaque remote_uuid[VIR_UUID_BUFLEN];
 
@@ -276,6 +300,11 @@ struct remote_nonnull_domain {
 /* A network which may not be NULL. */
 struct remote_nonnull_network {
     remote_nonnull_string name;
+    remote_uuid uuid;
+};
+
+struct remote_nonnull_network_port {
+    remote_nonnull_network net;
     remote_uuid uuid;
 };
 
@@ -322,6 +351,12 @@ struct remote_nonnull_secret {
     remote_nonnull_string usageID;
 };
 
+/* A checkpoint which may not be NULL. */
+struct remote_nonnull_domain_checkpoint {
+    remote_nonnull_string name;
+    remote_nonnull_domain dom;
+};
+
 /* A snapshot which may not be NULL. */
 struct remote_nonnull_domain_snapshot {
     remote_nonnull_string name;
@@ -331,6 +366,7 @@ struct remote_nonnull_domain_snapshot {
 /* A domain or network which may be NULL. */
 typedef remote_nonnull_domain *remote_domain;
 typedef remote_nonnull_network *remote_network;
+typedef remote_nonnull_network_port *remote_network_port;
 typedef remote_nonnull_nwfilter *remote_nwfilter;
 typedef remote_nonnull_nwfilter_binding *remote_nwfilter_binding;
 typedef remote_nonnull_storage_pool *remote_storage_pool;
@@ -2109,6 +2145,25 @@ struct remote_node_device_destroy_args {
     remote_nonnull_string name;
 };
 
+struct remote_node_device_define_xml_args {
+    remote_nonnull_string xml_desc;
+    unsigned int flags;
+};
+
+struct remote_node_device_define_xml_ret {
+    remote_nonnull_node_device dev;
+};
+
+struct remote_node_device_undefine_args {
+    remote_nonnull_string name;
+    unsigned int flags;
+};
+
+struct remote_node_device_create_args {
+    remote_nonnull_string name;
+    unsigned int flags;
+};
+
 
 /*
  * Events Register/Deregister:
@@ -3439,6 +3494,14 @@ struct remote_domain_event_callback_metadata_change_msg {
     remote_string nsuri;
 };
 
+struct remote_domain_event_memory_failure_msg {
+    int callbackID;
+    remote_nonnull_domain dom;
+    int recipient;
+    int action;
+    unsigned int flags;
+};
+
 struct remote_connect_secret_event_register_any_args {
     int eventID;
     remote_secret secret;
@@ -3573,6 +3636,207 @@ struct remote_connect_get_storage_pool_capabilities_ret {
     remote_nonnull_string capabilities;
 };
 
+struct remote_network_list_all_ports_args {
+    remote_nonnull_network network;
+    int need_results;
+    unsigned int flags;
+};
+
+struct remote_network_list_all_ports_ret { /* insert@1 */
+    remote_nonnull_network_port ports<REMOTE_NETWORK_PORT_LIST_MAX>;
+    unsigned int ret;
+};
+
+struct remote_network_port_lookup_by_uuid_args {
+    remote_nonnull_network network;
+    remote_uuid uuid;
+};
+
+struct remote_network_port_lookup_by_uuid_ret {
+    remote_nonnull_network_port port;
+};
+
+struct remote_network_port_create_xml_args {
+    remote_nonnull_network network;
+    remote_nonnull_string xml;
+    unsigned int flags;
+};
+
+struct remote_network_port_create_xml_ret {
+    remote_nonnull_network_port port;
+};
+
+struct remote_network_port_set_parameters_args {
+    remote_nonnull_network_port port;
+    remote_typed_param params<REMOTE_NETWORK_PORT_PARAMETERS_MAX>;
+    unsigned int flags;
+};
+
+struct remote_network_port_get_parameters_args {
+    remote_nonnull_network_port port;
+    int nparams;
+    unsigned int flags;
+};
+
+struct remote_network_port_get_parameters_ret {
+    remote_typed_param params<REMOTE_NETWORK_PORT_PARAMETERS_MAX>;
+    int nparams;
+};
+
+struct remote_network_port_get_xml_desc_args {
+    remote_nonnull_network_port port;
+    unsigned int flags;
+};
+
+struct remote_network_port_get_xml_desc_ret {
+    remote_nonnull_string xml;
+};
+
+struct remote_network_port_delete_args {
+    remote_nonnull_network_port port;
+    unsigned int flags;
+};
+
+struct remote_domain_checkpoint_create_xml_args {
+    remote_nonnull_domain dom;
+    remote_nonnull_string xml_desc;
+    unsigned int flags;
+};
+
+struct remote_domain_checkpoint_create_xml_ret {
+    remote_nonnull_domain_checkpoint checkpoint;
+};
+
+struct remote_domain_checkpoint_get_xml_desc_args {
+    remote_nonnull_domain_checkpoint checkpoint;
+    unsigned int flags;
+};
+
+struct remote_domain_checkpoint_get_xml_desc_ret {
+    remote_nonnull_string xml;
+};
+
+struct remote_domain_list_all_checkpoints_args {
+    remote_nonnull_domain dom;
+    int need_results;
+    unsigned int flags;
+};
+
+struct remote_domain_list_all_checkpoints_ret { /* insert@1 */
+    remote_nonnull_domain_checkpoint checkpoints<REMOTE_DOMAIN_CHECKPOINT_LIST_MAX>;
+    int ret;
+};
+
+struct remote_domain_checkpoint_list_all_children_args {
+    remote_nonnull_domain_checkpoint checkpoint;
+    int need_results;
+    unsigned int flags;
+};
+
+struct remote_domain_checkpoint_list_all_children_ret { /* insert@1 */
+    remote_nonnull_domain_checkpoint checkpoints<REMOTE_DOMAIN_CHECKPOINT_LIST_MAX>;
+    int ret;
+};
+
+struct remote_domain_checkpoint_lookup_by_name_args {
+    remote_nonnull_domain dom;
+    remote_nonnull_string name;
+    unsigned int flags;
+};
+
+struct remote_domain_checkpoint_lookup_by_name_ret {
+    remote_nonnull_domain_checkpoint checkpoint;
+};
+
+struct remote_domain_checkpoint_get_parent_args {
+    remote_nonnull_domain_checkpoint checkpoint;
+    unsigned int flags;
+};
+
+struct remote_domain_checkpoint_get_parent_ret {
+    remote_nonnull_domain_checkpoint parent;
+};
+
+struct remote_domain_checkpoint_delete_args {
+    remote_nonnull_domain_checkpoint checkpoint;
+    unsigned int flags;
+};
+
+struct remote_domain_get_guest_info_args {
+    remote_nonnull_domain dom;
+    unsigned int types;
+    unsigned int flags;
+};
+
+struct remote_domain_get_guest_info_ret {
+    remote_typed_param params<REMOTE_DOMAIN_GUEST_INFO_PARAMS_MAX>;
+};
+
+struct remote_connect_set_identity_args {
+    remote_typed_param params<REMOTE_CONNECT_IDENTITY_PARAMS_MAX>;
+    unsigned int flags;
+};
+
+struct remote_domain_agent_set_response_timeout_args {
+    remote_nonnull_domain dom;
+    int timeout;
+    unsigned int flags;
+};
+
+struct remote_domain_agent_set_response_timeout_ret {
+    int result;
+};
+
+
+struct remote_domain_backup_begin_args {
+    remote_nonnull_domain dom;
+    remote_nonnull_string backup_xml;
+    remote_string checkpoint_xml;
+    unsigned int flags;
+};
+
+struct remote_domain_backup_get_xml_desc_args {
+    remote_nonnull_domain dom;
+    unsigned int flags;
+};
+
+struct remote_domain_backup_get_xml_desc_ret {
+    remote_nonnull_string xml;
+};
+
+struct remote_domain_authorized_ssh_keys_get_args {
+    remote_nonnull_domain dom;
+    remote_nonnull_string user;
+    unsigned int flags;
+};
+
+struct remote_domain_authorized_ssh_keys_get_ret {
+    remote_nonnull_string keys<REMOTE_DOMAIN_AUTHORIZED_SSH_KEYS_MAX>;
+};
+
+struct remote_domain_authorized_ssh_keys_set_args {
+    remote_nonnull_domain dom;
+    remote_nonnull_string user;
+    remote_nonnull_string keys<REMOTE_DOMAIN_AUTHORIZED_SSH_KEYS_MAX>;
+    unsigned int flags;
+};
+
+struct remote_domain_get_messages_args {
+    remote_nonnull_domain dom;
+    unsigned int flags;
+};
+
+struct remote_domain_get_messages_ret {
+    remote_nonnull_string msgs<REMOTE_DOMAIN_MESSAGES_MAX>;
+};
+
+struct remote_domain_start_dirty_rate_calc_args {
+    remote_nonnull_domain dom;
+    int seconds;
+    unsigned int flags;
+};
+
+
 /*----- Protocol. -----*/
 
 /* Define the program number, protocol version and procedure numbers here. */
@@ -3607,6 +3871,7 @@ enum remote_procedure {
      *
      * - @acl: <object>:<permission>
      * - @acl: <object>:<permission>:<flagname>
+     * - @acl: <object>:<permission>::<param>:<value>
      *
      *   Declare the access control requirements for the API. May be repeated
      *   multiple times, if multiple rules are required.
@@ -3616,6 +3881,8 @@ enum remote_procedure {
      *     <permission> is one of the permissions in access/viraccessperm.h
      *     <flagname> indicates the rule only applies if the named flag
      *     is set in the API call
+     *     <param> and <value> can be used to check an unsigned int parameter
+     *     against value
      *
      * - @aclfilter: <object>:<permission>
      *
@@ -5242,8 +5509,7 @@ enum remote_procedure {
     /**
      * @generate: both
      * @priority: high
-     * @acl: domain:read
-     * @acl: domain:read_secure:VIR_DOMAIN_SAVE_IMAGE_XML_SECURE
+     * @acl: domain:write
      */
     REMOTE_PROC_DOMAIN_SAVE_IMAGE_GET_XML_DESC = 235,
 
@@ -6011,6 +6277,7 @@ enum remote_procedure {
     /**
      * @generate: none
      * @acl: domain:read
+     * @acl: domain:write::source:VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_AGENT
      */
     REMOTE_PROC_DOMAIN_INTERFACE_ADDRESSES = 353,
 
@@ -6170,7 +6437,7 @@ enum remote_procedure {
     REMOTE_PROC_NODE_DEVICE_EVENT_UPDATE = 377,
 
     /**
-     * @generate: none
+     * @generate: server
      * @priority: high
      * @acl: storage_vol:read
      */
@@ -6342,5 +6609,181 @@ enum remote_procedure {
      * @generate: both
      * @acl: connect:read
      */
-    REMOTE_PROC_CONNECT_GET_STORAGE_POOL_CAPABILITIES = 403
+    REMOTE_PROC_CONNECT_GET_STORAGE_POOL_CAPABILITIES = 403,
+
+    /**
+     * @generate: both
+     * @priority: high
+     * @acl: network:search_ports
+     * @aclfilter: network_port:getattr
+     */
+    REMOTE_PROC_NETWORK_LIST_ALL_PORTS = 404,
+
+    /**
+     * @generate: both
+     * @priority: high
+     * @acl: network_port:getattr
+     */
+    REMOTE_PROC_NETWORK_PORT_LOOKUP_BY_UUID = 405,
+
+    /**
+     * @generate: both
+     * @acl: network_port:create
+     */
+    REMOTE_PROC_NETWORK_PORT_CREATE_XML = 406,
+
+    /**
+     * @generate: none
+     * @acl: network_port:read
+     */
+    REMOTE_PROC_NETWORK_PORT_GET_PARAMETERS = 407,
+
+    /**
+     * @generate: both
+     * @acl: network_port:write
+     */
+    REMOTE_PROC_NETWORK_PORT_SET_PARAMETERS = 408,
+
+    /**
+     * @generate: both
+     * @acl: network_port:read
+     */
+    REMOTE_PROC_NETWORK_PORT_GET_XML_DESC = 409,
+
+    /**
+     * @generate: both
+     * @acl: network_port:delete
+     */
+    REMOTE_PROC_NETWORK_PORT_DELETE = 410,
+
+    /**
+     * @generate: both
+     * @acl: domain:checkpoint
+     * @acl: domain:fs_freeze:VIR_DOMAIN_CHECKPOINT_CREATE_QUIESCE
+     */
+    REMOTE_PROC_DOMAIN_CHECKPOINT_CREATE_XML = 411,
+
+    /**
+     * @generate: both
+     * @acl: domain:read
+     * @acl: domain:read_secure:VIR_DOMAIN_CHECKPOINT_XML_SECURE
+     */
+    REMOTE_PROC_DOMAIN_CHECKPOINT_GET_XML_DESC = 412,
+
+    /**
+     * @generate: both
+     * @priority: high
+     * @acl: domain:read
+     */
+    REMOTE_PROC_DOMAIN_LIST_ALL_CHECKPOINTS = 413,
+
+    /**
+     * @generate: both
+     * @priority: high
+     * @acl: domain:read
+     */
+    REMOTE_PROC_DOMAIN_CHECKPOINT_LIST_ALL_CHILDREN = 414,
+
+    /**
+     * @generate: both
+     * @priority: high
+     * @acl: domain:read
+     */
+    REMOTE_PROC_DOMAIN_CHECKPOINT_LOOKUP_BY_NAME = 415,
+
+    /**
+     * @generate: both
+     * @priority: high
+     * @acl: domain:read
+     */
+    REMOTE_PROC_DOMAIN_CHECKPOINT_GET_PARENT = 416,
+
+    /**
+     * @generate: both
+     * @acl: domain:checkpoint
+     */
+    REMOTE_PROC_DOMAIN_CHECKPOINT_DELETE = 417,
+
+    /**
+     * @generate: none
+     * @acl: domain:write
+     */
+    REMOTE_PROC_DOMAIN_GET_GUEST_INFO = 418,
+
+    /**
+     * @generate: client
+     * @acl: connect:write
+     */
+    REMOTE_PROC_CONNECT_SET_IDENTITY = 419,
+
+    /**
+     * @generate: both
+     * @acl: domain:write
+     */
+    REMOTE_PROC_DOMAIN_AGENT_SET_RESPONSE_TIMEOUT = 420,
+
+    /**
+     * @generate: both
+     * @acl: domain:checkpoint
+     * @acl: domain:block_write
+     */
+    REMOTE_PROC_DOMAIN_BACKUP_BEGIN = 421,
+
+    /**
+     * @generate: both
+     * @priority: high
+     * @acl: domain:read
+     */
+    REMOTE_PROC_DOMAIN_BACKUP_GET_XML_DESC = 422,
+
+    /**
+     * @generate: both
+     * @acl: none
+     */
+    REMOTE_PROC_DOMAIN_EVENT_MEMORY_FAILURE = 423,
+
+    /**
+     * @generate: none
+     * @acl: domain:write
+     */
+    REMOTE_PROC_DOMAIN_AUTHORIZED_SSH_KEYS_GET = 424,
+
+    /**
+     * @generate: none
+     * @acl: domain:write
+     */
+    REMOTE_PROC_DOMAIN_AUTHORIZED_SSH_KEYS_SET = 425,
+
+    /**
+     * @generate: none
+     * @acl: domain:read
+     */
+    REMOTE_PROC_DOMAIN_GET_MESSAGES = 426,
+
+    /**
+     * @generate: both
+     * @acl: domain:write
+     */
+    REMOTE_PROC_DOMAIN_START_DIRTY_RATE_CALC = 427,
+
+    /**
+     * @generate: both
+     * @acl: node_device:write
+     */
+    REMOTE_PROC_NODE_DEVICE_DEFINE_XML = 428,
+
+    /**
+     * @generate: both
+     * @priority: high
+     * @acl: node_device:delete
+     */
+    REMOTE_PROC_NODE_DEVICE_UNDEFINE = 429,
+
+    /**
+     * @generate: both
+     * @priority: high
+     * @acl: node_device:start
+     */
+    REMOTE_PROC_NODE_DEVICE_CREATE = 430
+
 };

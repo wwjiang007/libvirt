@@ -19,13 +19,11 @@
  *
  */
 
-#ifndef LIBVIRT_VIRT_HOST_VALIDATE_COMMON_H
-# define LIBVIRT_VIRT_HOST_VALIDATE_COMMON_H
+#pragma once
 
-# include "internal.h"
-# include "virutil.h"
-# include "virbitmap.h"
-# include "virenum.h"
+#include "internal.h"
+#include "virbitmap.h"
+#include "virenum.h"
 
 typedef enum {
     VIR_HOST_VALIDATE_FAIL,
@@ -39,22 +37,38 @@ typedef enum {
     VIR_HOST_VALIDATE_CPU_FLAG_VMX = 0,
     VIR_HOST_VALIDATE_CPU_FLAG_SVM,
     VIR_HOST_VALIDATE_CPU_FLAG_SIE,
+    VIR_HOST_VALIDATE_CPU_FLAG_FACILITY_158,
+    VIR_HOST_VALIDATE_CPU_FLAG_SEV,
 
     VIR_HOST_VALIDATE_CPU_FLAG_LAST,
 } virHostValidateCPUFlag;
 
 VIR_ENUM_DECL(virHostValidateCPUFlag);
 
+/**
+ * VIR_HOST_VALIDATE_FAILURE
+ * @level: the virHostValidateLevel to be checked
+ *
+ * This macro is to be used in to return a failures based on the
+ * virHostValidateLevel use in the function.
+ *
+ * If the virHostValidateLevel is VIR_HOST_VALIDATE_FAIL, -1 is returned.
+ * 0 is returned otherwise (as the virHosValidateLevel is then either a
+ * Warn or a Note).
+ */
+
+#define VIR_HOST_VALIDATE_FAILURE(level) (level == VIR_HOST_VALIDATE_FAIL) ? -1 : 0
+
 void virHostMsgSetQuiet(bool quietFlag);
 
 void virHostMsgCheck(const char *prefix,
                      const char *format,
-                     ...) ATTRIBUTE_FMT_PRINTF(2, 3);
+                     ...) G_GNUC_PRINTF(2, 3);
 
 void virHostMsgPass(void);
 void virHostMsgFail(virHostValidateLevel level,
                     const char *format,
-                    ...) ATTRIBUTE_FMT_PRINTF(2, 3);
+                    ...) G_GNUC_PRINTF(2, 3);
 
 int virHostValidateDeviceExists(const char *hvname,
                                 const char *dev_name,
@@ -66,7 +80,7 @@ int virHostValidateDeviceAccessible(const char *hvname,
                                     virHostValidateLevel level,
                                     const char *hint);
 
-virBitmapPtr virHostValidateGetCPUFlags(void);
+virBitmap *virHostValidateGetCPUFlags(void);
 
 int virHostValidateLinuxKernel(const char *hvname,
                                int version,
@@ -85,4 +99,7 @@ int virHostValidateCGroupControllers(const char *hvname,
 int virHostValidateIOMMU(const char *hvname,
                          virHostValidateLevel level);
 
-#endif /* LIBVIRT_VIRT_HOST_VALIDATE_COMMON_H */
+int virHostValidateSecureGuests(const char *hvname,
+                                virHostValidateLevel level);
+
+bool virHostKernelModuleIsLoaded(const char *module);

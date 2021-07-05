@@ -1,8 +1,10 @@
 <qemuCaps>
+  <emulator>/usr/bin/qemu-system-s390x</emulator>
   <qemuctime>0</qemuctime>
   <selfctime>0</selfctime>
   <selfvers>0</selfvers>
   <flag name='kvm'/>
+  <flag name='sdl'/>
   <flag name='virtio-tx-alg'/>
   <flag name='virtio-blk-pci.ioeventfd'/>
   <flag name='virtio-blk-pci.event_idx'/>
@@ -17,7 +19,6 @@
   <flag name='seccomp-sandbox'/>
   <flag name='reboot-timeout'/>
   <flag name='vnc'/>
-  <flag name='device-video-primary'/>
   <flag name='s390-sclp'/>
   <flag name='nbd-server'/>
   <flag name='virtio-rng'/>
@@ -30,6 +31,7 @@
   <flag name='drive-discard'/>
   <flag name='virtio-mmio'/>
   <flag name='boot-strict'/>
+  <flag name='enable-fips'/>
   <flag name='msg-timestamp'/>
   <flag name='active-commit'/>
   <flag name='change-backing-file'/>
@@ -40,13 +42,10 @@
   <flag name='iothread'/>
   <flag name='migrate-rdma'/>
   <flag name='drive-iotune-max'/>
-  <flag name='machine-vmport-opt'/>
   <flag name='aes-key-wrap'/>
   <flag name='dea-key-wrap'/>
-  <flag name='vhost-user-multiqueue'/>
   <flag name='migration-event'/>
   <flag name='virtio-net'/>
-  <flag name='gic-version'/>
   <flag name='incoming-defer'/>
   <flag name='virtio-gpu'/>
   <flag name='virtio-keyboard'/>
@@ -63,12 +62,10 @@
   <flag name='name-guest'/>
   <flag name='drive-detect-zeroes'/>
   <flag name='tls-creds-x509'/>
-  <flag name='smm'/>
   <flag name='virtio-pci-disable-legacy'/>
   <flag name='query-hotpluggable-cpus'/>
   <flag name='virtio-net.rx_queue_size'/>
   <flag name='drive-iotune-max-length'/>
-  <flag name='query-qmp-schema'/>
   <flag name='gluster.debug_level'/>
   <flag name='vhost-scsi'/>
   <flag name='drive-iotune-group'/>
@@ -78,7 +75,6 @@
   <flag name='block-write-threshold'/>
   <flag name='query-named-block-nodes'/>
   <flag name='kernel-irqchip'/>
-  <flag name='kernel-irqchip.split'/>
   <flag name='virtio.iommu_platform'/>
   <flag name='virtio.ats'/>
   <flag name='loadparm'/>
@@ -89,7 +85,6 @@
   <flag name='vxhs'/>
   <flag name='virtio-blk.num-queues'/>
   <flag name='sclplmconsole'/>
-  <flag name='numa.dist'/>
   <flag name='disk-share-rw'/>
   <flag name='iscsi.password-secret'/>
   <flag name='dump-completed'/>
@@ -103,16 +98,26 @@
   <flag name='nbd-tls'/>
   <flag name='pr-manager-helper'/>
   <flag name='virtual-css-bridge'/>
-  <flag name='sdl-gl'/>
   <flag name='blockdev-del'/>
   <flag name='vhost-vsock'/>
   <flag name='tpm-emulator'/>
   <flag name='egl-headless'/>
   <flag name='zpci'/>
   <flag name='iothread.poll-max-ns'/>
+  <flag name='query-cpu-model-baseline'/>
+  <flag name='query-cpu-model-comparison'/>
+  <flag name='storage.werror'/>
+  <flag name='tcg'/>
+  <flag name='fw_cfg'/>
+  <flag name='migration-param.bandwidth'/>
+  <flag name='migration-param.downtime'/>
+  <flag name='migration-param.xbzrle-cache-size'/>
+  <flag name='fsdev.createmode'/>
+  <flag name='vnc-opts'/>
+  <flag name='input-linux'/>
   <version>2011000</version>
   <kvmVersion>0</kvmVersion>
-  <microcodeVersion>39100806</microcodeVersion>
+  <microcodeVersion>39100288</microcodeVersion>
   <package></package>
   <arch>s390x</arch>
   <hostCPU type='kvm' model='z14-base' migratability='no'>
@@ -145,73 +150,81 @@
     <property name='te' type='boolean' value='true'/>
     <property name='cmm' type='boolean' value='true'/>
   </hostCPU>
-  <cpu type='kvm' name='z890.2' usable='yes'/>
-  <cpu type='kvm' name='z990.4' usable='yes'/>
-  <cpu type='kvm' name='z10BC.2' usable='yes'/>
-  <cpu type='kvm' name='z196.2' usable='yes'/>
-  <cpu type='kvm' name='z14' usable='yes'/>
-  <cpu type='kvm' name='z9BC-base' usable='yes'/>
-  <cpu type='kvm' name='zEC12-base' usable='yes'/>
-  <cpu type='kvm' name='z196-base' usable='yes'/>
-  <cpu type='kvm' name='z13-base' usable='yes'/>
-  <cpu type='kvm' name='z990.3' usable='yes'/>
-  <cpu type='kvm' name='host' usable='yes'/>
-  <cpu type='kvm' name='z9EC' usable='yes'/>
-  <cpu type='kvm' name='zBC12' usable='yes'/>
-  <cpu type='kvm' name='z9EC.3' usable='yes'/>
-  <cpu type='kvm' name='z196.2-base' usable='yes'/>
-  <cpu type='kvm' name='qemu' usable='yes'/>
-  <cpu type='kvm' name='zEC12.2-base' usable='yes'/>
-  <cpu type='kvm' name='z800-base' usable='yes'/>
-  <cpu type='kvm' name='z9EC.2' usable='yes'/>
-  <cpu type='kvm' name='z900.2-base' usable='yes'/>
-  <cpu type='kvm' name='z900.3' usable='yes'/>
-  <cpu type='kvm' name='z890-base' usable='yes'/>
-  <cpu type='kvm' name='z890' usable='yes'/>
-  <cpu type='kvm' name='z990.4-base' usable='yes'/>
-  <cpu type='kvm' name='z10BC.2-base' usable='yes'/>
-  <cpu type='kvm' name='z900.2' usable='yes'/>
-  <cpu type='kvm' name='z9BC.2-base' usable='yes'/>
-  <cpu type='kvm' name='z800' usable='yes'/>
-  <cpu type='kvm' name='z114' usable='yes'/>
-  <cpu type='kvm' name='z13' usable='yes'/>
-  <cpu type='kvm' name='z990' usable='yes'/>
-  <cpu type='kvm' name='z13s-base' usable='yes'/>
-  <cpu type='kvm' name='z990.2' usable='yes'/>
-  <cpu type='kvm' name='z14-base' usable='yes'/>
-  <cpu type='kvm' name='z890.2-base' usable='yes'/>
-  <cpu type='kvm' name='z196' usable='yes'/>
-  <cpu type='kvm' name='z10EC' usable='yes'/>
-  <cpu type='kvm' name='z13s' usable='yes'/>
-  <cpu type='kvm' name='z900' usable='yes'/>
-  <cpu type='kvm' name='z10EC.3' usable='yes'/>
-  <cpu type='kvm' name='z10EC.2-base' usable='yes'/>
-  <cpu type='kvm' name='z114-base' usable='yes'/>
-  <cpu type='kvm' name='z990.2-base' usable='yes'/>
-  <cpu type='kvm' name='z9EC.2-base' usable='yes'/>
-  <cpu type='kvm' name='z890.3' usable='yes'/>
-  <cpu type='kvm' name='z900.3-base' usable='yes'/>
-  <cpu type='kvm' name='z9BC.2' usable='yes'/>
-  <cpu type='kvm' name='z10BC' usable='yes'/>
-  <cpu type='kvm' name='z990.5' usable='yes'/>
-  <cpu type='kvm' name='zEC12.2' usable='yes'/>
-  <cpu type='kvm' name='z10EC-base' usable='yes'/>
-  <cpu type='kvm' name='z9EC-base' usable='yes'/>
-  <cpu type='kvm' name='z9EC.3-base' usable='yes'/>
-  <cpu type='kvm' name='zEC12' usable='yes'/>
-  <cpu type='kvm' name='z990.5-base' usable='yes'/>
-  <cpu type='kvm' name='z10BC-base' usable='yes'/>
-  <cpu type='kvm' name='z900-base' usable='yes'/>
-  <cpu type='kvm' name='z13.2' usable='yes'/>
-  <cpu type='kvm' name='zBC12-base' usable='yes'/>
-  <cpu type='kvm' name='z13.2-base' usable='yes'/>
-  <cpu type='kvm' name='z890.3-base' usable='yes'/>
-  <cpu type='kvm' name='z990-base' usable='yes'/>
-  <cpu type='kvm' name='z10EC.2' usable='yes'/>
-  <cpu type='kvm' name='z9BC' usable='yes'/>
-  <cpu type='kvm' name='z10EC.3-base' usable='yes'/>
-  <cpu type='kvm' name='z990.3-base' usable='yes'/>
-  <cpu type='tcg' name='z890.2' usable='no'>
+  <cpu type='kvm' name='z890.2' typename='z890.2-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z990.4' typename='z990.4-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z10BC.2' typename='z10BC.2-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z196.2' typename='z196.2-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z14' typename='z14-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z9BC-base' typename='z9BC-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='zEC12-base' typename='zEC12-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z196-base' typename='z196-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z13-base' typename='z13-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z990.3' typename='z990.3-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='host' typename='host-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z9EC' typename='z9EC-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='zBC12' typename='zBC12-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z9EC.3' typename='z9EC.3-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z196.2-base' typename='z196.2-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='qemu' typename='qemu-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='zEC12.2-base' typename='zEC12.2-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z800-base' typename='z800-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z9EC.2' typename='z9EC.2-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z900.2-base' typename='z900.2-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z900.3' typename='z900.3-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z890-base' typename='z890-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z890' typename='z890-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z990.4-base' typename='z990.4-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z10BC.2-base' typename='z10BC.2-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z900.2' typename='z900.2-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z9BC.2-base' typename='z9BC.2-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z800' typename='z800-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z114' typename='z114-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z13' typename='z13-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z990' typename='z990-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z13s-base' typename='z13s-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z990.2' typename='z990.2-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z14-base' typename='z14-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z890.2-base' typename='z890.2-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z196' typename='z196-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z10EC' typename='z10EC-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z13s' typename='z13s-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z900' typename='z900-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z10EC.3' typename='z10EC.3-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z10EC.2-base' typename='z10EC.2-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z114-base' typename='z114-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z990.2-base' typename='z990.2-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z9EC.2-base' typename='z9EC.2-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z890.3' typename='z890.3-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z900.3-base' typename='z900.3-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z9BC.2' typename='z9BC.2-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z10BC' typename='z10BC-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z990.5' typename='z990.5-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='zEC12.2' typename='zEC12.2-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z10EC-base' typename='z10EC-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z9EC-base' typename='z9EC-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z9EC.3-base' typename='z9EC.3-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='zEC12' typename='zEC12-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z990.5-base' typename='z990.5-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z10BC-base' typename='z10BC-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z900-base' typename='z900-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z13.2' typename='z13.2-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='zBC12-base' typename='zBC12-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z13.2-base' typename='z13.2-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z890.3-base' typename='z890.3-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z990-base' typename='z990-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z10EC.2' typename='z10EC.2-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z9BC' typename='z9BC-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z10EC.3-base' typename='z10EC.3-base-s390x-cpu' usable='yes'/>
+  <cpu type='kvm' name='z990.3-base' typename='z990.3-base-s390x-cpu' usable='yes'/>
+  <machine type='kvm' name='s390-ccw-virtio-2.11' alias='s390-ccw-virtio' hotplugCpus='yes' maxCpus='248' default='yes' numaMemSupported='yes'/>
+  <machine type='kvm' name='s390-ccw-virtio-2.7' hotplugCpus='yes' maxCpus='248' numaMemSupported='yes'/>
+  <machine type='kvm' name='s390-ccw-virtio-2.6' hotplugCpus='yes' maxCpus='248' numaMemSupported='yes'/>
+  <machine type='kvm' name='s390-ccw-virtio-2.10' hotplugCpus='yes' maxCpus='248' numaMemSupported='yes'/>
+  <machine type='kvm' name='s390-ccw-virtio-2.5' hotplugCpus='yes' maxCpus='248' numaMemSupported='yes'/>
+  <machine type='kvm' name='s390-ccw-virtio-2.4' hotplugCpus='yes' maxCpus='248' numaMemSupported='yes'/>
+  <machine type='kvm' name='s390-ccw-virtio-2.9' hotplugCpus='yes' maxCpus='248' numaMemSupported='yes'/>
+  <machine type='kvm' name='s390-ccw-virtio-2.8' hotplugCpus='yes' maxCpus='248' numaMemSupported='yes'/>
+  <cpu type='tcg' name='z890.2' typename='z890.2-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -226,7 +239,7 @@
     <blocker name='hfpm'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z990.4' usable='no'>
+  <cpu type='tcg' name='z990.4' typename='z990.4-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -241,7 +254,7 @@
     <blocker name='hfpm'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z10BC.2' usable='no'>
+  <cpu type='tcg' name='z10BC.2' typename='z10BC.2-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -271,7 +284,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z196.2' usable='no'>
+  <cpu type='tcg' name='z196.2' typename='z196.2-s390x-cpu' usable='no'>
     <blocker name='pcc-xts-eaes-256'/>
     <blocker name='pcc-xts-eaes-128'/>
     <blocker name='pcc-xts-aes-256'/>
@@ -393,7 +406,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z14' usable='no'>
+  <cpu type='tcg' name='z14' typename='z14-s390x-cpu' usable='no'>
     <blocker name='ppno-sha-512-drng'/>
     <blocker name='pcc-xts-eaes-256'/>
     <blocker name='pcc-xts-eaes-128'/>
@@ -540,7 +553,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z9BC-base' usable='no'>
+  <cpu type='tcg' name='z9BC-base' typename='z9BC-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -559,7 +572,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='zEC12-base' usable='no'>
+  <cpu type='tcg' name='zEC12-base' typename='zEC12-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -591,7 +604,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z196-base' usable='no'>
+  <cpu type='tcg' name='z196-base' typename='z196-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -622,7 +635,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z13-base' usable='no'>
+  <cpu type='tcg' name='z13-base' typename='z13-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -656,7 +669,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z990.3' usable='no'>
+  <cpu type='tcg' name='z990.3' typename='z990.3-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -671,8 +684,8 @@
     <blocker name='hfpm'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='host'/>
-  <cpu type='tcg' name='z9EC' usable='no'>
+  <cpu type='tcg' name='host' typename='host-s390x-cpu'/>
+  <cpu type='tcg' name='z9EC' typename='z9EC-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -694,7 +707,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='zBC12' usable='no'>
+  <cpu type='tcg' name='zBC12' typename='zBC12-s390x-cpu' usable='no'>
     <blocker name='pcc-xts-eaes-256'/>
     <blocker name='pcc-xts-eaes-128'/>
     <blocker name='pcc-xts-aes-256'/>
@@ -825,7 +838,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z9EC.3' usable='no'>
+  <cpu type='tcg' name='z9EC.3' typename='z9EC.3-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -847,7 +860,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z196.2-base' usable='no'>
+  <cpu type='tcg' name='z196.2-base' typename='z196.2-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -878,8 +891,8 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='qemu' usable='yes'/>
-  <cpu type='tcg' name='zEC12.2-base' usable='no'>
+  <cpu type='tcg' name='qemu' typename='qemu-s390x-cpu' usable='yes'/>
+  <cpu type='tcg' name='zEC12.2-base' typename='zEC12.2-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -911,10 +924,10 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z800-base' usable='no'>
+  <cpu type='tcg' name='z800-base' typename='z800-base-s390x-cpu' usable='no'>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z9EC.2' usable='no'>
+  <cpu type='tcg' name='z9EC.2' typename='z9EC.2-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -936,13 +949,13 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z900.2-base' usable='no'>
+  <cpu type='tcg' name='z900.2-base' typename='z900.2-base-s390x-cpu' usable='no'>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z900.3' usable='no'>
+  <cpu type='tcg' name='z900.3' typename='z900.3-s390x-cpu' usable='no'>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z890-base' usable='no'>
+  <cpu type='tcg' name='z890-base' typename='z890-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -957,7 +970,7 @@
     <blocker name='hfpm'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z890' usable='no'>
+  <cpu type='tcg' name='z890' typename='z890-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -972,7 +985,7 @@
     <blocker name='hfpm'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z990.4-base' usable='no'>
+  <cpu type='tcg' name='z990.4-base' typename='z990.4-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -987,7 +1000,7 @@
     <blocker name='hfpm'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z10BC.2-base' usable='no'>
+  <cpu type='tcg' name='z10BC.2-base' typename='z10BC.2-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -1012,10 +1025,10 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z900.2' usable='no'>
+  <cpu type='tcg' name='z900.2' typename='z900.2-s390x-cpu' usable='no'>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z9BC.2-base' usable='no'>
+  <cpu type='tcg' name='z9BC.2-base' typename='z9BC.2-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -1034,10 +1047,10 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z800' usable='no'>
+  <cpu type='tcg' name='z800' typename='z800-s390x-cpu' usable='no'>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z114' usable='no'>
+  <cpu type='tcg' name='z114' typename='z114-s390x-cpu' usable='no'>
     <blocker name='pcc-xts-eaes-256'/>
     <blocker name='pcc-xts-eaes-128'/>
     <blocker name='pcc-xts-aes-256'/>
@@ -1159,7 +1172,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z13' usable='no'>
+  <cpu type='tcg' name='z13' typename='z13-s390x-cpu' usable='no'>
     <blocker name='ppno-sha-512-drng'/>
     <blocker name='pcc-xts-eaes-256'/>
     <blocker name='pcc-xts-eaes-128'/>
@@ -1294,7 +1307,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z990' usable='no'>
+  <cpu type='tcg' name='z990' typename='z990-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -1309,7 +1322,7 @@
     <blocker name='hfpm'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z13s-base' usable='no'>
+  <cpu type='tcg' name='z13s-base' typename='z13s-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -1343,7 +1356,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z990.2' usable='no'>
+  <cpu type='tcg' name='z990.2' typename='z990.2-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -1358,7 +1371,7 @@
     <blocker name='hfpm'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z14-base' usable='no'>
+  <cpu type='tcg' name='z14-base' typename='z14-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -1397,7 +1410,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z890.2-base' usable='no'>
+  <cpu type='tcg' name='z890.2-base' typename='z890.2-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -1412,7 +1425,7 @@
     <blocker name='hfpm'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z196' usable='no'>
+  <cpu type='tcg' name='z196' typename='z196-s390x-cpu' usable='no'>
     <blocker name='pcc-xts-eaes-256'/>
     <blocker name='pcc-xts-eaes-128'/>
     <blocker name='pcc-xts-aes-256'/>
@@ -1534,7 +1547,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z10EC' usable='no'>
+  <cpu type='tcg' name='z10EC' typename='z10EC-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -1564,7 +1577,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z13s' usable='no'>
+  <cpu type='tcg' name='z13s' typename='z13s-s390x-cpu' usable='no'>
     <blocker name='ppno-sha-512-drng'/>
     <blocker name='pcc-xts-eaes-256'/>
     <blocker name='pcc-xts-eaes-128'/>
@@ -1699,8 +1712,8 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z900' usable='yes'/>
-  <cpu type='tcg' name='z10EC.3' usable='no'>
+  <cpu type='tcg' name='z900' typename='z900-s390x-cpu' usable='yes'/>
+  <cpu type='tcg' name='z10EC.3' typename='z10EC.3-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -1730,7 +1743,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z10EC.2-base' usable='no'>
+  <cpu type='tcg' name='z10EC.2-base' typename='z10EC.2-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -1755,7 +1768,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z114-base' usable='no'>
+  <cpu type='tcg' name='z114-base' typename='z114-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -1786,7 +1799,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z990.2-base' usable='no'>
+  <cpu type='tcg' name='z990.2-base' typename='z990.2-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -1801,7 +1814,7 @@
     <blocker name='hfpm'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z9EC.2-base' usable='no'>
+  <cpu type='tcg' name='z9EC.2-base' typename='z9EC.2-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -1820,7 +1833,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z890.3' usable='no'>
+  <cpu type='tcg' name='z890.3' typename='z890.3-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -1835,10 +1848,10 @@
     <blocker name='hfpm'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z900.3-base' usable='no'>
+  <cpu type='tcg' name='z900.3-base' typename='z900.3-base-s390x-cpu' usable='no'>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z9BC.2' usable='no'>
+  <cpu type='tcg' name='z9BC.2' typename='z9BC.2-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -1860,7 +1873,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z10BC' usable='no'>
+  <cpu type='tcg' name='z10BC' typename='z10BC-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -1890,7 +1903,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z990.5' usable='no'>
+  <cpu type='tcg' name='z990.5' typename='z990.5-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -1905,7 +1918,7 @@
     <blocker name='hfpm'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='zEC12.2' usable='no'>
+  <cpu type='tcg' name='zEC12.2' typename='zEC12.2-s390x-cpu' usable='no'>
     <blocker name='pcc-xts-eaes-256'/>
     <blocker name='pcc-xts-eaes-128'/>
     <blocker name='pcc-xts-aes-256'/>
@@ -2036,7 +2049,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z10EC-base' usable='no'>
+  <cpu type='tcg' name='z10EC-base' typename='z10EC-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -2061,7 +2074,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z9EC-base' usable='no'>
+  <cpu type='tcg' name='z9EC-base' typename='z9EC-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -2080,7 +2093,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z9EC.3-base' usable='no'>
+  <cpu type='tcg' name='z9EC.3-base' typename='z9EC.3-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -2099,7 +2112,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='zEC12' usable='no'>
+  <cpu type='tcg' name='zEC12' typename='zEC12-s390x-cpu' usable='no'>
     <blocker name='pcc-xts-eaes-256'/>
     <blocker name='pcc-xts-eaes-128'/>
     <blocker name='pcc-xts-aes-256'/>
@@ -2230,7 +2243,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z990.5-base' usable='no'>
+  <cpu type='tcg' name='z990.5-base' typename='z990.5-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -2245,7 +2258,7 @@
     <blocker name='hfpm'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z10BC-base' usable='no'>
+  <cpu type='tcg' name='z10BC-base' typename='z10BC-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -2270,8 +2283,8 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z900-base' usable='yes'/>
-  <cpu type='tcg' name='z13.2' usable='no'>
+  <cpu type='tcg' name='z900-base' typename='z900-base-s390x-cpu' usable='yes'/>
+  <cpu type='tcg' name='z13.2' typename='z13.2-s390x-cpu' usable='no'>
     <blocker name='ppno-sha-512-drng'/>
     <blocker name='pcc-xts-eaes-256'/>
     <blocker name='pcc-xts-eaes-128'/>
@@ -2406,7 +2419,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='zBC12-base' usable='no'>
+  <cpu type='tcg' name='zBC12-base' typename='zBC12-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -2438,7 +2451,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z13.2-base' usable='no'>
+  <cpu type='tcg' name='z13.2-base' typename='z13.2-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -2472,7 +2485,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z890.3-base' usable='no'>
+  <cpu type='tcg' name='z890.3-base' typename='z890.3-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -2487,7 +2500,7 @@
     <blocker name='hfpm'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z990-base' usable='no'>
+  <cpu type='tcg' name='z990-base' typename='z990-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -2502,7 +2515,7 @@
     <blocker name='hfpm'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z10EC.2' usable='no'>
+  <cpu type='tcg' name='z10EC.2' typename='z10EC.2-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -2532,7 +2545,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z9BC' usable='no'>
+  <cpu type='tcg' name='z9BC' typename='z9BC-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -2554,7 +2567,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z10EC.3-base' usable='no'>
+  <cpu type='tcg' name='z10EC.3-base' typename='z10EC.3-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -2579,7 +2592,7 @@
     <blocker name='tods'/>
     <blocker name='type'/>
   </cpu>
-  <cpu type='tcg' name='z990.3-base' usable='no'>
+  <cpu type='tcg' name='z990.3-base' typename='z990.3-base-s390x-cpu' usable='no'>
     <blocker name='klmd-sha-1'/>
     <blocker name='kimd-sha-1'/>
     <blocker name='km-tdea-192'/>
@@ -2594,12 +2607,12 @@
     <blocker name='hfpm'/>
     <blocker name='type'/>
   </cpu>
-  <machine name='s390-ccw-virtio-2.11' alias='s390-ccw-virtio' hotplugCpus='yes' maxCpus='248' default='yes'/>
-  <machine name='s390-ccw-virtio-2.7' hotplugCpus='yes' maxCpus='248'/>
-  <machine name='s390-ccw-virtio-2.6' hotplugCpus='yes' maxCpus='248'/>
-  <machine name='s390-ccw-virtio-2.10' hotplugCpus='yes' maxCpus='248'/>
-  <machine name='s390-ccw-virtio-2.5' hotplugCpus='yes' maxCpus='248'/>
-  <machine name='s390-ccw-virtio-2.4' hotplugCpus='yes' maxCpus='248'/>
-  <machine name='s390-ccw-virtio-2.9' hotplugCpus='yes' maxCpus='248'/>
-  <machine name='s390-ccw-virtio-2.8' hotplugCpus='yes' maxCpus='248'/>
+  <machine type='tcg' name='s390-ccw-virtio-2.11' alias='s390-ccw-virtio' hotplugCpus='yes' maxCpus='248' default='yes' numaMemSupported='yes'/>
+  <machine type='tcg' name='s390-ccw-virtio-2.7' hotplugCpus='yes' maxCpus='248' numaMemSupported='yes'/>
+  <machine type='tcg' name='s390-ccw-virtio-2.6' hotplugCpus='yes' maxCpus='248' numaMemSupported='yes'/>
+  <machine type='tcg' name='s390-ccw-virtio-2.10' hotplugCpus='yes' maxCpus='248' numaMemSupported='yes'/>
+  <machine type='tcg' name='s390-ccw-virtio-2.5' hotplugCpus='yes' maxCpus='248' numaMemSupported='yes'/>
+  <machine type='tcg' name='s390-ccw-virtio-2.4' hotplugCpus='yes' maxCpus='248' numaMemSupported='yes'/>
+  <machine type='tcg' name='s390-ccw-virtio-2.9' hotplugCpus='yes' maxCpus='248' numaMemSupported='yes'/>
+  <machine type='tcg' name='s390-ccw-virtio-2.8' hotplugCpus='yes' maxCpus='248' numaMemSupported='yes'/>
 </qemuCaps>

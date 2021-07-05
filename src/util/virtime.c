@@ -43,11 +43,6 @@
 
 VIR_LOG_INIT("util.time");
 
-/* We prefer clock_gettime if available because that is officially
- * async signal safe according to POSIX. Many platforms lack it
- * though, so fallback to gettimeofday everywhere else
- */
-
 /**
  * virTimeMillisNowRaw:
  * @now: filled with current time in milliseconds
@@ -59,22 +54,7 @@ VIR_LOG_INIT("util.time");
  */
 int virTimeMillisNowRaw(unsigned long long *now)
 {
-#ifdef HAVE_CLOCK_GETTIME
-    struct timespec ts;
-
-    if (clock_gettime(CLOCK_REALTIME, &ts) < 0)
-        return -1;
-
-    *now = (ts.tv_sec * 1000ull) + (ts.tv_nsec / (1000ull * 1000ull));
-#else
-    struct timeval tv;
-
-    if (gettimeofday(&tv, NULL) < 0)
-        return -1;
-
-    *now = (tv.tv_sec * 1000ull) + (tv.tv_usec / 1000ull);
-#endif
-
+    *now = g_get_real_time() / 1000;
     return 0;
 }
 
@@ -209,11 +189,11 @@ int virTimeStringThenRaw(unsigned long long when, char *buf)
     fields.tm_year += 1900;
     fields.tm_mon += 1;
 
-    if (snprintf(buf, VIR_TIME_STRING_BUFLEN,
-                 "%4d-%02d-%02d %02d:%02d:%02d.%03d+0000",
-                 fields.tm_year, fields.tm_mon, fields.tm_mday,
-                 fields.tm_hour, fields.tm_min, fields.tm_sec,
-                 (int) (when % 1000)) >= VIR_TIME_STRING_BUFLEN) {
+    if (g_snprintf(buf, VIR_TIME_STRING_BUFLEN,
+                   "%4d-%02d-%02d %02d:%02d:%02d.%03d+0000",
+                   fields.tm_year, fields.tm_mon, fields.tm_mday,
+                   fields.tm_hour, fields.tm_min, fields.tm_sec,
+                   (int) (when % 1000)) >= VIR_TIME_STRING_BUFLEN) {
         errno = ERANGE;
         return -1;
     }
@@ -243,7 +223,7 @@ int virTimeMillisNow(unsigned long long *now)
 
 
 /**
- * virTimeFieldsNowRaw:
+ * virTimeFieldsNow:
  * @fields: filled with current time fields
  *
  * Retrieves the current time, in broken-down field format.
@@ -277,8 +257,7 @@ char *virTimeStringNow(void)
 {
     char *ret;
 
-    if (VIR_ALLOC_N(ret, VIR_TIME_STRING_BUFLEN) < 0)
-        return NULL;
+    ret = g_new0(char, VIR_TIME_STRING_BUFLEN);
 
     if (virTimeStringNowRaw(ret) < 0) {
         virReportSystemError(errno, "%s",
@@ -306,8 +285,7 @@ char *virTimeStringThen(unsigned long long when)
 {
     char *ret;
 
-    if (VIR_ALLOC_N(ret, VIR_TIME_STRING_BUFLEN) < 0)
-        return NULL;
+    ret = g_new0(char, VIR_TIME_STRING_BUFLEN);
 
     if (virTimeStringThenRaw(when, ret) < 0) {
         virReportSystemError(errno, "%s",
@@ -322,8 +300,8 @@ char *virTimeStringThen(unsigned long long when)
 /**
  * virTimeLocalOffsetFromUTC:
  *
- * This function is threadsafe, but is *not* async signal safe (due to
- * gmtime_r() and mktime()).
+ * This function is threadsafe, but is *not* async signal safe
+ * due to use of GLib APIs.
  *
  * @offset: pointer to time_t that will be set to the difference
  *          between localtime and UTC in seconds (east of UTC is a
@@ -334,34 +312,11 @@ char *virTimeStringThen(unsigned long long when)
 int
 virTimeLocalOffsetFromUTC(long *offset)
 {
-    struct tm gmtimeinfo;
-    time_t current, utc;
+    g_autoptr(GDateTime) now = g_date_time_new_now_local();
+    GTimeSpan diff = g_date_time_get_utc_offset(now);
 
-    /* time() gives seconds since Epoch in current timezone */
-    if ((current = time(NULL)) == (time_t)-1) {
-        virReportSystemError(errno, "%s",
-                             _("failed to get current system time"));
-        return -1;
-    }
-
-    /* treat current as if it were in UTC */
-    if (!gmtime_r(&current, &gmtimeinfo)) {
-        virReportSystemError(errno, "%s",
-                             _("gmtime_r failed"));
-        return -1;
-    }
-
-    /* tell mktime to figure out itself whether or not DST is in effect */
-    gmtimeinfo.tm_isdst = -1;
-
-    /* mktime() also obeys current timezone rules */
-    if ((utc = mktime(&gmtimeinfo)) == (time_t)-1) {
-        virReportSystemError(errno, "%s",
-                             _("mktime failed"));
-        return -1;
-    }
-
-    *offset = current - utc;
+    /* GTimeSpan measures microseconds, we want seconds */
+    *offset = diff / 1000000;
     return 0;
 }
 
@@ -422,14 +377,14 @@ virTimeBackOffStart(virTimeBackOffVar *var,
 bool
 virTimeBackOffWait(virTimeBackOffVar *var)
 {
-    unsigned long long t, next;
+    unsigned long long next, t = 0;
 
     ignore_value(virTimeMillisNowRaw(&t));
 
     VIR_DEBUG("t=%llu, limit=%llu", t, var->limit_t);
 
     if (t > var->limit_t)
-        return 0;               /* ends the while loop */
+        return false;               /* ends the while loop */
 
     /* Compute next wait time. Cap at VIR_TIME_BACKOFF_CAP
      * to avoid long useless sleeps. */
@@ -448,6 +403,6 @@ virTimeBackOffWait(virTimeBackOffVar *var)
 
     VIR_DEBUG("sleeping for %llu ms", next);
 
-    usleep(next * 1000);
-    return 1;
+    g_usleep(next * 1000);
+    return true;
 }

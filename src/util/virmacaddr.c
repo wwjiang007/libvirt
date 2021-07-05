@@ -21,10 +21,8 @@
 #include <config.h>
 
 
-#include "c-ctype.h"
 #include "virmacaddr.h"
 #include "virrandom.h"
-#include "virutil.h"
 #include "viralloc.h"
 
 static const unsigned char virMacAddrBroadcastAddrRaw[VIR_MAC_BUFLEN] =
@@ -38,12 +36,12 @@ virMacAddrCompare(const char *p, const char *q)
 {
     unsigned char c, d;
     do {
-        while (*p == '0' && c_isxdigit(p[1]))
+        while (*p == '0' && g_ascii_isxdigit(p[1]))
             ++p;
-        while (*q == '0' && c_isxdigit(q[1]))
+        while (*q == '0' && g_ascii_isxdigit(q[1]))
             ++q;
-        c = c_tolower(*p);
-        d = c_tolower(*q);
+        c = g_ascii_tolower(*p);
+        d = g_ascii_tolower(*q);
 
         if (c == 0 || d == 0)
             break;
@@ -100,7 +98,7 @@ virMacAddrCmpRaw(const virMacAddr *mac1,
  * Copy src to dst
  */
 void
-virMacAddrSet(virMacAddrPtr dst, const virMacAddr *src)
+virMacAddrSet(virMacAddr *dst, const virMacAddr *src)
 {
     memcpy(dst, src, sizeof(*src));
 }
@@ -113,7 +111,7 @@ virMacAddrSet(virMacAddrPtr dst, const virMacAddr *src)
  * Set the MAC address to the given value
  */
 void
-virMacAddrSetRaw(virMacAddrPtr dst, const unsigned char src[VIR_MAC_BUFLEN])
+virMacAddrSetRaw(virMacAddr *dst, const unsigned char src[VIR_MAC_BUFLEN])
 {
     memcpy(dst->addr, src, VIR_MAC_BUFLEN);
 }
@@ -141,7 +139,7 @@ virMacAddrGetRaw(const virMacAddr *src, unsigned char dst[VIR_MAC_BUFLEN])
  * Return 0 upon success, or -1 in case of error.
  */
 int
-virMacAddrParse(const char* str, virMacAddrPtr addr)
+virMacAddrParse(const char* str, virMacAddr *addr)
 {
     size_t i;
 
@@ -153,7 +151,7 @@ virMacAddrParse(const char* str, virMacAddrPtr addr)
         /* This is solely to avoid accepting the leading
          * space or "+" that strtoul would otherwise accept.
          */
-        if (!c_isxdigit(*str))
+        if (!g_ascii_isxdigit(*str))
             break;
 
         result = strtoul(str, &end_ptr, 16); /* exempt from syntax-check */
@@ -187,10 +185,10 @@ const char *
 virMacAddrFormat(const virMacAddr *addr,
                  char *str)
 {
-    snprintf(str, VIR_MAC_STRING_BUFLEN,
-             "%02x:%02x:%02x:%02x:%02x:%02x",
-             addr->addr[0], addr->addr[1], addr->addr[2],
-             addr->addr[3], addr->addr[4], addr->addr[5]);
+    g_snprintf(str, VIR_MAC_STRING_BUFLEN,
+               "%02x:%02x:%02x:%02x:%02x:%02x",
+               addr->addr[0], addr->addr[1], addr->addr[2],
+               addr->addr[3], addr->addr[4], addr->addr[5]);
     str[VIR_MAC_STRING_BUFLEN-1] = '\0';
     return str;
 }
@@ -205,7 +203,7 @@ virMacAddrFormat(const virMacAddr *addr,
  * Return 0 upon success, or -1 in case of error.
  */
 int
-virMacAddrParseHex(const char *str, virMacAddrPtr addr)
+virMacAddrParseHex(const char *str, virMacAddr *addr)
 {
     size_t i;
 
@@ -214,13 +212,13 @@ virMacAddrParseHex(const char *str, virMacAddrPtr addr)
         return -1;
 
     for (i = 0; i < VIR_MAC_BUFLEN; i++)
-        addr->addr[i] = (virHexToBin(str[2 * i]) << 4 |
-                         virHexToBin(str[2 * i + 1]));
+        addr->addr[i] = (g_ascii_xdigit_value(str[2 * i]) << 4 |
+                         g_ascii_xdigit_value(str[2 * i + 1]));
     return 0;
 }
 
 void virMacAddrGenerate(const unsigned char prefix[VIR_MAC_PREFIX_BUFLEN],
-                        virMacAddrPtr addr)
+                        virMacAddr *addr)
 {
     addr->addr[0] = prefix[0];
     addr->addr[1] = prefix[1];
@@ -250,7 +248,7 @@ virMacAddrIsBroadcastRaw(const unsigned char s[VIR_MAC_BUFLEN])
 }
 
 void
-virMacAddrFree(virMacAddrPtr addr)
+virMacAddrFree(virMacAddr *addr)
 {
-    VIR_FREE(addr);
+    g_free(addr);
 }

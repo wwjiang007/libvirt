@@ -19,12 +19,19 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRHOSTCPU_H
-# define LIBVIRT_VIRHOSTCPU_H
+#pragma once
 
-# include "internal.h"
-# include "virarch.h"
-# include "virbitmap.h"
+#include "internal.h"
+#include "virarch.h"
+#include "virbitmap.h"
+#include "virenum.h"
+
+
+typedef struct _virHostCPUTscInfo virHostCPUTscInfo;
+struct _virHostCPUTscInfo {
+    unsigned long long frequency;
+    virTristateBool scaling;
+};
 
 
 int virHostCPUGetStats(int cpuNum,
@@ -33,10 +40,12 @@ int virHostCPUGetStats(int cpuNum,
                        unsigned int flags);
 
 bool virHostCPUHasBitmap(void);
-virBitmapPtr virHostCPUGetPresentBitmap(void);
-virBitmapPtr virHostCPUGetOnlineBitmap(void);
+virBitmap *virHostCPUGetPresentBitmap(void);
+virBitmap *virHostCPUGetOnlineBitmap(void);
+virBitmap *virHostCPUGetAvailableCPUsBitmap(void);
+
 int virHostCPUGetCount(void);
-int virHostCPUGetThreadsPerSubcore(virArch arch) ATTRIBUTE_NOINLINE;
+int virHostCPUGetThreadsPerSubcore(virArch arch) G_GNUC_NO_INLINE;
 
 int virHostCPUGetMap(unsigned char **cpumap,
                      unsigned int *online,
@@ -49,24 +58,28 @@ int virHostCPUGetInfo(virArch hostarch,
                       unsigned int *cores,
                       unsigned int *threads);
 
-int virHostCPUGetKVMMaxVCPUs(void) ATTRIBUTE_NOINLINE;
+int virHostCPUGetKVMMaxVCPUs(void) G_GNUC_NO_INLINE;
 
 int virHostCPUStatsAssign(virNodeCPUStatsPtr param,
                           const char *name,
                           unsigned long long value);
 
-# ifdef __linux__
+#ifdef __linux__
 int virHostCPUGetSocket(unsigned int cpu, unsigned int *socket);
+int virHostCPUGetDie(unsigned int cpu, unsigned int *die);
 int virHostCPUGetCore(unsigned int cpu, unsigned int *core);
 
-virBitmapPtr virHostCPUGetSiblingsList(unsigned int cpu);
-# endif
+virBitmap *virHostCPUGetSiblingsList(unsigned int cpu);
+#endif
 
 int virHostCPUGetOnline(unsigned int cpu, bool *online);
 
-unsigned int virHostCPUGetMicrocodeVersion(void);
+unsigned int
+virHostCPUGetMicrocodeVersion(virArch hostArch) G_GNUC_NO_INLINE;
 
 int virHostCPUGetMSR(unsigned long index,
                      uint64_t *msr);
 
-#endif /* LIBVIRT_VIRHOSTCPU_H */
+virHostCPUTscInfo *virHostCPUGetTscInfo(void);
+
+int virHostCPUGetSignature(char **signature);

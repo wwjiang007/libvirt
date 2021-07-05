@@ -17,76 +17,71 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRINTERFACEOBJ_H
-# define LIBVIRT_VIRINTERFACEOBJ_H
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 typedef struct _virInterfaceObj virInterfaceObj;
-typedef virInterfaceObj *virInterfaceObjPtr;
 
 typedef struct _virInterfaceObjList virInterfaceObjList;
-typedef virInterfaceObjList *virInterfaceObjListPtr;
 
 void
-virInterfaceObjEndAPI(virInterfaceObjPtr *obj);
+virInterfaceObjEndAPI(virInterfaceObj **obj);
 
-virInterfaceDefPtr
-virInterfaceObjGetDef(virInterfaceObjPtr obj);
+virInterfaceDef *
+virInterfaceObjGetDef(virInterfaceObj *obj);
 
 bool
-virInterfaceObjIsActive(virInterfaceObjPtr obj);
+virInterfaceObjIsActive(virInterfaceObj *obj);
 
 void
-virInterfaceObjSetActive(virInterfaceObjPtr obj,
+virInterfaceObjSetActive(virInterfaceObj *obj,
                          bool active);
 
-virInterfaceObjListPtr
+virInterfaceObjList *
 virInterfaceObjListNew(void);
 
 int
-virInterfaceObjListFindByMACString(virInterfaceObjListPtr interfaces,
+virInterfaceObjListFindByMACString(virInterfaceObjList *interfaces,
                                    const char *mac,
                                    char **const matches,
                                    int maxmatches);
 
-virInterfaceObjPtr
-virInterfaceObjListFindByName(virInterfaceObjListPtr interfaces,
+virInterfaceObj *
+virInterfaceObjListFindByName(virInterfaceObjList *interfaces,
                               const char *name);
 
 void
-virInterfaceObjFree(virInterfaceObjPtr obj);
+virInterfaceObjFree(virInterfaceObj *obj);
 
-virInterfaceObjListPtr
-virInterfaceObjListClone(virInterfaceObjListPtr interfaces);
+virInterfaceObjList *
+virInterfaceObjListClone(virInterfaceObjList *interfaces);
 
-virInterfaceObjPtr
-virInterfaceObjListAssignDef(virInterfaceObjListPtr interfaces,
-                             virInterfaceDefPtr def);
+virInterfaceObj *
+virInterfaceObjListAssignDef(virInterfaceObjList *interfaces,
+                             virInterfaceDef *def);
 
 void
-virInterfaceObjListRemove(virInterfaceObjListPtr interfaces,
-                          virInterfaceObjPtr obj);
+virInterfaceObjListRemove(virInterfaceObjList *interfaces,
+                          virInterfaceObj *obj);
 
 typedef bool
 (*virInterfaceObjListFilter)(virConnectPtr conn,
-                             virInterfaceDefPtr def);
+                             virInterfaceDef *def);
 
 int
-virInterfaceObjListNumOfInterfaces(virInterfaceObjListPtr interfaces,
+virInterfaceObjListNumOfInterfaces(virInterfaceObjList *interfaces,
                                    bool wantActive);
 
 int
-virInterfaceObjListGetNames(virInterfaceObjListPtr interfaces,
+virInterfaceObjListGetNames(virInterfaceObjList *interfaces,
                             bool wantActive,
                             char **const names,
                             int maxnames);
 
 int
 virInterfaceObjListExport(virConnectPtr conn,
-                          virInterfaceObjListPtr ifaceobjs,
+                          virInterfaceObjList *ifaceobjs,
                           virInterfacePtr **ifaces,
                           virInterfaceObjListFilter filter,
                           unsigned int flags);
-
-#endif /* LIBVIRT_VIRINTERFACEOBJ_H */

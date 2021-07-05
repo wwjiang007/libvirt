@@ -18,18 +18,13 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRNETMESSAGE_H
-# define LIBVIRT_VIRNETMESSAGE_H
+#pragma once
 
-# include "virnetprotocol.h"
-
-typedef struct virNetMessageHeader *virNetMessageHeaderPtr;
-typedef struct virNetMessageError *virNetMessageErrorPtr;
+#include "virnetprotocol.h"
 
 typedef struct _virNetMessage virNetMessage;
-typedef virNetMessage *virNetMessagePtr;
 
-typedef void (*virNetMessageFreeCallback)(virNetMessagePtr msg, void *opaque);
+typedef void (*virNetMessageFreeCallback)(virNetMessage *msg, void *opaque);
 
 struct _virNetMessage {
     bool tracked;
@@ -48,57 +43,55 @@ struct _virNetMessage {
     int *fds;
     size_t donefds;
 
-    virNetMessagePtr next;
+    virNetMessage *next;
 };
 
 
-virNetMessagePtr virNetMessageNew(bool tracked);
+virNetMessage *virNetMessageNew(bool tracked);
 
-void virNetMessageClearPayload(virNetMessagePtr msg);
+void virNetMessageClearPayload(virNetMessage *msg);
 
-void virNetMessageClear(virNetMessagePtr);
+void virNetMessageClear(virNetMessage *);
 
-void virNetMessageFree(virNetMessagePtr msg);
+void virNetMessageFree(virNetMessage *msg);
 
-virNetMessagePtr virNetMessageQueueServe(virNetMessagePtr *queue)
+virNetMessage *virNetMessageQueueServe(virNetMessage **queue)
     ATTRIBUTE_NONNULL(1);
-void virNetMessageQueuePush(virNetMessagePtr *queue,
-                            virNetMessagePtr msg)
+void virNetMessageQueuePush(virNetMessage **queue,
+                            virNetMessage *msg)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
-int virNetMessageEncodeHeader(virNetMessagePtr msg)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
-int virNetMessageDecodeLength(virNetMessagePtr msg)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
-int virNetMessageDecodeHeader(virNetMessagePtr msg)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
+int virNetMessageEncodeHeader(virNetMessage *msg)
+    ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
+int virNetMessageDecodeLength(virNetMessage *msg)
+    ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
+int virNetMessageDecodeHeader(virNetMessage *msg)
+    ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
 
-int virNetMessageEncodePayload(virNetMessagePtr msg,
+int virNetMessageEncodePayload(virNetMessage *msg,
                                xdrproc_t filter,
                                void *data)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
-int virNetMessageDecodePayload(virNetMessagePtr msg,
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
+int virNetMessageDecodePayload(virNetMessage *msg,
                                xdrproc_t filter,
                                void *data)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
 
-int virNetMessageEncodeNumFDs(virNetMessagePtr msg);
-int virNetMessageDecodeNumFDs(virNetMessagePtr msg);
+int virNetMessageEncodeNumFDs(virNetMessage *msg);
+int virNetMessageDecodeNumFDs(virNetMessage *msg);
 
-int virNetMessageEncodePayloadRaw(virNetMessagePtr msg,
+int virNetMessageEncodePayloadRaw(virNetMessage *msg,
                                   const char *buf,
                                   size_t len)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
-int virNetMessageEncodePayloadEmpty(virNetMessagePtr msg)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
+int virNetMessageEncodePayloadEmpty(virNetMessage *msg)
+    ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
 
-void virNetMessageSaveError(virNetMessageErrorPtr rerr)
+void virNetMessageSaveError(struct virNetMessageError *rerr)
     ATTRIBUTE_NONNULL(1);
 
-int virNetMessageDupFD(virNetMessagePtr msg,
+int virNetMessageDupFD(virNetMessage *msg,
                        size_t slot);
 
-int virNetMessageAddFD(virNetMessagePtr msg,
+int virNetMessageAddFD(virNetMessage *msg,
                        int fd);
-
-#endif /* LIBVIRT_VIRNETMESSAGE_H */

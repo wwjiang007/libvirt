@@ -16,14 +16,11 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRNETDEVIP_H
-# define LIBVIRT_VIRNETDEVIP_H
+#pragma once
 
-# include "virsocketaddr.h"
-# include "virautoclean.h"
+#include "virsocketaddr.h"
 
 typedef struct _virNetDevIPAddr virNetDevIPAddr;
-typedef virNetDevIPAddr *virNetDevIPAddrPtr;
 struct _virNetDevIPAddr {
     virSocketAddr address; /* ipv4 or ipv6 address */
     virSocketAddr peer;    /* ipv4 or ipv6 address of peer */
@@ -31,7 +28,6 @@ struct _virNetDevIPAddr {
 };
 
 typedef struct _virNetDevIPRoute virNetDevIPRoute;
-typedef virNetDevIPRoute *virNetDevIPRoutePtr;
 struct _virNetDevIPRoute {
     char *family;               /* ipv4 or ipv6 - default is ipv4 */
     virSocketAddr address;      /* Routed Network IP address */
@@ -51,12 +47,11 @@ struct _virNetDevIPRoute {
 
 /* A full set of all IP config info for a network device */
 typedef struct _virNetDevIPInfo virNetDevIPInfo;
-typedef virNetDevIPInfo *virNetDevIPInfoPtr;
  struct _virNetDevIPInfo {
     size_t nips;
-    virNetDevIPAddrPtr *ips;
+    virNetDevIPAddr **ips;
     size_t nroutes;
-    virNetDevIPRoutePtr *routes;
+    virNetDevIPRoute **routes;
 };
 
 /* manipulating/querying the netdev */
@@ -64,38 +59,34 @@ int virNetDevIPAddrAdd(const char *ifname,
                        virSocketAddr *addr,
                        virSocketAddr *peer,
                        unsigned int prefix)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NOINLINE;
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT G_GNUC_NO_INLINE;
 int virNetDevIPRouteAdd(const char *ifname,
-                        virSocketAddrPtr addr,
+                        virSocketAddr *addr,
                         unsigned int prefix,
-                        virSocketAddrPtr gateway,
+                        virSocketAddr *gateway,
                         unsigned int metric)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(4)
-    ATTRIBUTE_RETURN_CHECK;
+    G_GNUC_WARN_UNUSED_RESULT;
 int virNetDevIPAddrDel(const char *ifname,
                        virSocketAddr *addr,
                        unsigned int prefix)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
-int virNetDevIPAddrGet(const char *ifname, virSocketAddrPtr addr)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
-int virNetDevIPWaitDadFinish(virSocketAddrPtr *addrs, size_t count)
-    ATTRIBUTE_NONNULL(1);
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
+int virNetDevIPAddrGet(const char *ifname, virSocketAddr *addr)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
 bool virNetDevIPCheckIPv6Forwarding(void);
-void virNetDevIPAddrFree(virNetDevIPAddrPtr ip);
+void virNetDevIPAddrFree(virNetDevIPAddr *ip);
 
 /* virNetDevIPRoute object */
-void virNetDevIPRouteFree(virNetDevIPRoutePtr def);
-virSocketAddrPtr virNetDevIPRouteGetAddress(virNetDevIPRoutePtr def);
-int virNetDevIPRouteGetPrefix(virNetDevIPRoutePtr def);
-unsigned int virNetDevIPRouteGetMetric(virNetDevIPRoutePtr def);
-virSocketAddrPtr virNetDevIPRouteGetGateway(virNetDevIPRoutePtr def);
+void virNetDevIPRouteFree(virNetDevIPRoute *def);
+virSocketAddr *virNetDevIPRouteGetAddress(virNetDevIPRoute *def);
+int virNetDevIPRouteGetPrefix(virNetDevIPRoute *def);
+unsigned int virNetDevIPRouteGetMetric(virNetDevIPRoute *def);
+virSocketAddr *virNetDevIPRouteGetGateway(virNetDevIPRoute *def);
 
 /* virNetDevIPInfo object */
-void virNetDevIPInfoClear(virNetDevIPInfoPtr ip);
+void virNetDevIPInfoClear(virNetDevIPInfo *ip);
 int virNetDevIPInfoAddToDev(const char *ifname,
                             virNetDevIPInfo const *ipInfo);
 
-VIR_DEFINE_AUTOPTR_FUNC(virNetDevIPAddr, virNetDevIPAddrFree);
-VIR_DEFINE_AUTOPTR_FUNC(virNetDevIPRoute, virNetDevIPRouteFree);
-
-#endif /* LIBVIRT_VIRNETDEVIP_H */
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNetDevIPAddr, virNetDevIPAddrFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNetDevIPRoute, virNetDevIPRouteFree);

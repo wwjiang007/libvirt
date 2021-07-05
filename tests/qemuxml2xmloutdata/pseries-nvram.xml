@@ -21,9 +21,10 @@
       <model name='spapr-pci-host-bridge'/>
       <target index='0'/>
     </controller>
+    <audio id='1' type='none'/>
     <memballoon model='none'/>
     <nvram>
-      <address type='spapr-vio' reg='0x4000'/>
+      <address type='spapr-vio' reg='0x00004000'/>
     </nvram>
     <panic model='pseries'/>
   </devices>

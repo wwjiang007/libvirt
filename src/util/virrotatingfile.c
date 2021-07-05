@@ -39,10 +39,8 @@ VIR_LOG_INIT("util.rotatingfile");
 #define VIR_MAX_MAX_BACKUP 32
 
 typedef struct virRotatingFileWriterEntry virRotatingFileWriterEntry;
-typedef virRotatingFileWriterEntry *virRotatingFileWriterEntryPtr;
 
 typedef struct virRotatingFileReaderEntry virRotatingFileReaderEntry;
-typedef virRotatingFileReaderEntry *virRotatingFileReaderEntryPtr;
 
 struct virRotatingFileWriterEntry {
     int fd;
@@ -53,7 +51,7 @@ struct virRotatingFileWriterEntry {
 
 struct virRotatingFileWriter {
     char *basepath;
-    virRotatingFileWriterEntryPtr entry;
+    virRotatingFileWriterEntry *entry;
     size_t maxbackup;
     mode_t mode;
     size_t maxlen;
@@ -67,46 +65,45 @@ struct virRotatingFileReaderEntry {
 };
 
 struct virRotatingFileReader {
-    virRotatingFileReaderEntryPtr *entries;
+    virRotatingFileReaderEntry **entries;
     size_t nentries;
     size_t current;
 };
 
 
 static void
-virRotatingFileWriterEntryFree(virRotatingFileWriterEntryPtr entry)
+virRotatingFileWriterEntryFree(virRotatingFileWriterEntry *entry)
 {
     if (!entry)
         return;
 
     VIR_FORCE_CLOSE(entry->fd);
-    VIR_FREE(entry);
+    g_free(entry);
 }
 
 
 static void
-virRotatingFileReaderEntryFree(virRotatingFileReaderEntryPtr entry)
+virRotatingFileReaderEntryFree(virRotatingFileReaderEntry *entry)
 {
     if (!entry)
         return;
 
-    VIR_FREE(entry->path);
+    g_free(entry->path);
     VIR_FORCE_CLOSE(entry->fd);
-    VIR_FREE(entry);
+    g_free(entry);
 }
 
 
-static virRotatingFileWriterEntryPtr
+static virRotatingFileWriterEntry *
 virRotatingFileWriterEntryNew(const char *path,
                               mode_t mode)
 {
-    virRotatingFileWriterEntryPtr entry;
+    virRotatingFileWriterEntry *entry;
     struct stat sb;
 
     VIR_DEBUG("Opening %s mode=0%02o", path, mode);
 
-    if (VIR_ALLOC(entry) < 0)
-        return NULL;
+    entry = g_new0(virRotatingFileWriterEntry, 1);
 
     if ((entry->fd = open(path, O_CREAT|O_APPEND|O_WRONLY|O_CLOEXEC, mode)) < 0) {
         virReportSystemError(errno,
@@ -140,16 +137,15 @@ virRotatingFileWriterEntryNew(const char *path,
 }
 
 
-static virRotatingFileReaderEntryPtr
+static virRotatingFileReaderEntry *
 virRotatingFileReaderEntryNew(const char *path)
 {
-    virRotatingFileReaderEntryPtr entry;
+    virRotatingFileReaderEntry *entry;
     struct stat sb;
 
     VIR_DEBUG("Opening %s", path);
 
-    if (VIR_ALLOC(entry) < 0)
-        return NULL;
+    entry = g_new0(virRotatingFileReaderEntry, 1);
 
     if ((entry->fd = open(path, O_RDONLY|O_CLOEXEC)) < 0) {
         if (errno != ENOENT) {
@@ -170,8 +166,7 @@ virRotatingFileReaderEntryNew(const char *path)
         entry->inode = sb.st_ino;
     }
 
-    if (VIR_STRDUP(entry->path, path) < 0)
-        goto error;
+    entry->path = g_strdup(path);
 
     return entry;
 
@@ -182,7 +177,7 @@ virRotatingFileReaderEntryNew(const char *path)
 
 
 static int
-virRotatingFileWriterDelete(virRotatingFileWriterPtr file)
+virRotatingFileWriterDelete(virRotatingFileWriter *file)
 {
     size_t i;
 
@@ -196,8 +191,7 @@ virRotatingFileWriterDelete(virRotatingFileWriterPtr file)
 
     for (i = 0; i < file->maxbackup; i++) {
         char *oldpath;
-        if (virAsprintf(&oldpath, "%s.%zu", file->basepath, i) < 0)
-            return -1;
+        oldpath = g_strdup_printf("%s.%zu", file->basepath, i);
 
         if (unlink(oldpath) < 0 &&
             errno != ENOENT) {
@@ -229,22 +223,21 @@ virRotatingFileWriterDelete(virRotatingFileWriterPtr file)
  *
  * The files will never exceed @maxlen bytes in size,
  * but may be rolled over before they reach this size
- * in order to avoid splitting lines
+ * in order to avoid splitting lines. If @maxlen is
+ * zero then no rollover will be performed.
  */
-virRotatingFileWriterPtr
+virRotatingFileWriter *
 virRotatingFileWriterNew(const char *path,
                          off_t maxlen,
                          size_t maxbackup,
                          bool trunc,
                          mode_t mode)
 {
-    virRotatingFileWriterPtr file;
+    virRotatingFileWriter *file;
 
-    if (VIR_ALLOC(file) < 0)
-        goto error;
+    file = g_new0(virRotatingFileWriter, 1);
 
-    if (VIR_STRDUP(file->basepath, path) < 0)
-        goto error;
+    file->basepath = g_strdup(path);
 
     if (maxbackup > VIR_MAX_MAX_BACKUP) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
@@ -284,15 +277,14 @@ virRotatingFileWriterNew(const char *path,
  *
  * If @maxbackup is zero the only the newest file will be read.
  */
-virRotatingFileReaderPtr
+virRotatingFileReader *
 virRotatingFileReaderNew(const char *path,
                          size_t maxbackup)
 {
-    virRotatingFileReaderPtr file;
+    virRotatingFileReader *file;
     size_t i;
 
-    if (VIR_ALLOC(file) < 0)
-        goto error;
+    file = g_new0(virRotatingFileReader, 1);
 
     if (maxbackup > VIR_MAX_MAX_BACKUP) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
@@ -302,16 +294,14 @@ virRotatingFileReaderNew(const char *path,
     }
 
     file->nentries = maxbackup + 1;
-    if (VIR_ALLOC_N(file->entries, file->nentries) < 0)
-        goto error;
+    file->entries = g_new0(virRotatingFileReaderEntry *, file->nentries);
 
     if (!(file->entries[file->nentries - 1] = virRotatingFileReaderEntryNew(path)))
         goto error;
 
     for (i = 0; i < maxbackup; i++) {
         char *tmppath;
-        if (virAsprintf(&tmppath, "%s.%zu", path, i) < 0)
-            goto error;
+        tmppath = g_strdup_printf("%s.%zu", path, i);
 
         file->entries[file->nentries - (i + 2)] = virRotatingFileReaderEntryNew(tmppath);
         VIR_FREE(tmppath);
@@ -334,7 +324,7 @@ virRotatingFileReaderNew(const char *path,
  * Return the primary file path
  */
 const char *
-virRotatingFileWriterGetPath(virRotatingFileWriterPtr file)
+virRotatingFileWriterGetPath(virRotatingFileWriter *file)
 {
     return file->basepath;
 }
@@ -347,7 +337,7 @@ virRotatingFileWriterGetPath(virRotatingFileWriterPtr file)
  * Return the inode of the file currently being written to
  */
 ino_t
-virRotatingFileWriterGetINode(virRotatingFileWriterPtr file)
+virRotatingFileWriterGetINode(virRotatingFileWriter *file)
 {
     return file->entry->inode;
 }
@@ -360,14 +350,14 @@ virRotatingFileWriterGetINode(virRotatingFileWriterPtr file)
  * Return the offset at which data is currently being written
  */
 off_t
-virRotatingFileWriterGetOffset(virRotatingFileWriterPtr file)
+virRotatingFileWriterGetOffset(virRotatingFileWriter *file)
 {
     return file->entry->pos;
 }
 
 
 static int
-virRotatingFileWriterRollover(virRotatingFileWriterPtr file)
+virRotatingFileWriterRollover(virRotatingFileWriter *file)
 {
     size_t i;
     char *nextpath = NULL;
@@ -384,16 +374,13 @@ virRotatingFileWriterRollover(virRotatingFileWriterPtr file)
             goto cleanup;
         }
     } else {
-        if (virAsprintf(&nextpath, "%s.%zu", file->basepath, file->maxbackup - 1) < 0)
-            return -1;
+        nextpath = g_strdup_printf("%s.%zu", file->basepath, file->maxbackup - 1);
 
         for (i = file->maxbackup; i > 0; i--) {
             if (i == 1) {
-                if (VIR_STRDUP(thispath, file->basepath) < 0)
-                    goto cleanup;
+                thispath = g_strdup(file->basepath);
             } else {
-                if (virAsprintf(&thispath, "%s.%zu", file->basepath, i - 2) < 0)
-                    goto cleanup;
+                thispath = g_strdup_printf("%s.%zu", file->basepath, i - 2);
             }
             VIR_DEBUG("Rollover %s -> %s", thispath, nextpath);
 
@@ -406,7 +393,7 @@ virRotatingFileWriterRollover(virRotatingFileWriterPtr file)
             }
 
             VIR_FREE(nextpath);
-            VIR_STEAL_PTR(nextpath, thispath);
+            nextpath = g_steal_pointer(&thispath);
         }
     }
 
@@ -432,7 +419,7 @@ virRotatingFileWriterRollover(virRotatingFileWriterPtr file)
  * Returns the number of bytes written, or -1 on error
  */
 ssize_t
-virRotatingFileWriterAppend(virRotatingFileWriterPtr file,
+virRotatingFileWriterAppend(virRotatingFileWriter *file,
                             const char *buf,
                             size_t len)
 {
@@ -442,25 +429,27 @@ virRotatingFileWriterAppend(virRotatingFileWriterPtr file,
         size_t towrite = len;
         bool forceRollover = false;
 
-        if (file->entry->pos > file->maxlen) {
-            /* If existing file is for some reason larger then max length we
-             * won't write to this file anymore, but we rollover this file.*/
-            forceRollover = true;
-            towrite = 0;
-        } else if ((file->entry->pos + towrite) > file->maxlen) {
-            towrite = file->maxlen - file->entry->pos;
+        if (file->maxlen != 0) {
+            if (file->entry->pos > file->maxlen) {
+                /* If existing file is for some reason larger then max length we
+                 * won't write to this file anymore, but we rollover this file.*/
+                forceRollover = true;
+                towrite = 0;
+            } else if ((file->entry->pos + towrite) > file->maxlen) {
+                towrite = file->maxlen - file->entry->pos;
 
-            /*
-             * If there's a newline in the last 80 chars
-             * we're about to write, then break at that
-             * point to avoid splitting lines across
-             * separate files
-             */
-            for (i = 0; i < towrite && i < 80; i++) {
-                if (buf[towrite - i - 1] == '\n') {
-                    towrite -= i;
-                    forceRollover = true;
-                    break;
+                /*
+                 * If there's a newline in the last 80 chars
+                 * we're about to write, then break at that
+                 * point to avoid splitting lines across
+                 * separate files
+                 */
+                for (i = 0; i < towrite && i < 80; i++) {
+                    if (buf[towrite - i - 1] == '\n') {
+                        towrite -= i;
+                        forceRollover = true;
+                        break;
+                    }
                 }
             }
         }
@@ -480,9 +469,10 @@ virRotatingFileWriterAppend(virRotatingFileWriterPtr file,
             file->entry->len += towrite;
         }
 
-        if ((file->entry->pos == file->maxlen && len) ||
-            forceRollover) {
-            virRotatingFileWriterEntryPtr tmp;
+        if (file->maxlen != 0 &&
+            ((file->entry->pos == file->maxlen && len) ||
+             forceRollover)) {
+            virRotatingFileWriterEntry *tmp;
             VIR_DEBUG("Hit max size %zu on %s (force=%d)",
                       file->maxlen, file->basepath, forceRollover);
 
@@ -515,7 +505,7 @@ virRotatingFileWriterAppend(virRotatingFileWriterPtr file,
  * probably been rotated out of existence
  */
 int
-virRotatingFileReaderSeek(virRotatingFileReaderPtr file,
+virRotatingFileReaderSeek(virRotatingFileReader *file,
                           ino_t inode,
                           off_t offset)
 {
@@ -523,7 +513,7 @@ virRotatingFileReaderSeek(virRotatingFileReaderPtr file,
     off_t ret;
 
     for (i = 0; i < file->nentries; i++) {
-        virRotatingFileReaderEntryPtr entry = file->entries[i];
+        virRotatingFileReaderEntry *entry = file->entries[i];
         if (entry->inode != inode ||
             entry->fd == -1)
             continue;
@@ -564,7 +554,7 @@ virRotatingFileReaderSeek(virRotatingFileReaderPtr file,
  * Returns: the number of bytes read or -1 on error
  */
 ssize_t
-virRotatingFileReaderConsume(virRotatingFileReaderPtr file,
+virRotatingFileReaderConsume(virRotatingFileReader *file,
                              char *buf,
                              size_t len)
 {
@@ -572,7 +562,7 @@ virRotatingFileReaderConsume(virRotatingFileReaderPtr file,
 
     VIR_DEBUG("Consume %p %zu", buf, len);
     while (len) {
-        virRotatingFileReaderEntryPtr entry;
+        virRotatingFileReaderEntry *entry;
         ssize_t got;
 
         if (file->current >= file->nentries)
@@ -612,14 +602,14 @@ virRotatingFileReaderConsume(virRotatingFileReaderPtr file,
  * Close the current file and release all resources
  */
 void
-virRotatingFileWriterFree(virRotatingFileWriterPtr file)
+virRotatingFileWriterFree(virRotatingFileWriter *file)
 {
     if (!file)
         return;
 
     virRotatingFileWriterEntryFree(file->entry);
-    VIR_FREE(file->basepath);
-    VIR_FREE(file);
+    g_free(file->basepath);
+    g_free(file);
 }
 
 
@@ -630,7 +620,7 @@ virRotatingFileWriterFree(virRotatingFileWriterPtr file)
  * Close the files and release all resources
  */
 void
-virRotatingFileReaderFree(virRotatingFileReaderPtr file)
+virRotatingFileReaderFree(virRotatingFileReader *file)
 {
     size_t i;
 
@@ -639,6 +629,6 @@ virRotatingFileReaderFree(virRotatingFileReaderPtr file)
 
     for (i = 0; i < file->nentries; i++)
         virRotatingFileReaderEntryFree(file->entries[i]);
-    VIR_FREE(file->entries);
-    VIR_FREE(file);
+    g_free(file->entries);
+    g_free(file);
 }

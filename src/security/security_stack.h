@@ -18,21 +18,18 @@
  * Stacked security driver
  */
 
-#ifndef LIBVIRT_SECURITY_STACK_H
-# define LIBVIRT_SECURITY_STACK_H
+#pragma once
 
-# include "security_driver.h"
+#include "security_driver.h"
 
 extern virSecurityDriver virSecurityDriverStack;
 
 
 int
-virSecurityStackAddNested(virSecurityManagerPtr mgr,
-                          virSecurityManagerPtr nested);
-virSecurityManagerPtr
-virSecurityStackGetPrimary(virSecurityManagerPtr mgr);
+virSecurityStackAddNested(virSecurityManager *mgr,
+                          virSecurityManager *nested);
+virSecurityManager *
+virSecurityStackGetPrimary(virSecurityManager *mgr);
 
-virSecurityManagerPtr*
-virSecurityStackGetNested(virSecurityManagerPtr mgr);
-
-#endif /* LIBVIRT_SECURITY_STACK_H */
+virSecurityManager **
+virSecurityStackGetNested(virSecurityManager *mgr);

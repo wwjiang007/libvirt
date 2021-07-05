@@ -19,27 +19,25 @@
  *
  */
 
-#ifndef LIBVIRT_VIRLOCKSPACE_H
-# define LIBVIRT_VIRLOCKSPACE_H
+#pragma once
 
-# include "internal.h"
-# include "virjson.h"
+#include "internal.h"
+#include "virjson.h"
 
 typedef struct _virLockSpace virLockSpace;
-typedef virLockSpace *virLockSpacePtr;
 
-virLockSpacePtr virLockSpaceNew(const char *directory);
-virLockSpacePtr virLockSpaceNewPostExecRestart(virJSONValuePtr object);
+virLockSpace *virLockSpaceNew(const char *directory);
+virLockSpace *virLockSpaceNewPostExecRestart(virJSONValue *object);
 
-virJSONValuePtr virLockSpacePreExecRestart(virLockSpacePtr lockspace);
+virJSONValue *virLockSpacePreExecRestart(virLockSpace *lockspace);
 
-void virLockSpaceFree(virLockSpacePtr lockspace);
+void virLockSpaceFree(virLockSpace *lockspace);
 
-const char *virLockSpaceGetDirectory(virLockSpacePtr lockspace);
+const char *virLockSpaceGetDirectory(virLockSpace *lockspace);
 
-int virLockSpaceCreateResource(virLockSpacePtr lockspace,
+int virLockSpaceCreateResource(virLockSpace *lockspace,
                                const char *resname);
-int virLockSpaceDeleteResource(virLockSpacePtr lockspace,
+int virLockSpaceDeleteResource(virLockSpace *lockspace,
                                const char *resname);
 
 typedef enum {
@@ -47,16 +45,14 @@ typedef enum {
     VIR_LOCK_SPACE_ACQUIRE_AUTOCREATE = (1 << 1),
 } virLockSpaceAcquireFlags;
 
-int virLockSpaceAcquireResource(virLockSpacePtr lockspace,
+int virLockSpaceAcquireResource(virLockSpace *lockspace,
                                 const char *resname,
                                 pid_t owner,
                                 unsigned int flags);
 
-int virLockSpaceReleaseResource(virLockSpacePtr lockspace,
+int virLockSpaceReleaseResource(virLockSpace *lockspace,
                                 const char *resname,
                                 pid_t owner);
 
-int virLockSpaceReleaseResourcesForOwner(virLockSpacePtr lockspace,
+int virLockSpaceReleaseResourcesForOwner(virLockSpace *lockspace,
                                          pid_t owner);
-
-#endif /* LIBVIRT_VIRLOCKSPACE_H */

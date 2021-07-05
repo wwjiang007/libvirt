@@ -20,26 +20,18 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRUTIL_H
-# define LIBVIRT_VIRUTIL_H
+#pragma once
 
-# include "internal.h"
-# include <unistd.h>
-# include <sys/types.h>
-
-# ifndef MIN
-#  define MIN(a, b) ((a) < (b) ? (a) : (b))
-# endif
-# ifndef MAX
-#  define MAX(a, b) ((a) > (b) ? (a) : (b))
-# endif
+#include "internal.h"
+#include <unistd.h>
+#include <sys/types.h>
 
 
-int virSetBlocking(int fd, bool blocking) ATTRIBUTE_RETURN_CHECK;
-int virSetNonBlock(int fd) ATTRIBUTE_RETURN_CHECK;
-int virSetInherit(int fd, bool inherit) ATTRIBUTE_RETURN_CHECK;
-int virSetCloseExec(int fd) ATTRIBUTE_RETURN_CHECK;
-int virSetSockReuseAddr(int fd, bool fatal) ATTRIBUTE_RETURN_CHECK;
+int virSetBlocking(int fd, bool blocking) G_GNUC_WARN_UNUSED_RESULT;
+int virSetNonBlock(int fd) G_GNUC_WARN_UNUSED_RESULT;
+int virSetInherit(int fd, bool inherit) G_GNUC_WARN_UNUSED_RESULT;
+int virSetCloseExec(int fd) G_GNUC_WARN_UNUSED_RESULT;
+int virSetSockReuseAddr(int fd, bool fatal) G_GNUC_WARN_UNUSED_RESULT;
 
 int virSetUIDGID(uid_t uid, gid_t gid, gid_t *groups, int ngroups);
 int virSetUIDGIDWithCaps(uid_t uid, gid_t gid, gid_t *groups, int ngroups,
@@ -50,15 +42,13 @@ void virWaitForDevices(void);
 
 int virScaleInteger(unsigned long long *value, const char *suffix,
                     unsigned long long scale, unsigned long long limit)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
-
-int virHexToBin(unsigned char c);
+    ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
 
 int virParseVersionString(const char *str, unsigned long *version,
                           bool allowMissing);
 
 char *virFormatIntDecimal(char *buf, size_t buflen, int val)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
 
 unsigned long long
 virFormatIntPretty(unsigned long long val,
@@ -66,31 +56,31 @@ virFormatIntPretty(unsigned long long val,
 
 int virDiskNameParse(const char *name, int *disk, int *partition);
 int virDiskNameToIndex(const char* str);
-char *virIndexToDiskName(int idx, const char *prefix);
+char *virIndexToDiskName(unsigned int idx, const char *prefix);
 
 /* No-op workarounds for functionality missing in mingw.  */
-# ifndef HAVE_GETUID
+#ifndef WITH_GETUID
 static inline int getuid(void)
 { return 0; }
-# endif
+#endif
 
-# ifndef HAVE_GETEUID
+#ifndef WITH_GETEUID
 static inline int geteuid(void)
 { return 0; }
-# endif
+#endif
 
-# ifndef HAVE_GETGID
+#ifndef WITH_GETGID
 static inline int getgid(void)
 { return 0; }
-# endif
+#endif
 
-# ifndef HAVE_GETEGID
+#ifndef WITH_GETEGID
 static inline int getegid(void)
 { return 0; }
-# endif
+#endif
 
-# ifdef FUNC_PTHREAD_SIGMASK_BROKEN
-#  undef pthread_sigmask
+#ifdef FUNC_PTHREAD_SIGMASK_BROKEN
+# undef pthread_sigmask
 static inline int pthread_sigmask(int how,
                                   const void *set,
                                   void *old)
@@ -100,37 +90,35 @@ static inline int pthread_sigmask(int how,
     (void) old;
     return 0;
 }
-# endif
+#endif
 
-char *virGetHostname(void);
+char *virGetHostname(void) G_GNUC_NO_INLINE;
 char *virGetHostnameQuiet(void);
 
 char *virGetUserDirectory(void);
 char *virGetUserDirectoryByUID(uid_t uid);
 char *virGetUserConfigDirectory(void);
 char *virGetUserCacheDirectory(void);
-char *virGetUserRuntimeDirectory(void);
+char *virGetUserRuntimeDirectory(void) G_GNUC_NO_INLINE;
 char *virGetUserShell(uid_t uid);
-char *virGetUserName(uid_t uid) ATTRIBUTE_NOINLINE;
-char *virGetGroupName(gid_t gid) ATTRIBUTE_NOINLINE;
+char *virGetUserName(uid_t uid) G_GNUC_NO_INLINE;
+char *virGetGroupName(gid_t gid) G_GNUC_NO_INLINE;
 int virGetGroupList(uid_t uid, gid_t group, gid_t **groups)
     ATTRIBUTE_NONNULL(3);
 int virGetUserID(const char *name,
-                 uid_t *uid) ATTRIBUTE_RETURN_CHECK;
+                 uid_t *uid) G_GNUC_WARN_UNUSED_RESULT;
 int virGetGroupID(const char *name,
-                  gid_t *gid) ATTRIBUTE_RETURN_CHECK;
+                  gid_t *gid) G_GNUC_WARN_UNUSED_RESULT;
 
 bool virDoesUserExist(const char *name);
 bool virDoesGroupExist(const char *name);
 
 
-bool virIsDevMapperDevice(const char *dev_name) ATTRIBUTE_NONNULL(1);
-
 bool virValidateWWN(const char *wwn);
 
 int virGetDeviceID(const char *path,
                    int *maj,
-                   int *min);
+                   int *min) G_GNUC_NO_INLINE;
 int virSetDeviceUnprivSGIO(const char *path,
                            const char *sysfs_dir,
                            int unpriv_sgio);
@@ -142,27 +130,54 @@ char *virGetUnprivSGIOSysfsPath(const char *path,
 
 int virParseOwnershipIds(const char *label, uid_t *uidPtr, gid_t *gidPtr);
 
-const char *virGetEnvBlockSUID(const char *name);
-const char *virGetEnvAllowSUID(const char *name);
-bool virIsSUID(void);
-
 
 time_t virGetSelfLastChanged(void);
 void virUpdateSelfLastChanged(const char *path);
 
-unsigned int virGetListenFDs(void);
-char *virGetUNIXSocketPath(int fd);
-
-long virGetSystemPageSize(void) ATTRIBUTE_NOINLINE;
-long virGetSystemPageSizeKB(void) ATTRIBUTE_NOINLINE;
+long virGetSystemPageSize(void) G_GNUC_NO_INLINE;
+long virGetSystemPageSizeKB(void) G_GNUC_NO_INLINE;
 
 unsigned long long virMemoryLimitTruncate(unsigned long long value);
 bool virMemoryLimitIsSet(unsigned long long value);
-unsigned long long virMemoryMaxValue(bool ulong) ATTRIBUTE_NOINLINE;
+unsigned long long virMemoryMaxValue(bool ulong) G_GNUC_NO_INLINE;
 
 bool virHostHasIOMMU(void);
 
-char *virHostGetDRMRenderNode(void) ATTRIBUTE_NOINLINE;
+char *virHostGetDRMRenderNode(void) G_GNUC_NO_INLINE;
+
+/* Kernel cmdline match and comparison strategy for arg=value pairs */
+typedef enum {
+    /* substring comparison of argument values */
+    VIR_KERNEL_CMDLINE_FLAGS_CMP_PREFIX = 1,
+
+    /* strict string comparison of argument values */
+    VIR_KERNEL_CMDLINE_FLAGS_CMP_EQ = 2,
+
+    /* look for any occurrence of the argument with the expected value,
+     * this should be used when an argument set to the expected value overrides
+     * all the other occurrences of the argument, e.g. when looking for 'arg=1'
+     * in 'arg=0 arg=1 arg=0' the search would succeed with this flag
+     */
+    VIR_KERNEL_CMDLINE_FLAGS_SEARCH_FIRST = 4,
+
+    /* look for the last occurrence of argument with the expected value,
+     * this should be used when the last occurrence of the argument overrides
+     * all the other ones, e.g. when looking for 'arg=1' in 'arg=0 arg=1' the
+     * search would succeed with this flag, but in 'arg=1 arg=0' it would not,
+     * because 'arg=0' overrides all the previous occurrences of 'arg'
+     */
+    VIR_KERNEL_CMDLINE_FLAGS_SEARCH_LAST = 8,
+} virKernelCmdlineFlags;
+
+const char *virKernelCmdlineNextParam(const char *cmdline,
+                                      char **param,
+                                      char **val);
+
+bool virKernelCmdlineMatchParam(const char *cmdline,
+                                const char *arg,
+                                const char **values,
+                                size_t len_values,
+                                virKernelCmdlineFlags flags);
 
 /**
  * VIR_ASSIGN_IS_OVERFLOW:
@@ -172,7 +187,41 @@ char *virHostGetDRMRenderNode(void) ATTRIBUTE_NOINLINE;
  * This macro assigns @lvalue to @rvalue and evaluates as true if the value of
  * @rvalue did not fit into the @lvalue.
  */
-# define VIR_ASSIGN_IS_OVERFLOW(lvalue, rvalue) \
+#define VIR_ASSIGN_IS_OVERFLOW(lvalue, rvalue) \
     (((lvalue) = (rvalue)) != (rvalue))
 
-#endif /* LIBVIRT_VIRUTIL_H */
+char *virGetPassword(void);
+
+/*
+ * virPipe:
+ *
+ * Open a pair of FDs which can be used to communicate
+ * with each other. The FDs will have O_CLOEXEC set.
+ * This will report a libvirt error on failure.
+ *
+ * Returns: -1 on error, 0 on success
+ */
+int virPipe(int fds[2]);
+
+/*
+ * virPipeQuiet:
+ *
+ * Open a pair of FDs which can be used to communicate
+ * with each other. The FDs will have O_CLOEXEC set.
+ * This will set errno on failure.
+ *
+ * Returns: -1 on error, 0 on success
+ */
+int virPipeQuiet(int fds[2]);
+
+/*
+ * virPipe:
+ *
+ * Open a pair of FDs which can be used to communicate
+ * with each other. The FDs will have O_CLOEXEC and
+ * O_NONBLOCK set.
+ * This will report a libvirt error on failure.
+ *
+ * Returns: -1 on error, 0 on success
+ */
+int virPipeNonBlock(int fds[2]);

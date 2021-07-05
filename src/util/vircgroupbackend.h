@@ -18,15 +18,13 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRCGROUPBACKEND_H
-# define LIBVIRT_VIRCGROUPBACKEND_H
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
-# include "vircgroup.h"
-# include "virhash.h"
+#include "vircgroup.h"
 
-# define CGROUP_MAX_VAL 512
+#define CGROUP_MAX_VAL 512
 
 typedef enum {
     VIR_CGROUP_NONE = 0, /* create subdir under each cgroup if possible. */
@@ -35,6 +33,9 @@ typedef enum {
                                        * attaching tasks
                                        */
     VIR_CGROUP_THREAD = 1 << 1, /* cgroup v2 handles threads differently */
+    VIR_CGROUP_SYSTEMD = 1 << 2, /* with systemd and cgroups v2 we cannot
+                                  * manually enable controllers that systemd
+                                  * doesn't know how to delegate */
 } virCgroupBackendFlags;
 
 typedef enum {
@@ -57,111 +58,123 @@ typedef enum {
     VIR_CGROUP_BACKEND_TYPE_LAST,
 } virCgroupBackendType;
 
+VIR_ENUM_DECL(virCgroupBackend);
+
 typedef bool
 (*virCgroupAvailableCB)(void);
 
 typedef bool
-(*virCgroupValidateMachineGroupCB)(virCgroupPtr group,
+(*virCgroupValidateMachineGroupCB)(virCgroup *group,
                                    const char *name,
                                    const char *drivername,
                                    const char *machinename);
 
 typedef int
-(*virCgroupCopyMountsCB)(virCgroupPtr group,
-                         virCgroupPtr parent);
+(*virCgroupCopyMountsCB)(virCgroup *group,
+                         virCgroup *parent);
 
 typedef int
-(*virCgroupCopyPlacementCB)(virCgroupPtr group,
+(*virCgroupCopyPlacementCB)(virCgroup *group,
                             const char *path,
-                            virCgroupPtr parent);
+                            virCgroup *parent);
 
 typedef int
-(*virCgroupDetectMountsCB)(virCgroupPtr group,
+(*virCgroupDetectMountsCB)(virCgroup *group,
                            const char *mntType,
                            const char *mntOpts,
                            const char *mntDir);
 
 typedef int
-(*virCgroupDetectPlacementCB)(virCgroupPtr group,
+(*virCgroupDetectPlacementCB)(virCgroup *group,
                               const char *path,
                               const char *controllers,
                               const char *selfpath);
 
 typedef int
-(*virCgroupValidatePlacementCB)(virCgroupPtr group,
+(*virCgroupSetPlacementCB)(virCgroup *group,
+                           const char *path);
+
+typedef int
+(*virCgroupValidatePlacementCB)(virCgroup *group,
                                 pid_t pid);
 
 typedef char *
-(*virCgroupStealPlacementCB)(virCgroupPtr group);
+(*virCgroupStealPlacementCB)(virCgroup *group);
 
 typedef int
-(*virCgroupDetectControllersCB)(virCgroupPtr group,
-                                int controllers);
+(*virCgroupDetectControllersCB)(virCgroup *group,
+                                int controllers,
+                                virCgroup *parent,
+                                int detected);
 
 typedef bool
-(*virCgroupHasControllerCB)(virCgroupPtr cgroup,
+(*virCgroupHasControllerCB)(virCgroup *cgroup,
                             int controller);
 
 typedef int
-(*virCgroupGetAnyControllerCB)(virCgroupPtr group);
+(*virCgroupGetAnyControllerCB)(virCgroup *group);
 
 typedef int
-(*virCgroupPathOfControllerCB)(virCgroupPtr group,
+(*virCgroupPathOfControllerCB)(virCgroup *group,
                                int controller,
                                const char *key,
                                char **path);
 
+typedef bool
+(*virCgroupExistsCB)(virCgroup *group);
+
 typedef int
-(*virCgroupMakeGroupCB)(virCgroupPtr parent,
-                        virCgroupPtr group,
+(*virCgroupMakeGroupCB)(virCgroup *parent,
+                        virCgroup *group,
                         bool create,
+                        pid_t pid,
                         unsigned int flags);
 
 typedef int
-(*virCgroupRemoveCB)(virCgroupPtr group);
+(*virCgroupRemoveCB)(virCgroup *group);
 
 typedef int
-(*virCgroupAddTaskCB)(virCgroupPtr group,
+(*virCgroupAddTaskCB)(virCgroup *group,
                       pid_t pid,
                       unsigned int flags);
 
 typedef int
-(*virCgroupHasEmptyTasksCB)(virCgroupPtr cgroup,
+(*virCgroupHasEmptyTasksCB)(virCgroup *cgroup,
                             int controller);
 
 typedef int
-(*virCgroupKillRecursiveCB)(virCgroupPtr group,
+(*virCgroupKillRecursiveCB)(virCgroup *group,
                             int signum,
-                            virHashTablePtr pids);
+                            GHashTable *pids);
 
 typedef int
-(*virCgroupBindMountCB)(virCgroupPtr group,
+(*virCgroupBindMountCB)(virCgroup *group,
                         const char *oldroot,
                         const char *mountopts);
 
 typedef int
-(*virCgroupSetOwnerCB)(virCgroupPtr cgroup,
+(*virCgroupSetOwnerCB)(virCgroup *cgroup,
                        uid_t uid,
                        gid_t gid,
                        int controllers);
 
 typedef int
-(*virCgroupSetBlkioWeightCB)(virCgroupPtr group,
+(*virCgroupSetBlkioWeightCB)(virCgroup *group,
                              unsigned int weight);
 
 typedef int
-(*virCgroupGetBlkioWeightCB)(virCgroupPtr group,
+(*virCgroupGetBlkioWeightCB)(virCgroup *group,
                              unsigned int *weight);
 
 typedef int
-(*virCgroupGetBlkioIoServicedCB)(virCgroupPtr group,
+(*virCgroupGetBlkioIoServicedCB)(virCgroup *group,
                                  long long *bytes_read,
                                  long long *bytes_write,
                                  long long *requests_read,
                                  long long *requests_write);
 
 typedef int
-(*virCgroupGetBlkioIoDeviceServicedCB)(virCgroupPtr group,
+(*virCgroupGetBlkioIoDeviceServicedCB)(virCgroup *group,
                                        const char *path,
                                        long long *bytes_read,
                                        long long *bytes_write,
@@ -169,61 +182,61 @@ typedef int
                                        long long *requests_write);
 
 typedef int
-(*virCgroupSetBlkioDeviceWeightCB)(virCgroupPtr group,
+(*virCgroupSetBlkioDeviceWeightCB)(virCgroup *group,
                                    const char *path,
                                    unsigned int weight);
 
 typedef int
-(*virCgroupGetBlkioDeviceWeightCB)(virCgroupPtr group,
+(*virCgroupGetBlkioDeviceWeightCB)(virCgroup *group,
                                    const char *path,
                                    unsigned int *weight);
 
 typedef int
-(*virCgroupSetBlkioDeviceReadIopsCB)(virCgroupPtr group,
+(*virCgroupSetBlkioDeviceReadIopsCB)(virCgroup *group,
                                      const char *path,
                                      unsigned int riops);
 
 typedef int
-(*virCgroupGetBlkioDeviceReadIopsCB)(virCgroupPtr group,
+(*virCgroupGetBlkioDeviceReadIopsCB)(virCgroup *group,
                                      const char *path,
                                      unsigned int *riops);
 
 typedef int
-(*virCgroupSetBlkioDeviceWriteIopsCB)(virCgroupPtr group,
+(*virCgroupSetBlkioDeviceWriteIopsCB)(virCgroup *group,
                                       const char *path,
                                       unsigned int wiops);
 
 typedef int
-(*virCgroupGetBlkioDeviceWriteIopsCB)(virCgroupPtr group,
+(*virCgroupGetBlkioDeviceWriteIopsCB)(virCgroup *group,
                                       const char *path,
                                       unsigned int *wiops);
 
 typedef int
-(*virCgroupSetBlkioDeviceReadBpsCB)(virCgroupPtr group,
+(*virCgroupSetBlkioDeviceReadBpsCB)(virCgroup *group,
                                     const char *path,
                                     unsigned long long rbps);
 
 typedef int
-(*virCgroupGetBlkioDeviceReadBpsCB)(virCgroupPtr group,
+(*virCgroupGetBlkioDeviceReadBpsCB)(virCgroup *group,
                                     const char *path,
                                     unsigned long long *rbps);
 
 typedef int
-(*virCgroupSetBlkioDeviceWriteBpsCB)(virCgroupPtr group,
+(*virCgroupSetBlkioDeviceWriteBpsCB)(virCgroup *group,
                                      const char *path,
                                      unsigned long long wbps);
 
 typedef int
-(*virCgroupGetBlkioDeviceWriteBpsCB)(virCgroupPtr group,
+(*virCgroupGetBlkioDeviceWriteBpsCB)(virCgroup *group,
                                      const char *path,
                                      unsigned long long *wbps);
 
 typedef int
-(*virCgroupSetMemoryCB)(virCgroupPtr group,
+(*virCgroupSetMemoryCB)(virCgroup *group,
                         unsigned long long kb);
 
 typedef int
-(*virCgroupGetMemoryStatCB)(virCgroupPtr group,
+(*virCgroupGetMemoryStatCB)(virCgroup *group,
                             unsigned long long *cache,
                             unsigned long long *activeAnon,
                             unsigned long long *inactiveAnon,
@@ -232,128 +245,128 @@ typedef int
                             unsigned long long *unevictable);
 
 typedef int
-(*virCgroupGetMemoryUsageCB)(virCgroupPtr group,
+(*virCgroupGetMemoryUsageCB)(virCgroup *group,
                              unsigned long *kb);
 
 typedef int
-(*virCgroupSetMemoryHardLimitCB)(virCgroupPtr group,
+(*virCgroupSetMemoryHardLimitCB)(virCgroup *group,
                                  unsigned long long kb);
 
 typedef int
-(*virCgroupGetMemoryHardLimitCB)(virCgroupPtr group,
+(*virCgroupGetMemoryHardLimitCB)(virCgroup *group,
                                  unsigned long long *kb);
 
 typedef int
-(*virCgroupSetMemorySoftLimitCB)(virCgroupPtr group,
+(*virCgroupSetMemorySoftLimitCB)(virCgroup *group,
                                  unsigned long long kb);
 
 typedef int
-(*virCgroupGetMemorySoftLimitCB)(virCgroupPtr group,
+(*virCgroupGetMemorySoftLimitCB)(virCgroup *group,
                                  unsigned long long *kb);
 
 typedef int
-(*virCgroupSetMemSwapHardLimitCB)(virCgroupPtr group,
+(*virCgroupSetMemSwapHardLimitCB)(virCgroup *group,
                                   unsigned long long kb);
 
 typedef int
-(*virCgroupGetMemSwapHardLimitCB)(virCgroupPtr group,
+(*virCgroupGetMemSwapHardLimitCB)(virCgroup *group,
                                   unsigned long long *kb);
 
 typedef int
-(*virCgroupGetMemSwapUsageCB)(virCgroupPtr group,
+(*virCgroupGetMemSwapUsageCB)(virCgroup *group,
                               unsigned long long *kb);
 
 typedef int
-(*virCgroupAllowDeviceCB)(virCgroupPtr group,
+(*virCgroupAllowDeviceCB)(virCgroup *group,
                           char type,
                           int major,
                           int minor,
                           int perms);
 
 typedef int
-(*virCgroupDenyDeviceCB)(virCgroupPtr group,
+(*virCgroupDenyDeviceCB)(virCgroup *group,
                          char type,
                          int major,
                          int minor,
                          int perms);
 
 typedef int
-(*virCgroupAllowAllDevicesCB)(virCgroupPtr group,
+(*virCgroupAllowAllDevicesCB)(virCgroup *group,
                               int perms);
 
 typedef int
-(*virCgroupDenyAllDevicesCB)(virCgroupPtr group);
+(*virCgroupDenyAllDevicesCB)(virCgroup *group);
 
 typedef int
-(*virCgroupSetCpuSharesCB)(virCgroupPtr group,
+(*virCgroupSetCpuSharesCB)(virCgroup *group,
                            unsigned long long shares);
 
 typedef int
-(*virCgroupGetCpuSharesCB)(virCgroupPtr group,
+(*virCgroupGetCpuSharesCB)(virCgroup *group,
                            unsigned long long *shares);
 
 typedef int
-(*virCgroupSetCpuCfsPeriodCB)(virCgroupPtr group,
+(*virCgroupSetCpuCfsPeriodCB)(virCgroup *group,
                               unsigned long long cfs_period);
 
 typedef int
-(*virCgroupGetCpuCfsPeriodCB)(virCgroupPtr group,
+(*virCgroupGetCpuCfsPeriodCB)(virCgroup *group,
                               unsigned long long *cfs_period);
 
 typedef int
-(*virCgroupSetCpuCfsQuotaCB)(virCgroupPtr group,
+(*virCgroupSetCpuCfsQuotaCB)(virCgroup *group,
                              long long cfs_quota);
 
 typedef int
-(*virCgroupGetCpuCfsQuotaCB)(virCgroupPtr group,
+(*virCgroupGetCpuCfsQuotaCB)(virCgroup *group,
                              long long *cfs_quota);
 
 typedef bool
-(*virCgroupSupportsCpuBWCB)(virCgroupPtr cgroup);
+(*virCgroupSupportsCpuBWCB)(virCgroup *cgroup);
 
 typedef int
-(*virCgroupGetCpuacctUsageCB)(virCgroupPtr group,
+(*virCgroupGetCpuacctUsageCB)(virCgroup *group,
                               unsigned long long *usage);
 
 typedef int
-(*virCgroupGetCpuacctPercpuUsageCB)(virCgroupPtr group,
+(*virCgroupGetCpuacctPercpuUsageCB)(virCgroup *group,
                                     char **usage);
 
 typedef int
-(*virCgroupGetCpuacctStatCB)(virCgroupPtr group,
+(*virCgroupGetCpuacctStatCB)(virCgroup *group,
                              unsigned long long *user,
                              unsigned long long *sys);
 
 typedef int
-(*virCgroupSetFreezerStateCB)(virCgroupPtr group,
+(*virCgroupSetFreezerStateCB)(virCgroup *group,
                               const char *state);
 
 typedef int
-(*virCgroupGetFreezerStateCB)(virCgroupPtr group,
+(*virCgroupGetFreezerStateCB)(virCgroup *group,
                               char **state);
 
 typedef int
-(*virCgroupSetCpusetMemsCB)(virCgroupPtr group,
+(*virCgroupSetCpusetMemsCB)(virCgroup *group,
                             const char *mems);
 
 typedef int
-(*virCgroupGetCpusetMemsCB)(virCgroupPtr group,
+(*virCgroupGetCpusetMemsCB)(virCgroup *group,
                             char **mems);
 
 typedef int
-(*virCgroupSetCpusetMemoryMigrateCB)(virCgroupPtr group,
+(*virCgroupSetCpusetMemoryMigrateCB)(virCgroup *group,
                                      bool migrate);
 
 typedef int
-(*virCgroupGetCpusetMemoryMigrateCB)(virCgroupPtr group,
+(*virCgroupGetCpusetMemoryMigrateCB)(virCgroup *group,
                                      bool *migrate);
 
 typedef int
-(*virCgroupSetCpusetCpusCB)(virCgroupPtr group,
+(*virCgroupSetCpusetCpusCB)(virCgroup *group,
                             const char *cpus);
 
 typedef int
-(*virCgroupGetCpusetCpusCB)(virCgroupPtr group,
+(*virCgroupGetCpusetCpusCB)(virCgroup *group,
                             char **cpus);
 
 struct _virCgroupBackend {
@@ -366,6 +379,7 @@ struct _virCgroupBackend {
     virCgroupCopyPlacementCB copyPlacement;
     virCgroupDetectMountsCB detectMounts;
     virCgroupDetectPlacementCB detectPlacement;
+    virCgroupSetPlacementCB setPlacement;
     virCgroupValidatePlacementCB validatePlacement;
     virCgroupStealPlacementCB stealPlacement;
     virCgroupDetectControllersCB detectControllers;
@@ -373,6 +387,7 @@ struct _virCgroupBackend {
     virCgroupGetAnyControllerCB getAnyController;
     virCgroupPathOfControllerCB pathOfController;
     virCgroupMakeGroupCB makeGroup;
+    virCgroupExistsCB exists;
     virCgroupRemoveCB remove;
     virCgroupAddTaskCB addTask;
     virCgroupHasEmptyTasksCB hasEmptyTasks;
@@ -435,30 +450,31 @@ struct _virCgroupBackend {
     virCgroupGetCpusetCpusCB getCpusetCpus;
 };
 typedef struct _virCgroupBackend virCgroupBackend;
-typedef virCgroupBackend *virCgroupBackendPtr;
 
 void
-virCgroupBackendRegister(virCgroupBackendPtr backend);
+virCgroupBackendRegister(virCgroupBackend *backend);
 
-virCgroupBackendPtr *
+virCgroupBackend **
 virCgroupBackendGetAll(void);
 
-virCgroupBackendPtr
-virCgroupBackendForController(virCgroupPtr group,
+virCgroupBackend *
+virCgroupBackendForController(virCgroup *group,
                               unsigned int controller);
 
-# define VIR_CGROUP_BACKEND_CALL(group, controller, func, ret, ...) \
-    virCgroupBackendPtr backend = virCgroupBackendForController(group, controller); \
-    if (!backend) { \
-        virReportError(VIR_ERR_INTERNAL_ERROR, \
-                       _("failed to get cgroup backend for '%s'"), #func); \
-        return ret; \
-    } \
-    if (!backend->func) { \
-        virReportError(VIR_ERR_OPERATION_UNSUPPORTED, \
-                       _("operation '%s' not supported"), #func); \
-        return ret; \
-    } \
-    return backend->func(group, ##__VA_ARGS__);
-
-#endif /* LIBVIRT_VIRCGROUPBACKEND_H */
+#define VIR_CGROUP_BACKEND_CALL(group, controller, func, ret, ...) \
+    do { \
+        virCgroupBackend *backend = virCgroupBackendForController(group, controller); \
+        if (!backend) { \
+            virReportError(VIR_ERR_INTERNAL_ERROR, \
+                           _("failed to get cgroup backend for '%s' controller '%u'"), \
+                           #func, controller); \
+            return ret; \
+        } \
+        if (!backend->func) { \
+            virReportError(VIR_ERR_OPERATION_UNSUPPORTED, \
+                           _("operation '%s' not supported for backend '%s'"), \
+                           #func, virCgroupBackendTypeToString(backend->type)); \
+            return ret; \
+        } \
+        return backend->func(group, ##__VA_ARGS__); \
+    } while (0)

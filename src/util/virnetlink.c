@@ -24,8 +24,6 @@
 #include <config.h>
 
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
 
 #include "virnetlink.h"
 #include "virnetdev.h"
@@ -34,6 +32,7 @@
 #include "virmacaddr.h"
 #include "virerror.h"
 #include "viralloc.h"
+#include "virsocket.h"
 
 #define VIR_FROM_THIS VIR_FROM_NET
 
@@ -41,7 +40,48 @@ VIR_LOG_INIT("util.netlink");
 
 #define NETLINK_ACK_TIMEOUT_S  (2*1000)
 
-#if defined(__linux__) && defined(HAVE_LIBNL)
+#if defined(WITH_LIBNL)
+
+# include <linux/veth.h>
+
+# define NETLINK_MSG_NEST_START(msg, container, attrtype) \
+do { \
+    container = nla_nest_start(msg, attrtype); \
+    if (!container) { \
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", \
+                       _("allocated netlink buffer is too small")); \
+        return -1; \
+    } \
+} while (0)
+
+# define NETLINK_MSG_NEST_END(msg, container) \
+do { nla_nest_end(msg, container); } while (0)
+
+/*
+ * we need to use an intermediary pointer to @data as compilers may sometimes
+ * complain about @data not being a pointer type:
+ * error: the address of 'foo' will always evaluate as 'true' [-Werror=address]
+ */
+# define NETLINK_MSG_PUT(msg, attrtype, datalen, data) \
+do { \
+    const void *dataptr = data; \
+    if (dataptr && nla_put(msg, attrtype, datalen, dataptr) < 0) { \
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", \
+                       _("allocated netlink buffer is too small")); \
+        return -1; \
+    } \
+} while (0)
+
+# define NETLINK_MSG_APPEND(msg, datalen, dataptr) \
+do { \
+    if (nlmsg_append(msg, dataptr, datalen, NLMSG_ALIGNTO) < 0) { \
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", \
+                       _("allocated netlink buffer is too small")); \
+        return -1; \
+    } \
+} while (0)
+
+
 /* State for a single netlink event handle */
 struct virNetlinkEventHandle {
     int watch;
@@ -52,29 +92,21 @@ struct virNetlinkEventHandle {
     int deleted;
 };
 
-# ifdef HAVE_LIBNL1
-#  define virNetlinkAlloc nl_handle_alloc
-#  define virNetlinkSetBufferSize nl_set_buffer_size
-#  define virNetlinkFree nl_handle_destroy
-typedef struct nl_handle virNetlinkHandle;
-# else
-#  define virNetlinkAlloc nl_socket_alloc
-#  define virNetlinkSetBufferSize nl_socket_set_buffer_size
-#  define virNetlinkFree nl_socket_free
+# define virNetlinkAlloc nl_socket_alloc
+# define virNetlinkSetBufferSize nl_socket_set_buffer_size
+# define virNetlinkFree nl_socket_free
 typedef struct nl_sock virNetlinkHandle;
-# endif
 
-VIR_DEFINE_AUTOPTR_FUNC(virNetlinkHandle, virNetlinkFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNetlinkHandle, virNetlinkFree);
 
 typedef struct _virNetlinkEventSrvPrivate virNetlinkEventSrvPrivate;
-typedef virNetlinkEventSrvPrivate *virNetlinkEventSrvPrivatePtr;
 struct _virNetlinkEventSrvPrivate {
-    /*Server*/
+    /* Server */
     virMutex lock;
     int eventwatch;
     int netlinkfd;
     virNetlinkHandle *netlinknh;
-    /*Events*/
+    /* Events */
     int handled;
     size_t handlesCount;
     size_t handlesAlloc;
@@ -95,10 +127,22 @@ static int nextWatch = 1;
 
 /* Linux kernel supports up to MAX_LINKS (32 at the time) individual
  * netlink protocols. */
-static virNetlinkEventSrvPrivatePtr server[MAX_LINKS] = {NULL};
+static virNetlinkEventSrvPrivate *server[MAX_LINKS] = {NULL};
 static virNetlinkHandle *placeholder_nlhandle;
 
 /* Function definitions */
+
+struct nl_msg *
+virNetlinkMsgNew(int nlmsgtype,
+                 int nlmsgflags)
+{
+    struct nl_msg *ret;
+
+    if (!(ret = nlmsg_alloc_simple(nlmsgtype, nlmsgflags)))
+        abort();
+
+    return ret;
+}
 
 /**
  * virNetlinkStartup:
@@ -191,16 +235,14 @@ virNetlinkCreateSocket(int protocol)
     }
     nl_socket_enable_msg_peek(nlhandle);
 
- cleanup:
     return nlhandle;
 
  error:
     if (nlhandle) {
         nl_close(nlhandle);
         virNetlinkFree(nlhandle);
-        nlhandle = NULL;
     }
-    goto cleanup;
+    return NULL;
 }
 
 static virNetlinkHandle *
@@ -253,7 +295,7 @@ virNetlinkSendRequest(struct nl_msg *nl_msg, uint32_t src_pid,
     fds[0].fd = fd;
     fds[0].events = POLLIN;
 
-    n = poll(fds, ARRAY_CARDINALITY(fds), NETLINK_ACK_TIMEOUT_S);
+    n = poll(fds, G_N_ELEMENTS(fds), NETLINK_ACK_TIMEOUT_S);
     if (n <= 0) {
         if (n < 0)
             virReportSystemError(errno, "%s",
@@ -296,8 +338,8 @@ int virNetlinkCommand(struct nl_msg *nl_msg,
             .nl_groups = 0,
     };
     struct pollfd fds[1];
-    VIR_AUTOFREE(struct nlmsghdr *) temp_resp = NULL;
-    VIR_AUTOPTR(virNetlinkHandle) nlhandle = NULL;
+    g_autofree struct nlmsghdr *temp_resp = NULL;
+    g_autoptr(virNetlinkHandle) nlhandle = NULL;
     int len = 0;
 
     memset(fds, 0, sizeof(fds));
@@ -317,10 +359,86 @@ int virNetlinkCommand(struct nl_msg *nl_msg,
         return -1;
     }
 
-    VIR_STEAL_PTR(*resp, temp_resp);
+    *resp = g_steal_pointer(&temp_resp);
     *respbuflen = len;
     return 0;
 }
+
+
+/**
+ * virNetlinkTalk:
+ * @ifname: name of the link
+ * @nl_msg: pointer to netlink message
+ * @src_pid: pid used for nl_pid of the local end of the netlink message
+ *           (0 == "use getpid()")
+ * @dst_pid: pid of destination nl_pid if the kernel
+ *           is not the target of the netlink message but it is to be
+ *           sent to another process (0 if sending to the kernel)
+ * @resp: pointer to pointer where response buffer will be allocated
+ * @resp_len: pointer to integer holding the size of the response buffer
+ *            on return of the function
+ * @error: pointer to store netlink error (-errno)
+ * @fallback: pointer to an alternate function that will be called in case
+ *            netlink fails with EOPNOTSUPP (any other error will simply be
+ *            treated as an error)
+ *
+ * Simple wrapper around virNetlinkCommand(). The returned netlink message
+ * is allocated at @resp. Please note that according to netlink(7) man page,
+ * reply with type of NLMSG_ERROR and @error == 0 is an acknowledgment and
+ * thus not an error.
+ *
+ * Returns: 0 on success,
+ *         -1 otherwise (error reported if @error == NULL)
+ */
+static int
+virNetlinkTalk(const char *ifname,
+               virNetlinkMsg *nl_msg,
+               uint32_t src_pid,
+               uint32_t dst_pid,
+               struct nlmsghdr **resp,
+               unsigned int *resp_len,
+               int *error,
+               virNetlinkTalkFallback fallback)
+{
+    if (virNetlinkCommand(nl_msg, resp, resp_len,
+                          src_pid, dst_pid, NETLINK_ROUTE, 0) < 0)
+        return -1;
+
+    if (*resp_len < NLMSG_LENGTH(0) || *resp == NULL)
+        goto malformed_resp;
+
+    if ((*resp)->nlmsg_type == NLMSG_ERROR) {
+        struct nlmsgerr *err;
+
+        err = (struct nlmsgerr *) NLMSG_DATA(*resp);
+
+        if ((*resp)->nlmsg_len < NLMSG_LENGTH(sizeof(*err)))
+            goto malformed_resp;
+
+        if (-err->error == EOPNOTSUPP && fallback)
+            return fallback(ifname);
+
+        if (err->error < 0) {
+            if (error)
+                *error = err->error;
+            else
+                virReportSystemError(-err->error, "%s", _("netlink error"));
+
+            return -1;
+        }
+
+        /* According to netlink(7) man page NLMSG_ERROR packet with error
+         * field set to 0 is an acknowledgment packet and thus not an error. */
+    }
+
+    return 0;
+
+ malformed_resp:
+    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                   _("malformed netlink response message"));
+    return -1;
+}
+
 
 int
 virNetlinkDumpCommand(struct nl_msg *nl_msg,
@@ -338,14 +456,14 @@ virNetlinkDumpCommand(struct nl_msg *nl_msg,
             .nl_pid    = dst_pid,
             .nl_groups = 0,
     };
-    VIR_AUTOPTR(virNetlinkHandle) nlhandle = NULL;
+    g_autoptr(virNetlinkHandle) nlhandle = NULL;
 
     if (!(nlhandle = virNetlinkSendRequest(nl_msg, src_pid, nladdr,
                                            protocol, groups)))
         return -1;
 
     while (!end) {
-        VIR_AUTOFREE(struct nlmsghdr *) resp = NULL;
+        g_autofree struct nlmsghdr *resp = NULL;
 
         len = nl_recv(nlhandle, &nladdr, (unsigned char **)&resp, NULL);
         VIR_WARNINGS_NO_CAST_ALIGN
@@ -364,6 +482,7 @@ virNetlinkDumpCommand(struct nl_msg *nl_msg,
 
     return 0;
 }
+
 
 /**
  * virNetlinkDumpLink:
@@ -389,34 +508,26 @@ virNetlinkDumpLink(const char *ifname, int ifindex,
                    void **nlData, struct nlattr **tb,
                    uint32_t src_pid, uint32_t dst_pid)
 {
-    int rc = -1;
-    struct nlmsgerr *err;
     struct ifinfomsg ifinfo = {
         .ifi_family = AF_UNSPEC,
         .ifi_index  = ifindex
     };
-    unsigned int recvbuflen;
-    VIR_AUTOPTR(virNetlinkMsg) nl_msg = NULL;
-    VIR_AUTOFREE(struct nlmsghdr *) resp = NULL;
+    g_autoptr(virNetlinkMsg) nl_msg = NULL;
+    g_autofree struct nlmsghdr *resp = NULL;
+    unsigned int resp_len = 0;
+    int error = 0;
 
     if (ifname && ifindex <= 0 && virNetDevGetIndex(ifname, &ifindex) < 0)
         return -1;
 
     ifinfo.ifi_index = ifindex;
 
-    nl_msg = nlmsg_alloc_simple(RTM_GETLINK, NLM_F_REQUEST);
-    if (!nl_msg) {
-        virReportOOMError();
-        return -1;
-    }
+    nl_msg = virNetlinkMsgNew(RTM_GETLINK, NLM_F_REQUEST);
 
-    if (nlmsg_append(nl_msg,  &ifinfo, sizeof(ifinfo), NLMSG_ALIGNTO) < 0)
-        goto buffer_too_small;
+    NETLINK_MSG_APPEND(nl_msg, sizeof(ifinfo), &ifinfo);
 
-    if (ifname) {
-        if (nla_put(nl_msg, IFLA_IFNAME, strlen(ifname)+1, ifname) < 0)
-            goto buffer_too_small;
-    }
+    if (ifname)
+        NETLINK_MSG_PUT(nl_msg, IFLA_IFNAME, (strlen(ifname) + 1), ifname);
 
 # ifdef RTEXT_FILTER_VF
     /* if this filter exists in the kernel's netlink implementation,
@@ -426,58 +537,30 @@ virNetlinkDumpLink(const char *ifname, int ifindex,
     {
         uint32_t ifla_ext_mask = RTEXT_FILTER_VF;
 
-        if (nla_put(nl_msg, IFLA_EXT_MASK,
-                    sizeof(ifla_ext_mask), &ifla_ext_mask) < 0) {
-            goto buffer_too_small;
-        }
+        NETLINK_MSG_PUT(nl_msg, IFLA_EXT_MASK,
+                        sizeof(ifla_ext_mask), &ifla_ext_mask);
     }
 # endif
 
-    if (virNetlinkCommand(nl_msg, &resp, &recvbuflen,
-                          src_pid, dst_pid, NETLINK_ROUTE, 0) < 0)
+    if (virNetlinkTalk(ifname, nl_msg, src_pid, dst_pid,
+                       &resp, &resp_len, &error, NULL) < 0) {
+        virReportSystemError(-error,
+                             _("error dumping %s (%d) interface"),
+                             ifname, ifindex);
         return -1;
-
-    if (recvbuflen < NLMSG_LENGTH(0) || resp == NULL)
-        goto malformed_resp;
-
-    switch (resp->nlmsg_type) {
-    case NLMSG_ERROR:
-        err = (struct nlmsgerr *)NLMSG_DATA(resp);
-        if (resp->nlmsg_len < NLMSG_LENGTH(sizeof(*err)))
-            goto malformed_resp;
-
-        if (err->error) {
-            virReportSystemError(-err->error,
-                                 _("error dumping %s (%d) interface"),
-                                 ifname, ifindex);
-            return -1;
-        }
-        break;
-
-    case GENL_ID_CTRL:
-    case NLMSG_DONE:
-        rc = nlmsg_parse(resp, sizeof(struct ifinfomsg),
-                         tb, IFLA_MAX, NULL);
-        if (rc < 0)
-            goto malformed_resp;
-        break;
-
-    default:
-        goto malformed_resp;
     }
 
-    VIR_STEAL_PTR(*nlData, resp);
+    if ((resp->nlmsg_type != NLMSG_ERROR &&
+         resp->nlmsg_type != GENL_ID_CTRL &&
+         resp->nlmsg_type != NLMSG_DONE) ||
+        nlmsg_parse(resp, sizeof(struct ifinfomsg), tb, IFLA_MAX, NULL) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("malformed netlink response message"));
+        return -1;
+    }
+
+    *nlData = g_steal_pointer(&resp);
     return 0;
-
- malformed_resp:
-    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                   _("malformed netlink response message"));
-    return rc;
-
- buffer_too_small:
-    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                   _("allocated netlink buffer is too small"));
-    return rc;
 }
 
 
@@ -499,16 +582,15 @@ virNetlinkDumpLink(const char *ifname, int ifindex,
 int
 virNetlinkNewLink(const char *ifname,
                   const char *type,
-                  virNetlinkNewLinkDataPtr extra_args,
+                  virNetlinkNewLinkData *extra_args,
                   int *error)
 {
-    struct nlmsgerr *err;
     struct nlattr *linkinfo = NULL;
     struct nlattr *infodata = NULL;
-    unsigned int buflen;
     struct ifinfomsg ifinfo = { .ifi_family = AF_UNSPEC };
-    VIR_AUTOPTR(virNetlinkMsg) nl_msg = NULL;
-    VIR_AUTOFREE(struct nlmsghdr *) resp = NULL;
+    g_autoptr(virNetlinkMsg) nl_msg = NULL;
+    g_autofree struct nlmsghdr *resp = NULL;
+    unsigned int resp_len = 0;
 
     *error = 0;
 
@@ -520,15 +602,10 @@ virNetlinkNewLink(const char *ifname,
         return -1;
     }
 
-    nl_msg = nlmsg_alloc_simple(RTM_NEWLINK,
-                                NLM_F_REQUEST | NLM_F_CREATE | NLM_F_EXCL);
-    if (!nl_msg) {
-        virReportOOMError();
-        return -1;
-    }
+    nl_msg = virNetlinkMsgNew(RTM_NEWLINK,
+                              NLM_F_REQUEST | NLM_F_CREATE | NLM_F_EXCL);
 
-    if (nlmsg_append(nl_msg,  &ifinfo, sizeof(ifinfo), NLMSG_ALIGNTO) < 0)
-        goto buffer_too_small;
+    NETLINK_MSG_APPEND(nl_msg, sizeof(ifinfo), &ifinfo);
 
     NETLINK_MSG_PUT(nl_msg, IFLA_IFNAME, (strlen(ifname) + 1), ifname);
 
@@ -545,50 +622,44 @@ virNetlinkNewLink(const char *ifname,
         NETLINK_MSG_NEST_END(nl_msg, infodata);
     }
 
+    if (STREQ(type, "veth") && extra_args && extra_args->veth_peer) {
+        struct nlattr *infoveth = NULL;
+
+        NETLINK_MSG_NEST_START(nl_msg, infodata, IFLA_INFO_DATA);
+        NETLINK_MSG_NEST_START(nl_msg, infoveth, VETH_INFO_PEER);
+        nlmsg_reserve(nl_msg, sizeof(struct ifinfomsg), 0);
+        NETLINK_MSG_PUT(nl_msg, IFLA_IFNAME,
+                        (strlen(extra_args->veth_peer) + 1),
+                        extra_args->veth_peer);
+        NETLINK_MSG_NEST_END(nl_msg, infoveth);
+        NETLINK_MSG_NEST_END(nl_msg, infodata);
+    }
+
     NETLINK_MSG_NEST_END(nl_msg, linkinfo);
 
     if (extra_args) {
-        NETLINK_MSG_PUT(nl_msg, IFLA_LINK,
+        if (extra_args->ifindex) {
+            NETLINK_MSG_PUT(nl_msg, IFLA_LINK,
                         sizeof(uint32_t), extra_args->ifindex);
-        NETLINK_MSG_PUT(nl_msg, IFLA_ADDRESS, VIR_MAC_BUFLEN, extra_args->mac);
+        }
+        if (extra_args->mac) {
+            NETLINK_MSG_PUT(nl_msg, IFLA_ADDRESS,
+                            VIR_MAC_BUFLEN, extra_args->mac);
+        }
     }
 
-    if (virNetlinkCommand(nl_msg, &resp, &buflen, 0, 0, NETLINK_ROUTE, 0) < 0)
+    if (virNetlinkTalk(ifname, nl_msg, 0, 0,
+                       &resp, &resp_len, error, NULL) < 0)
         return -1;
 
-    if (buflen < NLMSG_LENGTH(0) || resp == NULL)
-        goto malformed_resp;
-
-    switch (resp->nlmsg_type) {
-    case NLMSG_ERROR:
-        err = (struct nlmsgerr *)NLMSG_DATA(resp);
-        if (resp->nlmsg_len < NLMSG_LENGTH(sizeof(*err)))
-            goto malformed_resp;
-
-        if (err->error < 0) {
-            *error = err->error;
-            return -1;
-        }
-        break;
-
-    case NLMSG_DONE:
-        break;
-
-    default:
-        goto malformed_resp;
+    if (resp->nlmsg_type != NLMSG_ERROR &&
+        resp->nlmsg_type != NLMSG_DONE) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("malformed netlink response message"));
+        return -1;
     }
 
     return 0;
-
- malformed_resp:
-    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                   _("malformed netlink response message"));
-    return -1;
-
- buffer_too_small:
-    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                   _("allocated netlink buffer is too small"));
-    return -1;
 }
 
 
@@ -608,70 +679,36 @@ virNetlinkNewLink(const char *ifname,
  * Returns 0 on success, -1 on fatal error.
  */
 int
-virNetlinkDelLink(const char *ifname, virNetlinkDelLinkFallback fallback)
+virNetlinkDelLink(const char *ifname, virNetlinkTalkFallback fallback)
 {
-    struct nlmsgerr *err;
     struct ifinfomsg ifinfo = { .ifi_family = AF_UNSPEC };
-    unsigned int recvbuflen;
-    VIR_AUTOPTR(virNetlinkMsg) nl_msg = NULL;
-    VIR_AUTOFREE(struct nlmsghdr *) resp = NULL;
+    g_autoptr(virNetlinkMsg) nl_msg = NULL;
+    g_autofree struct nlmsghdr *resp = NULL;
+    unsigned int resp_len = 0;
+    int error = 0;
 
-    nl_msg = nlmsg_alloc_simple(RTM_DELLINK,
-                                NLM_F_REQUEST | NLM_F_CREATE | NLM_F_EXCL);
-    if (!nl_msg) {
-        virReportOOMError();
+    nl_msg = virNetlinkMsgNew(RTM_DELLINK, NLM_F_REQUEST);
+
+    NETLINK_MSG_APPEND(nl_msg, sizeof(ifinfo), &ifinfo);
+
+    NETLINK_MSG_PUT(nl_msg, IFLA_IFNAME, (strlen(ifname) + 1), ifname);
+
+    if (virNetlinkTalk(ifname, nl_msg, 0, 0,
+                       &resp, &resp_len, &error, fallback) < 0) {
+        virReportSystemError(-error,
+                             _("error destroying network device %s"),
+                             ifname);
         return -1;
     }
 
-    if (nlmsg_append(nl_msg,  &ifinfo, sizeof(ifinfo), NLMSG_ALIGNTO) < 0)
-        goto buffer_too_small;
-
-    if (nla_put(nl_msg, IFLA_IFNAME, strlen(ifname)+1, ifname) < 0)
-        goto buffer_too_small;
-
-    if (virNetlinkCommand(nl_msg, &resp, &recvbuflen, 0, 0,
-                          NETLINK_ROUTE, 0) < 0) {
+    if (resp->nlmsg_type != NLMSG_ERROR &&
+        resp->nlmsg_type != NLMSG_DONE) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("malformed netlink response message"));
         return -1;
-    }
-
-    if (recvbuflen < NLMSG_LENGTH(0) || resp == NULL)
-        goto malformed_resp;
-
-    switch (resp->nlmsg_type) {
-    case NLMSG_ERROR:
-        err = (struct nlmsgerr *)NLMSG_DATA(resp);
-        if (resp->nlmsg_len < NLMSG_LENGTH(sizeof(*err)))
-            goto malformed_resp;
-
-        if (-err->error == EOPNOTSUPP && fallback)
-            return fallback(ifname);
-
-        if (err->error) {
-            virReportSystemError(-err->error,
-                                 _("error destroying network device %s"),
-                                 ifname);
-            return -1;
-        }
-        break;
-
-    case NLMSG_DONE:
-        break;
-
-    default:
-        goto malformed_resp;
     }
 
     return 0;
-
- malformed_resp:
-    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                   _("malformed netlink response message"));
-    return -1;
-
- buffer_too_small:
-    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                   _("allocated netlink buffer is too small"));
-    return -1;
 }
 
 /**
@@ -687,68 +724,38 @@ virNetlinkDelLink(const char *ifname, virNetlinkDelLinkFallback fallback)
  *
  * Get neighbor table entry from netlink.
  *
- * Returns 0 on success, -1 on fatal error.
+ * Returns length of the raw data from netlink on success, -1 on fatal error.
  */
 int
 virNetlinkGetNeighbor(void **nlData, uint32_t src_pid, uint32_t dst_pid)
 {
-    struct nlmsgerr *err;
     struct ndmsg ndinfo = {
         .ndm_family = AF_UNSPEC,
     };
-    unsigned int recvbuflen;
-    VIR_AUTOPTR(virNetlinkMsg) nl_msg = NULL;
-    VIR_AUTOFREE(struct nlmsghdr *) resp = NULL;
+    g_autoptr(virNetlinkMsg) nl_msg = NULL;
+    g_autofree struct nlmsghdr *resp = NULL;
+    unsigned int resp_len = 0;
+    int error = 0;
 
-    nl_msg = nlmsg_alloc_simple(RTM_GETNEIGH, NLM_F_DUMP | NLM_F_REQUEST);
-    if (!nl_msg) {
-        virReportOOMError();
+    nl_msg = virNetlinkMsgNew(RTM_GETNEIGH, NLM_F_DUMP | NLM_F_REQUEST);
+
+    NETLINK_MSG_APPEND(nl_msg, sizeof(ndinfo), &ndinfo);
+
+    if (virNetlinkTalk(NULL, nl_msg, src_pid, dst_pid,
+                       &resp, &resp_len, &error, NULL) < 0) {
+        virReportSystemError(-error, "%s", _("error dumping neighbor table"));
         return -1;
     }
 
-    if (nlmsg_append(nl_msg, &ndinfo, sizeof(ndinfo), NLMSG_ALIGNTO) < 0)
-        goto buffer_too_small;
-
-
-    if (virNetlinkCommand(nl_msg, &resp, &recvbuflen,
-                          src_pid, dst_pid, NETLINK_ROUTE, 0) < 0)
+    if (resp->nlmsg_type != NLMSG_ERROR &&
+        resp->nlmsg_type != RTM_NEWNEIGH) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("malformed netlink response message"));
         return -1;
-
-    if (recvbuflen < NLMSG_LENGTH(0) || resp == NULL)
-        goto malformed_resp;
-
-    switch (resp->nlmsg_type) {
-    case NLMSG_ERROR:
-        err = (struct nlmsgerr *)NLMSG_DATA(resp);
-        if (resp->nlmsg_len < NLMSG_LENGTH(sizeof(*err)))
-            goto malformed_resp;
-
-        if (err->error) {
-            virReportSystemError(-err->error,
-                                 "%s", _("error dumping"));
-            return -1;
-        }
-        break;
-
-    case RTM_NEWNEIGH:
-        break;
-
-    default:
-        goto malformed_resp;
     }
 
-    VIR_STEAL_PTR(*nlData, resp);
-    return recvbuflen;
-
- malformed_resp:
-    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                   _("malformed netlink response message"));
-    return -1;
-
- buffer_too_small:
-    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                   _("allocated netlink buffer is too small"));
-    return -1;
+    *nlData = g_steal_pointer(&resp);
+    return resp_len;
 }
 
 int
@@ -794,13 +801,13 @@ virNetlinkGetErrorCode(struct nlmsghdr *resp, unsigned int recvbuflen)
 
 
 static void
-virNetlinkEventServerLock(virNetlinkEventSrvPrivatePtr driver)
+virNetlinkEventServerLock(virNetlinkEventSrvPrivate *driver)
 {
     virMutexLock(&driver->lock);
 }
 
 static void
-virNetlinkEventServerUnlock(virNetlinkEventSrvPrivatePtr driver)
+virNetlinkEventServerUnlock(virNetlinkEventSrvPrivate *driver)
 {
     virMutexUnlock(&driver->lock);
 }
@@ -822,10 +829,12 @@ virNetlinkEventServerUnlock(virNetlinkEventSrvPrivatePtr driver)
 static int
 virNetlinkEventRemoveClientPrimitive(size_t i, unsigned int protocol)
 {
+    virNetlinkEventRemoveCallback removeCB;
+
     if (protocol >= MAX_LINKS)
         return -EINVAL;
 
-    virNetlinkEventRemoveCallback removeCB = server[protocol]->handles[i].removeCB;
+    removeCB = server[protocol]->handles[i].removeCB;
 
     if (removeCB) {
         (removeCB)(server[protocol]->handles[i].watch,
@@ -838,17 +847,17 @@ virNetlinkEventRemoveClientPrimitive(size_t i, unsigned int protocol)
 
 static void
 virNetlinkEventCallback(int watch,
-                        int fd ATTRIBUTE_UNUSED,
-                        int events ATTRIBUTE_UNUSED,
+                        int fd G_GNUC_UNUSED,
+                        int events G_GNUC_UNUSED,
                         void *opaque)
 {
-    virNetlinkEventSrvPrivatePtr srv = opaque;
+    virNetlinkEventSrvPrivate *srv = opaque;
     struct sockaddr_nl peer;
     struct ucred *creds = NULL;
     size_t i;
     int length;
     bool handled = false;
-    VIR_AUTOFREE(struct nlmsghdr *) msg = NULL;
+    g_autofree struct nlmsghdr *msg = NULL;
 
     length = nl_recv(srv->netlinknh, &peer,
                      (unsigned char **)&msg, &creds);
@@ -895,11 +904,13 @@ virNetlinkEventCallback(int watch,
 int
 virNetlinkEventServiceStop(unsigned int protocol)
 {
+    virNetlinkEventSrvPrivate *srv;
+    size_t i;
+
     if (protocol >= MAX_LINKS)
         return -EINVAL;
 
-    virNetlinkEventSrvPrivatePtr srv = server[protocol];
-    size_t i;
+    srv = server[protocol];
 
     VIR_INFO("stopping netlink event service");
 
@@ -1004,7 +1015,7 @@ int virNetlinkEventServiceLocalPid(unsigned int protocol)
 int
 virNetlinkEventServiceStart(unsigned int protocol, unsigned int groups)
 {
-    virNetlinkEventSrvPrivatePtr srv;
+    virNetlinkEventSrvPrivate *srv;
     int fd;
     int ret = -1;
 
@@ -1019,8 +1030,7 @@ virNetlinkEventServiceStart(unsigned int protocol, unsigned int groups)
 
     VIR_INFO("starting netlink event service with protocol %d", protocol);
 
-    if (VIR_ALLOC(srv) < 0)
-        return -1;
+    srv = g_new0(virNetlinkEventSrvPrivate, 1);
 
     if (virMutexInit(&srv->lock) < 0) {
         VIR_FREE(srv);
@@ -1106,7 +1116,7 @@ virNetlinkEventAddClient(virNetlinkEventHandleCallback handleCB,
 {
     size_t i;
     int r, ret = -1;
-    virNetlinkEventSrvPrivatePtr srv = NULL;
+    virNetlinkEventSrvPrivate *srv = NULL;
 
     if (protocol >= MAX_LINKS)
         return -EINVAL;
@@ -1135,9 +1145,8 @@ virNetlinkEventAddClient(virNetlinkEventHandleCallback handleCB,
     if (srv->handlesCount == srv->handlesAlloc) {
         VIR_DEBUG("Used %zu handle slots, adding at least %d more",
                   srv->handlesAlloc, NETLINK_EVENT_ALLOC_EXTENT);
-        if (VIR_RESIZE_N(srv->handles, srv->handlesAlloc,
-                         srv->handlesCount, NETLINK_EVENT_ALLOC_EXTENT) < 0)
-            goto error;
+        VIR_RESIZE_N(srv->handles, srv->handlesAlloc,
+                     srv->handlesCount, NETLINK_EVENT_ALLOC_EXTENT);
     }
     r = srv->handlesCount++;
 
@@ -1156,7 +1165,7 @@ virNetlinkEventAddClient(virNetlinkEventHandleCallback handleCB,
     VIR_DEBUG("added client to loop slot: %d. with macaddr ptr=%p", r, macaddr);
 
     ret = nextWatch++;
- error:
+
     virNetlinkEventServerUnlock(srv);
     return ret;
 }
@@ -1180,7 +1189,7 @@ virNetlinkEventRemoveClient(int watch, const virMacAddr *macaddr,
 {
     size_t i;
     int ret = -1;
-    virNetlinkEventSrvPrivatePtr srv = NULL;
+    virNetlinkEventSrvPrivate *srv = NULL;
 
     if (protocol >= MAX_LINKS)
         return -EINVAL;
@@ -1220,7 +1229,7 @@ virNetlinkEventRemoveClient(int watch, const virMacAddr *macaddr,
 
 #else
 
-# if defined(__linux)
+# if defined(__linux__)
 static const char *unsupported = N_("libnl was not available at build time");
 # else
 static const char *unsupported = N_("not supported on non-linux platforms");
@@ -1238,38 +1247,38 @@ virNetlinkShutdown(void)
     return;
 }
 
-int virNetlinkCommand(struct nl_msg *nl_msg ATTRIBUTE_UNUSED,
-                      struct nlmsghdr **resp ATTRIBUTE_UNUSED,
-                      unsigned int *respbuflen ATTRIBUTE_UNUSED,
-                      uint32_t src_pid ATTRIBUTE_UNUSED,
-                      uint32_t dst_pid ATTRIBUTE_UNUSED,
-                      unsigned int protocol ATTRIBUTE_UNUSED,
-                      unsigned int groups ATTRIBUTE_UNUSED)
+int virNetlinkCommand(struct nl_msg *nl_msg G_GNUC_UNUSED,
+                      struct nlmsghdr **resp G_GNUC_UNUSED,
+                      unsigned int *respbuflen G_GNUC_UNUSED,
+                      uint32_t src_pid G_GNUC_UNUSED,
+                      uint32_t dst_pid G_GNUC_UNUSED,
+                      unsigned int protocol G_GNUC_UNUSED,
+                      unsigned int groups G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -1;
 }
 
 int
-virNetlinkDumpCommand(struct nl_msg *nl_msg ATTRIBUTE_UNUSED,
-                      virNetlinkDumpCallback callback ATTRIBUTE_UNUSED,
-                      uint32_t src_pid ATTRIBUTE_UNUSED,
-                      uint32_t dst_pid ATTRIBUTE_UNUSED,
-                      unsigned int protocol ATTRIBUTE_UNUSED,
-                      unsigned int groups ATTRIBUTE_UNUSED,
-                      void *opaque ATTRIBUTE_UNUSED)
+virNetlinkDumpCommand(struct nl_msg *nl_msg G_GNUC_UNUSED,
+                      virNetlinkDumpCallback callback G_GNUC_UNUSED,
+                      uint32_t src_pid G_GNUC_UNUSED,
+                      uint32_t dst_pid G_GNUC_UNUSED,
+                      unsigned int protocol G_GNUC_UNUSED,
+                      unsigned int groups G_GNUC_UNUSED,
+                      void *opaque G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -1;
 }
 
 int
-virNetlinkDumpLink(const char *ifname ATTRIBUTE_UNUSED,
-                   int ifindex ATTRIBUTE_UNUSED,
-                   void **nlData ATTRIBUTE_UNUSED,
-                   struct nlattr **tb ATTRIBUTE_UNUSED,
-                   uint32_t src_pid ATTRIBUTE_UNUSED,
-                   uint32_t dst_pid ATTRIBUTE_UNUSED)
+virNetlinkDumpLink(const char *ifname G_GNUC_UNUSED,
+                   int ifindex G_GNUC_UNUSED,
+                   void **nlData G_GNUC_UNUSED,
+                   struct nlattr **tb G_GNUC_UNUSED,
+                   uint32_t src_pid G_GNUC_UNUSED,
+                   uint32_t dst_pid G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Unable to dump link info on this platform"));
@@ -1278,8 +1287,8 @@ virNetlinkDumpLink(const char *ifname ATTRIBUTE_UNUSED,
 
 
 int
-virNetlinkDelLink(const char *ifname ATTRIBUTE_UNUSED,
-                  virNetlinkDelLinkFallback fallback ATTRIBUTE_UNUSED)
+virNetlinkDelLink(const char *ifname G_GNUC_UNUSED,
+                  virNetlinkTalkFallback fallback G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -1;
@@ -1287,10 +1296,10 @@ virNetlinkDelLink(const char *ifname ATTRIBUTE_UNUSED,
 
 
 int
-virNetlinkNewLink(const char *ifname ATTRIBUTE_UNUSED,
-                  const char *type ATTRIBUTE_UNUSED,
-                  virNetlinkNewLinkDataPtr extra_args ATTRIBUTE_UNUSED,
-                  int *error ATTRIBUTE_UNUSED)
+virNetlinkNewLink(const char *ifname G_GNUC_UNUSED,
+                  const char *type G_GNUC_UNUSED,
+                  virNetlinkNewLinkData *extra_args G_GNUC_UNUSED,
+                  int *error G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -1;
@@ -1298,9 +1307,9 @@ virNetlinkNewLink(const char *ifname ATTRIBUTE_UNUSED,
 
 
 int
-virNetlinkGetNeighbor(void **nlData ATTRIBUTE_UNUSED,
-                      uint32_t src_pid ATTRIBUTE_UNUSED,
-                      uint32_t dst_pid ATTRIBUTE_UNUSED)
+virNetlinkGetNeighbor(void **nlData G_GNUC_UNUSED,
+                      uint32_t src_pid G_GNUC_UNUSED,
+                      uint32_t dst_pid G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -1;
@@ -1311,7 +1320,7 @@ virNetlinkGetNeighbor(void **nlData ATTRIBUTE_UNUSED,
  * stopNetlinkEventServer: stop the monitor to receive netlink
  * messages for libvirtd
  */
-int virNetlinkEventServiceStop(unsigned int protocol ATTRIBUTE_UNUSED)
+int virNetlinkEventServiceStop(unsigned int protocol G_GNUC_UNUSED)
 {
     VIR_DEBUG("%s", _(unsupported));
     return 0;
@@ -1331,8 +1340,8 @@ int virNetlinkEventServiceStopAll(void)
  * startNetlinkEventServer: start a monitor to receive netlink
  * messages for libvirtd
  */
-int virNetlinkEventServiceStart(unsigned int protocol ATTRIBUTE_UNUSED,
-                                unsigned int groups ATTRIBUTE_UNUSED)
+int virNetlinkEventServiceStart(unsigned int protocol G_GNUC_UNUSED,
+                                unsigned int groups G_GNUC_UNUSED)
 {
     VIR_DEBUG("%s", _(unsupported));
     return 0;
@@ -1342,13 +1351,13 @@ int virNetlinkEventServiceStart(unsigned int protocol ATTRIBUTE_UNUSED,
  * virNetlinkEventServiceIsRunning: returns if the netlink event
  * service is running.
  */
-bool virNetlinkEventServiceIsRunning(unsigned int protocol ATTRIBUTE_UNUSED)
+bool virNetlinkEventServiceIsRunning(unsigned int protocol G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
-    return 0;
+    return false;
 }
 
-int virNetlinkEventServiceLocalPid(unsigned int protocol ATTRIBUTE_UNUSED)
+int virNetlinkEventServiceLocalPid(unsigned int protocol G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -1;
@@ -1358,11 +1367,11 @@ int virNetlinkEventServiceLocalPid(unsigned int protocol ATTRIBUTE_UNUSED)
  * virNetlinkEventAddClient: register a callback for handling of
  * netlink messages
  */
-int virNetlinkEventAddClient(virNetlinkEventHandleCallback handleCB ATTRIBUTE_UNUSED,
-                             virNetlinkEventRemoveCallback removeCB ATTRIBUTE_UNUSED,
-                             void *opaque ATTRIBUTE_UNUSED,
-                             const virMacAddr *macaddr ATTRIBUTE_UNUSED,
-                             unsigned int protocol ATTRIBUTE_UNUSED)
+int virNetlinkEventAddClient(virNetlinkEventHandleCallback handleCB G_GNUC_UNUSED,
+                             virNetlinkEventRemoveCallback removeCB G_GNUC_UNUSED,
+                             void *opaque G_GNUC_UNUSED,
+                             const virMacAddr *macaddr G_GNUC_UNUSED,
+                             unsigned int protocol G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -1;
@@ -1371,9 +1380,9 @@ int virNetlinkEventAddClient(virNetlinkEventHandleCallback handleCB ATTRIBUTE_UN
 /**
  * virNetlinkEventRemoveClient: unregister a callback from a netlink monitor
  */
-int virNetlinkEventRemoveClient(int watch ATTRIBUTE_UNUSED,
-                                const virMacAddr *macaddr ATTRIBUTE_UNUSED,
-                                unsigned int protocol ATTRIBUTE_UNUSED)
+int virNetlinkEventRemoveClient(int watch G_GNUC_UNUSED,
+                                const virMacAddr *macaddr G_GNUC_UNUSED,
+                                unsigned int protocol G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -1;
@@ -1381,11 +1390,11 @@ int virNetlinkEventRemoveClient(int watch ATTRIBUTE_UNUSED,
 
 
 int
-virNetlinkGetErrorCode(struct nlmsghdr *resp ATTRIBUTE_UNUSED,
-                       unsigned int recvbuflen ATTRIBUTE_UNUSED)
+virNetlinkGetErrorCode(struct nlmsghdr *resp G_GNUC_UNUSED,
+                       unsigned int recvbuflen G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _(unsupported));
     return -EINVAL;
 }
 
-#endif /* __linux__ */
+#endif /* WITH_LIBNL */

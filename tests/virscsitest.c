@@ -19,6 +19,7 @@
 
 #include <config.h>
 
+#include <unistd.h>
 
 #include "virscsi.h"
 #include "testutils.h"
@@ -33,7 +34,7 @@ VIR_LOG_INIT("tests.scsitest");
 static char *virscsi_prefix;
 
 static int
-test1(const void *data ATTRIBUTE_UNUSED)
+test1(const void *data G_GNUC_UNUSED)
 {
     char *name = NULL;
     int ret = -1;
@@ -57,14 +58,14 @@ test1(const void *data ATTRIBUTE_UNUSED)
  * details.
  */
 static int
-test2(const void *data ATTRIBUTE_UNUSED)
+test2(const void *data G_GNUC_UNUSED)
 {
-    virSCSIDeviceListPtr list = NULL;
-    virSCSIDevicePtr dev = NULL;
-    virSCSIDevicePtr dev1 = NULL;
+    virSCSIDeviceList *list = NULL;
+    virSCSIDevice *dev = NULL;
+    virSCSIDevice *dev1 = NULL;
     bool free_dev = true;
     bool free_dev1 = true;
-    virSCSIDevicePtr tmp = NULL;
+    virSCSIDevice *tmp = NULL;
     char *sgname = NULL;
     int ret = -1;
 
@@ -167,11 +168,9 @@ create_symlink(const char *tmpdir, const char *src_name, const char *dst_name)
     char *src_path = NULL;
     char *dst_path = NULL;
 
-    if (virAsprintf(&src_path, "%s/%s", virscsi_prefix, src_name) < 0)
-        goto cleanup;
+    src_path = g_strdup_printf("%s/%s", virscsi_prefix, src_name);
 
-    if (virAsprintf(&dst_path, "%s/%s", tmpdir, dst_name) < 0)
-        goto cleanup;
+    dst_path = g_strdup_printf("%s/%s", tmpdir, dst_name);
 
     if (symlink(src_path, dst_path) < 0) {
         VIR_WARN("Failed to create symlink '%s' to '%s'", src_path, dst_path);
@@ -194,12 +193,9 @@ mymain(void)
     char *tmpdir = NULL;
     char template[] = "/tmp/libvirt_XXXXXX";
 
-    if (virAsprintf(&virscsi_prefix, "%s" VIR_SCSI_DATA, abs_srcdir) < 0) {
-        ret = -1;
-        goto cleanup;
-    }
+    virscsi_prefix = g_strdup_printf("%s" VIR_SCSI_DATA, abs_srcdir);
 
-    tmpdir = mkdtemp(template);
+    tmpdir = g_mkdtemp(template);
 
     if (tmpdir == NULL) {
         VIR_WARN("Failed to create temporary directory");
@@ -222,10 +218,7 @@ mymain(void)
 
     VIR_FREE(virscsi_prefix);
 
-    if (VIR_STRDUP(virscsi_prefix, tmpdir) < 0) {
-        ret = -1;
-        goto cleanup;
-    }
+    virscsi_prefix = g_strdup(tmpdir);
 
     if (virTestRun("test1", test1, NULL) < 0)
         ret = -1;
@@ -236,7 +229,7 @@ mymain(void)
     if (getenv("LIBVIRT_SKIP_CLEANUP") == NULL)
         virFileDeleteTree(tmpdir);
     VIR_FREE(virscsi_prefix);
-    return ret;
+    return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 VIR_TEST_MAIN(mymain)

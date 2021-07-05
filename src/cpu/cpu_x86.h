@@ -18,31 +18,33 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_CPU_X86_H
-# define LIBVIRT_CPU_X86_H
+#pragma once
 
-# include "cpu.h"
-# include "cpu_x86_data.h"
+#include "cpu.h"
+#include "cpu_x86_data.h"
 
 extern struct cpuArchDriver cpuDriverX86;
 
-int virCPUx86DataAdd(virCPUDataPtr cpuData,
+int virCPUx86DataAdd(virCPUData *cpuData,
                      const virCPUx86DataItem *cpuid);
 
-int virCPUx86DataSetSignature(virCPUDataPtr cpuData,
+int virCPUx86DataSetSignature(virCPUData *cpuData,
                               unsigned int family,
                               unsigned int model,
                               unsigned int stepping);
 
-uint32_t virCPUx86DataGetSignature(virCPUDataPtr cpuData,
+uint32_t virCPUx86DataGetSignature(virCPUData *cpuData,
                                    unsigned int *family,
                                    unsigned int *model,
                                    unsigned int *stepping);
 
-int virCPUx86DataSetVendor(virCPUDataPtr cpuData,
+int virCPUx86DataSetVendor(virCPUData *cpuData,
                            const char *vendor);
 
-int virCPUx86DataAddFeature(virCPUDataPtr cpuData,
-                            const char *name);
+bool virCPUx86FeatureFilterSelectMSR(const char *name,
+                                     virCPUFeaturePolicy policy,
+                                     void *opaque);
 
-#endif /* LIBVIRT_CPU_X86_H */
+bool virCPUx86FeatureFilterDropMSR(const char *name,
+                                   virCPUFeaturePolicy policy,
+                                   void *opaque);

@@ -19,15 +19,13 @@
  *
  */
 
-#ifndef LIBVIRT_VIRPROCESS_H
-# define LIBVIRT_VIRPROCESS_H
+#pragma once
 
-# include <sys/types.h>
+#include <sys/types.h>
 
-# include "internal.h"
-# include "virbitmap.h"
-# include "virutil.h"
-# include "virenum.h"
+#include "internal.h"
+#include "virbitmap.h"
+#include "virenum.h"
 
 typedef enum {
     VIR_PROC_POLICY_NONE = 0,
@@ -47,11 +45,11 @@ virProcessTranslateStatus(int status);
 void
 virProcessAbort(pid_t pid);
 
-void virProcessExitWithStatus(int status) ATTRIBUTE_NORETURN;
+void virProcessExitWithStatus(int status) G_GNUC_NORETURN;
 
 int
 virProcessWait(pid_t pid, int *exitstatus, bool raw)
-    ATTRIBUTE_RETURN_CHECK;
+    G_GNUC_WARN_UNUSED_RESULT;
 
 int virProcessKill(pid_t pid, int sig);
 
@@ -60,9 +58,9 @@ int virProcessKillPainfullyDelay(pid_t pid,
                                  bool force,
                                  unsigned int extradelay);
 
-int virProcessSetAffinity(pid_t pid, virBitmapPtr map);
+int virProcessSetAffinity(pid_t pid, virBitmap *map, bool quiet);
 
-virBitmapPtr virProcessGetAffinity(pid_t pid);
+virBitmap *virProcessGetAffinity(pid_t pid);
 
 int virProcessGetPids(pid_t pid, size_t *npids, pid_t **pids);
 
@@ -76,12 +74,12 @@ int virProcessGetNamespaces(pid_t pid,
 int virProcessSetNamespaces(size_t nfdlist,
                             int *fdlist);
 
-int virProcessSetMaxMemLock(pid_t pid, unsigned long long bytes);
+int virProcessSetMaxMemLock(pid_t pid, unsigned long long bytes) G_GNUC_NO_INLINE;
 int virProcessSetMaxProcesses(pid_t pid, unsigned int procs);
 int virProcessSetMaxFiles(pid_t pid, unsigned int files);
 int virProcessSetMaxCoreSize(pid_t pid, unsigned long long bytes);
 
-int virProcessGetMaxMemLock(pid_t pid, unsigned long long *bytes);
+int virProcessGetMaxMemLock(pid_t pid, unsigned long long *bytes) G_GNUC_NO_INLINE;
 
 /* Callback to run code within the mount namespace tied to the given
  * pid.  This function must use only async-signal-safe functions, as
@@ -108,7 +106,8 @@ typedef int (*virProcessForkCallback)(pid_t ppid,
                                       void *opaque);
 
 int virProcessRunInFork(virProcessForkCallback cb,
-                        void *opaque);
+                        void *opaque)
+    G_GNUC_NO_INLINE;
 
 int virProcessSetupPrivateMountNS(void);
 
@@ -125,5 +124,3 @@ typedef enum {
 } virProcessNamespaceFlags;
 
 int virProcessNamespaceAvailable(unsigned int ns);
-
-#endif /* LIBVIRT_VIRPROCESS_H */

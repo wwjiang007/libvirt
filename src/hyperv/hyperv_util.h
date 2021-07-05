@@ -19,11 +19,10 @@
  *
  */
 
-#ifndef LIBVIRT_HYPERV_UTIL_H
-# define LIBVIRT_HYPERV_UTIL_H
+#pragma once
 
-# include "internal.h"
-# include "viruri.h"
+#include "internal.h"
+#include "viruri.h"
 
 typedef struct _hypervParsedUri hypervParsedUri;
 
@@ -31,8 +30,6 @@ struct _hypervParsedUri {
     char *transport;
 };
 
-int hypervParseUri(hypervParsedUri **parsedUri, virURIPtr uri);
+int hypervParseUri(hypervParsedUri **parsedUri, virURI *uri);
 
 void hypervFreeParsedUri(hypervParsedUri **parsedUri);
-
-#endif /* LIBVIRT_HYPERV_UTIL_H */

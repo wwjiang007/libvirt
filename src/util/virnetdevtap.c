@@ -32,10 +32,13 @@
 #include "datatypes.h"
 
 #include <unistd.h>
-#include <regex.h>
 #include <sys/types.h>
-#include <sys/ioctl.h>
-#include <net/if.h>
+#ifndef WIN32
+# include <sys/ioctl.h>
+#endif
+#ifdef WITH_NET_IF_H
+# include <net/if.h>
+#endif
 #include <fcntl.h>
 #ifdef __linux__
 # include <linux/if_tun.h>    /* IFF_TUN, IFF_NO_PI */
@@ -43,7 +46,7 @@
 # include <net/if_mib.h>
 # include <sys/sysctl.h>
 #endif
-#if defined(HAVE_GETIFADDRS) && defined(AF_LINK)
+#if defined(WITH_GETIFADDRS) && defined(AF_LINK)
 # include <ifaddrs.h>
 #endif
 
@@ -62,7 +65,7 @@ VIR_LOG_INIT("util.netdevtap");
  * Returns 0 if the interface name is successfully queried, -1 otherwise
  */
 int
-virNetDevTapGetName(int tapfd ATTRIBUTE_UNUSED, char **ifname ATTRIBUTE_UNUSED)
+virNetDevTapGetName(int tapfd G_GNUC_UNUSED, char **ifname G_GNUC_UNUSED)
 {
 #ifdef TUNGETIFF
     struct ifreq ifr;
@@ -73,7 +76,8 @@ virNetDevTapGetName(int tapfd ATTRIBUTE_UNUSED, char **ifname ATTRIBUTE_UNUSED)
         return -1;
     }
 
-    return VIR_STRDUP(*ifname, ifr.ifr_name) < 0 ? -1 : 0;
+    *ifname = g_strdup(ifr.ifr_name);
+    return 0;
 #else
     return -1;
 #endif
@@ -92,7 +96,7 @@ virNetDevTapGetName(int tapfd ATTRIBUTE_UNUSED, char **ifname ATTRIBUTE_UNUSED)
  * found.
  */
 char*
-virNetDevTapGetRealDeviceName(char *ifname ATTRIBUTE_UNUSED)
+virNetDevTapGetRealDeviceName(char *ifname G_GNUC_UNUSED)
 {
 #ifdef IFDATA_DRIVERNAME
     int ifindex = 0;
@@ -121,8 +125,7 @@ virNetDevTapGetRealDeviceName(char *ifname ATTRIBUTE_UNUSED)
         return NULL;
     }
 
-    if (VIR_ALLOC_N(ret, len) < 0)
-        return NULL;
+    ret = g_new0(char, len);
 
     if (sysctl(name, 6, ret, &len, 0, 0) < 0) {
         virReportSystemError(errno,
@@ -137,66 +140,6 @@ virNetDevTapGetRealDeviceName(char *ifname ATTRIBUTE_UNUSED)
     return NULL;
 #endif
 }
-
-
-/**
- * virNetDevProbeVnetHdr:
- * @tapfd: a tun/tap file descriptor
- *
- * Check whether it is safe to enable the IFF_VNET_HDR flag on the
- * tap interface.
- *
- * Setting IFF_VNET_HDR enables QEMU's virtio_net driver to allow
- * guests to pass larger (GSO) packets, with partial checksums, to
- * the host. This greatly increases the achievable throughput.
- *
- * It is only useful to enable this when we're setting up a virtio
- * interface. And it is only *safe* to enable it when we know for
- * sure that a) qemu has support for IFF_VNET_HDR and b) the running
- * kernel implements the TUNGETIFF ioctl(), which qemu needs to query
- * the supplied tapfd.
- *
- * Returns 1 if VnetHdr is supported, 0 if not supported
- */
-#ifdef IFF_VNET_HDR
-static int
-virNetDevProbeVnetHdr(int tapfd)
-{
-# if defined(IFF_VNET_HDR) && defined(TUNGETFEATURES) && defined(TUNGETIFF)
-    unsigned int features;
-    struct ifreq dummy;
-
-    if (ioctl(tapfd, TUNGETFEATURES, &features) != 0) {
-        VIR_INFO("Not enabling IFF_VNET_HDR; "
-                 "TUNGETFEATURES ioctl() not implemented");
-        return 0;
-    }
-
-    if (!(features & IFF_VNET_HDR)) {
-        VIR_INFO("Not enabling IFF_VNET_HDR; "
-                 "TUNGETFEATURES ioctl() reports no IFF_VNET_HDR");
-        return 0;
-    }
-
-    /* The kernel will always return -1 at this point.
-     * If TUNGETIFF is not implemented then errno == EBADFD.
-     */
-    if (ioctl(tapfd, TUNGETIFF, &dummy) != -1 || errno != EBADFD) {
-        VIR_INFO("Not enabling IFF_VNET_HDR; "
-                 "TUNGETIFF ioctl() not implemented");
-        return 0;
-    }
-
-    VIR_INFO("Enabling IFF_VNET_HDR");
-
-    return 1;
-# else
-    (void) tapfd;
-    VIR_INFO("Not enabling IFF_VNET_HDR; disabled at build time");
-    return 0;
-# endif
-}
-#endif
 
 
 #ifdef TUNSETIFF
@@ -226,10 +169,19 @@ int virNetDevTapCreate(char **ifname,
                        size_t tapfdSize,
                        unsigned int flags)
 {
-    size_t i;
+    size_t i = 0;
     struct ifreq ifr;
     int ret = -1;
-    int fd;
+    int fd = -1;
+
+    /* if ifname is empty, then auto-generate a name for the new
+     * device (the kernel could do this for us, but has a bad habit of
+     * immediately re-using names that have just been released, which
+     * can lead to race conditions).  if ifname is just a
+     * user-provided name, virNetDevGenerateName leaves it
+     * unchanged. */
+    if (virNetDevGenerateName(ifname, VIR_NET_DEV_GEN_NAME_VNET) < 0)
+        return -1;
 
     if (!tunpath)
         tunpath = "/dev/net/tun";
@@ -247,21 +199,11 @@ int virNetDevTapCreate(char **ifname,
 
         ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
         /* If tapfdSize is greater than one, request multiqueue */
-        if (tapfdSize > 1) {
-# ifdef IFF_MULTI_QUEUE
+        if (tapfdSize > 1)
             ifr.ifr_flags |= IFF_MULTI_QUEUE;
-# else
-            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                           _("Multiqueue devices are not supported on this system"));
-            goto cleanup;
-# endif
-        }
 
-# ifdef IFF_VNET_HDR
-        if ((flags &  VIR_NETDEV_TAP_CREATE_VNET_HDR) &&
-            virNetDevProbeVnetHdr(fd))
+        if (flags &  VIR_NETDEV_TAP_CREATE_VNET_HDR)
             ifr.ifr_flags |= IFF_VNET_HDR;
-# endif
 
         if (virStrcpyStatic(ifr.ifr_name, *ifname) < 0) {
             virReportSystemError(ERANGE,
@@ -282,8 +224,7 @@ int virNetDevTapCreate(char **ifname,
             /* In case we are looping more than once, set other
              * TAPs to have the same name */
             VIR_FREE(*ifname);
-            if (VIR_STRDUP(*ifname, ifr.ifr_name) < 0)
-                goto cleanup;
+            *ifname = g_strdup(ifr.ifr_name);
         }
 
         if ((flags & VIR_NETDEV_TAP_CREATE_PERSIST) &&
@@ -296,6 +237,7 @@ int virNetDevTapCreate(char **ifname,
         tapfd[i] = fd;
     }
 
+    VIR_INFO("created device: '%s'", *ifname);
     ret = 0;
 
  cleanup:
@@ -348,6 +290,7 @@ int virNetDevTapDelete(const char *ifname,
         goto cleanup;
     }
 
+    VIR_INFO("delete device: '%s'", ifname);
     ret = 0;
 
  cleanup:
@@ -356,21 +299,26 @@ int virNetDevTapDelete(const char *ifname,
 }
 #elif defined(SIOCIFCREATE2) && defined(SIOCIFDESTROY) && defined(IF_MAXUNIT)
 int virNetDevTapCreate(char **ifname,
-                       const char *tunpath ATTRIBUTE_UNUSED,
+                       const char *tunpath G_GNUC_UNUSED,
                        int *tapfd,
                        size_t tapfdSize,
-                       unsigned int flags ATTRIBUTE_UNUSED)
+                       unsigned int flags G_GNUC_UNUSED)
 {
     int s;
     struct ifreq ifr;
     int ret = -1;
-    char *newifname = NULL;
 
     if (tapfdSize > 1) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                        _("Multiqueue devices are not supported on this system"));
         goto cleanup;
     }
+
+    /* auto-generate an unused name for the new device (this
+     * is NOP if a name has been provided)
+     */
+    if (virNetDevGenerateName(ifname, VIR_NET_DEV_GEN_NAME_VNET) < 0)
+        return -1;
 
     /* As FreeBSD determines interface type by name,
      * we have to create 'tap' interface first and
@@ -385,39 +333,9 @@ int virNetDevTapCreate(char **ifname,
         goto cleanup;
     }
 
-    /* In case we were given exact interface name (e.g. 'vnetN'),
-     * we just rename to it. If we have format string like
-     * 'vnet%d', we need to find the first available name that
-     * matches this pattern
-     */
-    if (strstr(*ifname, "%d") != NULL) {
-        size_t i;
-        for (i = 0; i <= IF_MAXUNIT; i++) {
-            VIR_AUTOFREE(char *) newname = NULL;
-
-            if (virAsprintf(&newname, *ifname, i) < 0)
-                goto cleanup;
-
-            if (virNetDevExists(newname) == 0) {
-                VIR_STEAL_PTR(newifname, newname);
-                break;
-            }
-        }
-        if (newifname) {
-            VIR_FREE(*ifname);
-            *ifname = newifname;
-        } else {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Failed to generate new name for interface %s"),
-                           ifr.ifr_name);
-            goto cleanup;
-        }
-    }
-
     if (tapfd) {
-        VIR_AUTOFREE(char *) dev_path = NULL;
-        if (virAsprintf(&dev_path, "/dev/%s", ifr.ifr_name) < 0)
-            goto cleanup;
+        g_autofree char *dev_path = NULL;
+        dev_path = g_strdup_printf("/dev/%s", ifr.ifr_name);
 
         if ((*tapfd = open(dev_path, O_RDWR)) < 0) {
             virReportSystemError(errno,
@@ -439,7 +357,7 @@ int virNetDevTapCreate(char **ifname,
 }
 
 int virNetDevTapDelete(const char *ifname,
-                       const char *tunpath ATTRIBUTE_UNUSED)
+                       const char *tunpath G_GNUC_UNUSED)
 {
     int s;
     struct ifreq ifr;
@@ -462,18 +380,18 @@ int virNetDevTapDelete(const char *ifname,
 }
 
 #else
-int virNetDevTapCreate(char **ifname ATTRIBUTE_UNUSED,
-                       const char *tunpath ATTRIBUTE_UNUSED,
-                       int *tapfd ATTRIBUTE_UNUSED,
-                       size_t tapfdSize ATTRIBUTE_UNUSED,
-                       unsigned int flags ATTRIBUTE_UNUSED)
+int virNetDevTapCreate(char **ifname G_GNUC_UNUSED,
+                       const char *tunpath G_GNUC_UNUSED,
+                       int *tapfd G_GNUC_UNUSED,
+                       size_t tapfdSize G_GNUC_UNUSED,
+                       unsigned int flags G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Unable to create TAP devices on this platform"));
     return -1;
 }
-int virNetDevTapDelete(const char *ifname ATTRIBUTE_UNUSED,
-                       const char *tunpath ATTRIBUTE_UNUSED)
+int virNetDevTapDelete(const char *ifname G_GNUC_UNUSED,
+                       const char *tunpath G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Unable to delete TAP devices on this platform"));
@@ -502,8 +420,9 @@ virNetDevTapAttachBridge(const char *tapname,
                          const char *brname,
                          const virMacAddr *macaddr,
                          const unsigned char *vmuuid,
-                         virNetDevVPortProfilePtr virtPortProfile,
-                         virNetDevVlanPtr virtVlan,
+                         const virNetDevVPortProfile *virtPortProfile,
+                         const virNetDevVlan *virtVlan,
+                         virTristateBool isolatedPort,
                          unsigned int mtu,
                          unsigned int *actualMTU)
 {
@@ -513,20 +432,20 @@ virNetDevTapAttachBridge(const char *tapname,
      * the bridge, or if it is smaller than the current MTU of the
      * bridge). If MTU isn't specified for the new device (i.e. 0),
      * we need to set the interface MTU to the current MTU of the
-     * bridge (to avoid inadvertantly changing the bridge's MTU).
+     * bridge (to avoid inadvertently changing the bridge's MTU).
      */
     if (mtu > 0) {
         if (virNetDevSetMTU(tapname, mtu) < 0)
-            goto error;
+            return -1;
     } else {
         if (virNetDevSetMTUFromDevice(tapname, brname) < 0)
-            goto error;
+            return -1;
     }
     if (actualMTU) {
         int retMTU = virNetDevGetMTU(tapname);
 
         if (retMTU < 0)
-            goto error;
+            return -1;
 
         *actualMTU = retMTU;
     }
@@ -535,21 +454,28 @@ virNetDevTapAttachBridge(const char *tapname,
     if (virtPortProfile) {
         if (virtPortProfile->virtPortType == VIR_NETDEV_VPORT_PROFILE_MIDONET) {
             if (virNetDevMidonetBindPort(tapname, virtPortProfile) < 0)
-                goto error;
+                return -1;
         } else if (virtPortProfile->virtPortType == VIR_NETDEV_VPORT_PROFILE_OPENVSWITCH) {
             if (virNetDevOpenvswitchAddPort(brname, tapname, macaddr, vmuuid,
                                             virtPortProfile, virtVlan) < 0)
-                goto error;
+                return -1;
         }
     } else {
         if (virNetDevBridgeAddPort(brname, tapname) < 0)
-            goto error;
+            return -1;
+
+        if (isolatedPort == VIR_TRISTATE_BOOL_YES &&
+            virNetDevBridgePortSetIsolated(brname, tapname, true) < 0) {
+            virErrorPtr err;
+
+            virErrorPreserveLast(&err);
+            ignore_value(virNetDevBridgeRemovePort(brname, tapname));
+            virErrorRestore(&err);
+            return -1;
+        }
     }
 
     return 0;
-
- error:
-    return -1;
 }
 
 
@@ -574,13 +500,14 @@ virNetDevTapReattachBridge(const char *tapname,
                            const char *brname,
                            const virMacAddr *macaddr,
                            const unsigned char *vmuuid,
-                           virNetDevVPortProfilePtr virtPortProfile,
-                           virNetDevVlanPtr virtVlan,
+                           const virNetDevVPortProfile *virtPortProfile,
+                           const virNetDevVlan *virtVlan,
+                           virTristateBool isolatedPort,
                            unsigned int mtu,
                            unsigned int *actualMTU)
 {
     bool useOVS = false;
-    VIR_AUTOFREE(char *) master = NULL;
+    g_autofree char *master = NULL;
 
     if (virNetDevGetMaster(tapname, &master) < 0)
         return -1;
@@ -613,6 +540,7 @@ virNetDevTapReattachBridge(const char *tapname,
                                  macaddr, vmuuid,
                                  virtPortProfile,
                                  virtVlan,
+                                 isolatedPort,
                                  mtu, actualMTU) < 0)
         return -1;
 
@@ -660,15 +588,15 @@ int virNetDevTapCreateInBridgePort(const char *brname,
                                    const char *tunpath,
                                    int *tapfd,
                                    size_t tapfdSize,
-                                   virNetDevVPortProfilePtr virtPortProfile,
-                                   virNetDevVlanPtr virtVlan,
-                                   virNetDevCoalescePtr coalesce,
+                                   const virNetDevVPortProfile *virtPortProfile,
+                                   const virNetDevVlan *virtVlan,
+                                   virTristateBool isolatedPort,
+                                   virNetDevCoalesce *coalesce,
                                    unsigned int mtu,
                                    unsigned int *actualMTU,
                                    unsigned int flags)
 {
     virMacAddr tapmac;
-    char macaddrstr[VIR_MAC_STRING_BUFLEN];
     size_t i;
 
     if (virNetDevTapCreate(ifname, tunpath, tapfd, tapfdSize, flags) < 0)
@@ -682,26 +610,26 @@ int virNetDevTapCreateInBridgePort(const char *brname,
      */
     virMacAddrSet(&tapmac, macaddr);
     if (!(flags & VIR_NETDEV_TAP_CREATE_USE_MAC_FOR_BRIDGE)) {
-        if (macaddr->addr[0] == 0xFE) {
-            /* For normal use, the tap device's MAC address cannot
-             * match the MAC address used by the guest. This results
-             * in "received packet on vnetX with own address as source
-             * address" error logs from the kernel.
-             */
-            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           _("Unable to use MAC address starting with "
-                             "reserved value 0xFE - '%s' - "),
-                           virMacAddrFormat(macaddr, macaddrstr));
-            goto error;
-        }
-        tapmac.addr[0] = 0xFE; /* Discourage bridge from using TAP dev MAC */
+        /* The tap device's MAC address cannot match the MAC address
+         * used by the guest. This results in "received packet on
+         * vnetX with own address as source address" error logs from
+         * the kernel. Making the tap address as high as possible
+         * discourages the bridge from using this tap's MAC as its own
+         * (a Linux host bridge will take on the lowest numbered MAC
+         * of all devices attached to it).
+         */
+        if (tapmac.addr[0] == 0xFE)
+            tapmac.addr[0] = 0xFA;
+        else
+            tapmac.addr[0] = 0xFE;
     }
 
     if (virNetDevSetMAC(*ifname, &tapmac) < 0)
         goto error;
 
     if (virNetDevTapAttachBridge(*ifname, brname, macaddr, vmuuid,
-                                 virtPortProfile, virtVlan, mtu, actualMTU) < 0) {
+                                 virtPortProfile, virtVlan,
+                                 isolatedPort, mtu, actualMTU) < 0) {
         goto error;
     }
 
@@ -820,7 +748,7 @@ virNetDevTapInterfaceStats(const char *ifname,
                    _("/proc/net/dev: Interface not found"));
     return -1;
 }
-#elif defined(HAVE_GETIFADDRS) && defined(AF_LINK)
+#elif defined(WITH_GETIFADDRS) && defined(AF_LINK)
 int
 virNetDevTapInterfaceStats(const char *ifname,
                            virDomainInterfaceStatsPtr stats,
@@ -859,7 +787,7 @@ virNetDevTapInterfaceStats(const char *ifname,
                 stats->rx_bytes = ifd->ifi_obytes;
                 stats->rx_packets = ifd->ifi_opackets;
                 stats->rx_errs = ifd->ifi_oerrors;
-# ifdef HAVE_STRUCT_IF_DATA_IFI_OQDROPS
+# ifndef __APPLE__
                 stats->rx_drop = ifd->ifi_oqdrops;
 # else
                 stats->rx_drop = 0;
@@ -868,7 +796,7 @@ virNetDevTapInterfaceStats(const char *ifname,
                 stats->tx_bytes = ifd->ifi_obytes;
                 stats->tx_packets = ifd->ifi_opackets;
                 stats->tx_errs = ifd->ifi_oerrors;
-# ifdef HAVE_STRUCT_IF_DATA_IFI_OQDROPS
+# ifndef __APPLE__
                 stats->tx_drop = ifd->ifi_oqdrops;
 # else
                 stats->tx_drop = 0;
@@ -893,9 +821,9 @@ virNetDevTapInterfaceStats(const char *ifname,
 }
 #else
 int
-virNetDevTapInterfaceStats(const char *ifname ATTRIBUTE_UNUSED,
-                           virDomainInterfaceStatsPtr stats ATTRIBUTE_UNUSED,
-                           bool swapped ATTRIBUTE_UNUSED)
+virNetDevTapInterfaceStats(const char *ifname G_GNUC_UNUSED,
+                           virDomainInterfaceStatsPtr stats G_GNUC_UNUSED,
+                           bool swapped G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_OPERATION_INVALID, "%s",
                    _("interface stats not implemented on this platform"));

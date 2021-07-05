@@ -30,26 +30,18 @@ static int
 testCompareMemLock(const void *data)
 {
     const struct testInfo *info = data;
-    virDomainDefPtr def = NULL;
-    char *xml = NULL;
-    int ret = -1;
+    g_autoptr(virDomainDef) def = NULL;
+    g_autofree char *xml = NULL;
 
-    if (virAsprintf(&xml, "%s/qemumemlockdata/qemumemlock-%s.xml",
-                    abs_srcdir, info->name) < 0)
-        goto cleanup;
+    xml = g_strdup_printf("%s/qemumemlockdata/qemumemlock-%s.xml", abs_srcdir,
+                          info->name);
 
-    if (!(def = virDomainDefParseFile(xml, driver.caps, driver.xmlopt, NULL,
+    if (!(def = virDomainDefParseFile(xml, driver.xmlopt, NULL,
                                       VIR_DOMAIN_DEF_PARSE_INACTIVE))) {
-        goto cleanup;
+        return -1;
     }
 
-    ret = virTestCompareToULL(info->memlock, qemuDomainGetMemLockLimitBytes(def));
-
- cleanup:
-    virDomainDefFree(def);
-    VIR_FREE(xml);
-
-    return ret;
+    return virTestCompareToULL(info->memlock, qemuDomainGetMemLockLimitBytes(def, false));
 }
 
 # define FAKEROOTDIRTEMPLATE abs_builddir "/fakerootdir-XXXXXX"
@@ -58,25 +50,20 @@ static int
 mymain(void)
 {
     int ret = 0;
-    char *fakerootdir;
-    virQEMUCapsPtr qemuCaps = NULL;
+    g_autofree char *fakerootdir = NULL;
+    g_autoptr(virQEMUCaps) qemuCaps = NULL;
 
-    if (VIR_STRDUP_QUIET(fakerootdir, FAKEROOTDIRTEMPLATE) < 0) {
-        fprintf(stderr, "Out of memory\n");
-        abort();
-    }
+    fakerootdir = g_strdup(FAKEROOTDIRTEMPLATE);
 
-    if (!mkdtemp(fakerootdir)) {
+    if (!g_mkdtemp(fakerootdir)) {
         fprintf(stderr, "Cannot create fakerootdir");
         abort();
     }
 
-    setenv("LIBVIRT_FAKE_ROOT_DIR", fakerootdir, 1);
+    g_setenv("LIBVIRT_FAKE_ROOT_DIR", fakerootdir, TRUE);
 
-    if (qemuTestDriverInit(&driver) < 0) {
-        VIR_FREE(fakerootdir);
+    if (qemuTestDriverInit(&driver) < 0)
         return EXIT_FAILURE;
-    }
 
     driver.privileged = true;
 
@@ -105,10 +92,22 @@ mymain(void)
      * ensure settings are prioritized as expected.
      */
 
-    qemuTestSetHostArch(driver.caps, VIR_ARCH_X86_64);
+    qemuTestSetHostArch(&driver, VIR_ARCH_X86_64);
 
     DO_TEST("pc-kvm", 0);
     DO_TEST("pc-tcg", 0);
+
+    if (!(qemuCaps = virQEMUCapsNew())) {
+        ret = -1;
+        goto cleanup;
+    }
+
+    virQEMUCapsSet(qemuCaps, QEMU_CAPS_DEVICE_VFIO_PCI);
+
+    if (qemuTestCapsCacheInsert(driver.qemuCapsCache, qemuCaps) < 0) {
+        ret = -1;
+        goto cleanup;
+    };
 
     DO_TEST("pc-hardlimit", 2147483648);
     DO_TEST("pc-locked", VIR_DOMAIN_MEMORY_PARAM_UNLIMITED);
@@ -119,11 +118,7 @@ mymain(void)
     DO_TEST("pc-hardlimit+locked+hostdev", 2147483648);
     DO_TEST("pc-locked+hostdev", VIR_DOMAIN_MEMORY_PARAM_UNLIMITED);
 
-    qemuTestSetHostArch(driver.caps, VIR_ARCH_PPC64);
-    if (!(qemuCaps = virQEMUCapsNew())) {
-        ret = -1;
-        goto cleanup;
-    }
+    qemuTestSetHostArch(&driver, VIR_ARCH_PPC64);
 
     virQEMUCapsSet(qemuCaps, QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE);
     if (qemuTestCapsCacheInsert(driver.qemuCapsCache, qemuCaps) < 0) {
@@ -144,19 +139,17 @@ mymain(void)
     DO_TEST("pseries-locked+hostdev", VIR_DOMAIN_MEMORY_PARAM_UNLIMITED);
 
  cleanup:
-    virObjectUnref(qemuCaps);
-
     if (getenv("LIBVIRT_SKIP_CLEANUP") == NULL)
         virFileDeleteTree(fakerootdir);
 
     qemuTestDriverFree(&driver);
-    VIR_FREE(fakerootdir);
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 VIR_TEST_MAIN_PRELOAD(mymain,
-                      abs_builddir "/.libs/virpcimock.so")
+                      VIR_TEST_MOCK("virpci"),
+                      VIR_TEST_MOCK("domaincaps"))
 
 #else
 

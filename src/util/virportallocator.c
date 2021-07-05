@@ -21,10 +21,9 @@
 
 #include <config.h>
 
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
+#include <unistd.h>
 
+#include "virsocket.h"
 #include "viralloc.h"
 #include "virbitmap.h"
 #include "virportallocator.h"
@@ -32,16 +31,16 @@
 #include "virerror.h"
 #include "virfile.h"
 #include "virstring.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 #define VIR_PORT_ALLOCATOR_NUM_PORTS 65536
 
 typedef struct _virPortAllocator virPortAllocator;
-typedef virPortAllocator *virPortAllocatorPtr;
 struct _virPortAllocator {
     virObjectLockable parent;
-    virBitmapPtr bitmap;
+    virBitmap *bitmap;
 };
 
 struct _virPortAllocatorRange {
@@ -51,32 +50,28 @@ struct _virPortAllocatorRange {
     unsigned short end;
 };
 
-static virClassPtr virPortAllocatorClass;
-static virPortAllocatorPtr virPortAllocatorInstance;
+static virClass *virPortAllocatorClass;
+static virPortAllocator *virPortAllocatorInstance;
 
 static void
 virPortAllocatorDispose(void *obj)
 {
-    virPortAllocatorPtr pa = obj;
+    virPortAllocator *pa = obj;
 
     virBitmapFree(pa->bitmap);
 }
 
-static virPortAllocatorPtr
+static virPortAllocator *
 virPortAllocatorNew(void)
 {
-    virPortAllocatorPtr pa;
+    virPortAllocator *pa;
 
     if (!(pa = virObjectLockableNew(virPortAllocatorClass)))
         return NULL;
 
-    if (!(pa->bitmap = virBitmapNew(VIR_PORT_ALLOCATOR_NUM_PORTS)))
-        goto error;
+    pa->bitmap = virBitmapNew(VIR_PORT_ALLOCATOR_NUM_PORTS);
 
     return pa;
- error:
-    virObjectUnref(pa);
-    return NULL;
 }
 
 static int
@@ -93,12 +88,12 @@ virPortAllocatorOnceInit(void)
 
 VIR_ONCE_GLOBAL_INIT(virPortAllocator);
 
-virPortAllocatorRangePtr
+virPortAllocatorRange *
 virPortAllocatorRangeNew(const char *name,
                          unsigned short start,
                          unsigned short end)
 {
-    virPortAllocatorRangePtr range;
+    virPortAllocatorRange *range;
 
     if (start >= end) {
         virReportInvalidArg(start, "start port %d must be less than end port %d",
@@ -106,30 +101,23 @@ virPortAllocatorRangeNew(const char *name,
         return NULL;
     }
 
-    if (VIR_ALLOC(range) < 0)
-        return NULL;
+    range = g_new0(virPortAllocatorRange, 1);
 
     range->start = start;
     range->end = end;
-
-    if (VIR_STRDUP(range->name, name) < 0)
-        goto error;
+    range->name = g_strdup(name);
 
     return range;
-
- error:
-    virPortAllocatorRangeFree(range);
-    return NULL;
 }
 
 void
-virPortAllocatorRangeFree(virPortAllocatorRangePtr range)
+virPortAllocatorRangeFree(virPortAllocatorRange *range)
 {
     if (!range)
         return;
 
-    VIR_FREE(range->name);
-    VIR_FREE(range);
+    g_free(range->name);
+    g_free(range);
 }
 
 static int
@@ -198,11 +186,12 @@ virPortAllocatorBindToPort(bool *used,
 
     ret = 0;
  cleanup:
-    VIR_FORCE_CLOSE(fd);
+    if (fd != -1)
+        closesocket(fd);
     return ret;
 }
 
-static virPortAllocatorPtr
+static virPortAllocator *
 virPortAllocatorGet(void)
 {
     if (virPortAllocatorInitialize() < 0)
@@ -217,7 +206,7 @@ virPortAllocatorAcquire(const virPortAllocatorRange *range,
 {
     int ret = -1;
     size_t i;
-    virPortAllocatorPtr pa = virPortAllocatorGet();
+    virPortAllocator *pa = virPortAllocatorGet();
 
     *port = 0;
 
@@ -262,7 +251,7 @@ int
 virPortAllocatorRelease(unsigned short port)
 {
     int ret = -1;
-    virPortAllocatorPtr pa = virPortAllocatorGet();
+    virPortAllocator *pa = virPortAllocatorGet();
 
     if (!pa)
         return -1;
@@ -289,7 +278,7 @@ int
 virPortAllocatorSetUsed(unsigned short port)
 {
     int ret = -1;
-    virPortAllocatorPtr pa = virPortAllocatorGet();
+    virPortAllocator *pa = virPortAllocatorGet();
 
     if (!pa)
         return -1;

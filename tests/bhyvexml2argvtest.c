@@ -7,17 +7,20 @@
 # include "datatypes.h"
 
 # include "bhyve/bhyve_capabilities.h"
+# include "bhyve/bhyve_conf.h"
 # include "bhyve/bhyve_domain.h"
 # include "bhyve/bhyve_utils.h"
 # include "bhyve/bhyve_command.h"
+# include "bhyve/bhyve_process.h"
 
 # define VIR_FROM_THIS VIR_FROM_BHYVE
 
 static bhyveConn driver;
 
 typedef enum {
-    FLAG_EXPECT_FAILURE     = 1 << 0,
-    FLAG_EXPECT_PARSE_ERROR = 1 << 1,
+    FLAG_EXPECT_FAILURE         = 1 << 0,
+    FLAG_EXPECT_PARSE_ERROR     = 1 << 1,
+    FLAG_EXPECT_PREPARE_ERROR   = 1 << 2,
 } virBhyveXMLToArgvTestFlags;
 
 static int testCompareXMLToArgvFiles(const char *xml,
@@ -26,22 +29,28 @@ static int testCompareXMLToArgvFiles(const char *xml,
                                      const char *dmcmdline,
                                      unsigned int flags)
 {
-    char *actualargv = NULL, *actualld = NULL, *actualdm = NULL;
-    virDomainDefPtr vmdef = NULL;
-    virCommandPtr cmd = NULL, ldcmd = NULL;
-    virConnectPtr conn;
+    g_autofree char *actualargv = NULL;
+    g_autofree char *actualld = NULL;
+    g_autofree char *actualdm = NULL;
+    g_autoptr(virDomainObj) vm = NULL;
+    g_autoptr(virCommand) cmd = NULL;
+    g_autoptr(virCommand) ldcmd = NULL;
+    g_autoptr(virConnect) conn = NULL;
     int ret = -1;
 
     if (!(conn = virGetConnect()))
         goto out;
 
-    if (!(vmdef = virDomainDefParseFile(xml, driver.caps, driver.xmlopt,
-                                        NULL, VIR_DOMAIN_DEF_PARSE_INACTIVE))) {
+    if (!(vm = virDomainObjNew(driver.xmlopt)))
+        return -1;
+
+    if (!(vm->def = virDomainDefParseFile(xml, driver.xmlopt,
+                                          NULL, VIR_DOMAIN_DEF_PARSE_INACTIVE))) {
         if (flags & FLAG_EXPECT_PARSE_ERROR) {
             ret = 0;
         } else if (flags & FLAG_EXPECT_FAILURE) {
             ret = 0;
-            VIR_TEST_DEBUG("Got expected error: %s\n",
+            VIR_TEST_DEBUG("Got expected error: %s",
                     virGetLastErrorMessage());
             virResetLastError();
         }
@@ -51,36 +60,45 @@ static int testCompareXMLToArgvFiles(const char *xml,
 
     conn->privateData = &driver;
 
-    cmd = virBhyveProcessBuildBhyveCmd(conn, vmdef, false);
-    if (vmdef->os.loader)
+    if (bhyveProcessPrepareDomain(&driver, vm, 0) < 0) {
+        if (flags & FLAG_EXPECT_PREPARE_ERROR) {
+            ret = 0;
+            VIR_TEST_DEBUG("Got expected error: %s",
+                    virGetLastErrorMessage());
+        }
+        goto out;
+    }
+
+    cmd = virBhyveProcessBuildBhyveCmd(&driver, vm->def, false);
+    if (vm->def->os.loader)
         ldcmd = virCommandNew("dummy");
     else
-        ldcmd = virBhyveProcessBuildLoadCmd(conn, vmdef, "<device.map>",
+        ldcmd = virBhyveProcessBuildLoadCmd(&driver, vm->def, "<device.map>",
                                             &actualdm);
 
     if ((cmd == NULL) || (ldcmd == NULL)) {
         if (flags & FLAG_EXPECT_FAILURE) {
             ret = 0;
-            VIR_TEST_DEBUG("Got expected error: %s\n",
+            VIR_TEST_DEBUG("Got expected error: %s",
                     virGetLastErrorMessage());
             virResetLastError();
         }
         goto out;
     }
 
-    if (!(actualargv = virCommandToString(cmd, false)))
+    if (!(actualargv = virCommandToStringFull(cmd, true, true)))
         goto out;
 
     if (actualdm != NULL)
         virTrimSpaces(actualdm, NULL);
 
-    if (!(actualld = virCommandToString(ldcmd, false)))
+    if (!(actualld = virCommandToStringFull(ldcmd, true, true)))
         goto out;
 
-    if (virTestCompareToFile(actualargv, cmdline) < 0)
+    if (virTestCompareToFileFull(actualargv, cmdline, false) < 0)
         goto out;
 
-    if (virTestCompareToFile(actualld, ldcmdline) < 0)
+    if (virTestCompareToFileFull(actualld, ldcmdline, false) < 0)
         goto out;
 
     if (virFileExists(dmcmdline) || actualdm) {
@@ -91,18 +109,11 @@ static int testCompareXMLToArgvFiles(const char *xml,
     ret = 0;
 
  out:
-    if (vmdef &&
-        vmdef->ngraphics == 1 &&
-        vmdef->graphics[0]->type == VIR_DOMAIN_GRAPHICS_TYPE_VNC)
-        virPortAllocatorRelease(vmdef->graphics[0]->data.vnc.port);
+    if (vm && vm->def &&
+        vm->def->ngraphics == 1 &&
+        vm->def->graphics[0]->type == VIR_DOMAIN_GRAPHICS_TYPE_VNC)
+        virPortAllocatorRelease(vm->def->graphics[0]->data.vnc.port);
 
-    VIR_FREE(actualargv);
-    VIR_FREE(actualld);
-    VIR_FREE(actualdm);
-    virCommandFree(cmd);
-    virCommandFree(ldcmd);
-    virDomainDefFree(vmdef);
-    virObjectUnref(conn);
     return ret;
 }
 
@@ -114,35 +125,30 @@ struct testInfo {
 static int
 testCompareXMLToArgvHelper(const void *data)
 {
-    int ret = -1;
     const struct testInfo *info = data;
-    char *xml = NULL;
-    char *args = NULL, *ldargs = NULL, *dmargs = NULL;
+    g_autofree char *xml = NULL;
+    g_autofree char *args = NULL;
+    g_autofree char *ldargs = NULL;
+    g_autofree char *dmargs = NULL;
 
-    if (virAsprintf(&xml, "%s/bhyvexml2argvdata/bhyvexml2argv-%s.xml",
-                    abs_srcdir, info->name) < 0 ||
-        virAsprintf(&args, "%s/bhyvexml2argvdata/bhyvexml2argv-%s.args",
-                    abs_srcdir, info->name) < 0 ||
-        virAsprintf(&ldargs, "%s/bhyvexml2argvdata/bhyvexml2argv-%s.ldargs",
-                    abs_srcdir, info->name) < 0 ||
-        virAsprintf(&dmargs, "%s/bhyvexml2argvdata/bhyvexml2argv-%s.devmap",
-                    abs_srcdir, info->name) < 0)
-        goto cleanup;
+    xml = g_strdup_printf("%s/bhyvexml2argvdata/bhyvexml2argv-%s.xml",
+                          abs_srcdir, info->name);
+    args = g_strdup_printf("%s/bhyvexml2argvdata/bhyvexml2argv-%s.args",
+                           abs_srcdir, info->name);
+    ldargs = g_strdup_printf("%s/bhyvexml2argvdata/bhyvexml2argv-%s.ldargs",
+                             abs_srcdir, info->name);
+    dmargs = g_strdup_printf("%s/bhyvexml2argvdata/bhyvexml2argv-%s.devmap",
+                             abs_srcdir, info->name);
 
-    ret = testCompareXMLToArgvFiles(xml, args, ldargs, dmargs, info->flags);
-
- cleanup:
-    VIR_FREE(xml);
-    VIR_FREE(args);
-    VIR_FREE(ldargs);
-    VIR_FREE(dmargs);
-    return ret;
+    return testCompareXMLToArgvFiles(xml, args, ldargs, dmargs, info->flags);
 }
 
 static int
 mymain(void)
 {
     int ret = 0;
+    g_autofree char *fakefirmwaredir = g_strdup("fakefirmwaredir");
+    g_autofree char *fakefirmwareemptydir = g_strdup("fakefirmwareemptydir");
 
     if ((driver.caps = virBhyveCapsBuild()) == NULL)
         return EXIT_FAILURE;
@@ -153,6 +159,10 @@ mymain(void)
     if (!(driver.remotePorts = virPortAllocatorRangeNew("display", 5900, 65535)))
         return EXIT_FAILURE;
 
+    if (!(driver.config = virBhyveDriverConfigNew()))
+        return EXIT_FAILURE;
+
+    driver.config->firmwareDir = fakefirmwaredir;
 
 # define DO_TEST_FULL(name, flags) \
     do { \
@@ -173,11 +183,15 @@ mymain(void)
 # define DO_TEST_PARSE_ERROR(name) \
     DO_TEST_FULL(name, FLAG_EXPECT_PARSE_ERROR)
 
+# define DO_TEST_PREPARE_ERROR(name) \
+    DO_TEST_FULL(name, FLAG_EXPECT_PREPARE_ERROR)
+
     driver.grubcaps = BHYVE_GRUB_CAP_CONSDEV;
     driver.bhyvecaps = BHYVE_CAP_RTC_UTC | BHYVE_CAP_AHCI32SLOT | \
                        BHYVE_CAP_NET_E1000 | BHYVE_CAP_LPC_BOOTROM | \
                        BHYVE_CAP_FBUF | BHYVE_CAP_XHCI | \
-                       BHYVE_CAP_CPUTOPOLOGY;
+                       BHYVE_CAP_CPUTOPOLOGY | BHYVE_CAP_SOUND_HDA | \
+                       BHYVE_CAP_VNC_PASSWORD | BHYVE_CAP_VIRTIO_9P;
 
     DO_TEST("base");
     DO_TEST("wired");
@@ -187,6 +201,7 @@ mymain(void)
     DO_TEST("macaddr");
     DO_TEST("serial");
     DO_TEST("console");
+    DO_TEST("console-master-slave-not-specified");
     DO_TEST("grub-defaults");
     DO_TEST("grub-bootorder");
     DO_TEST("grub-bootorder2");
@@ -208,10 +223,26 @@ mymain(void)
     DO_TEST("vnc-vgaconf-off");
     DO_TEST("vnc-vgaconf-io");
     DO_TEST("vnc-autoport");
+    DO_TEST("vnc-resolution");
+    DO_TEST("vnc-password");
+    DO_TEST_FAILURE("vnc-password-comma");
     DO_TEST("cputopology");
     DO_TEST_FAILURE("cputopology-nvcpu-mismatch");
     DO_TEST("commandline");
     DO_TEST("msrs");
+    DO_TEST("sound");
+    DO_TEST("isa-controller");
+    DO_TEST_FAILURE("isa-multiple-controllers");
+    DO_TEST("firmware-efi");
+    driver.config->firmwareDir = fakefirmwareemptydir;
+    DO_TEST_PREPARE_ERROR("firmware-efi");
+    DO_TEST("fs-9p");
+    DO_TEST("fs-9p-readonly");
+    DO_TEST_FAILURE("fs-9p-unsupported-type");
+    DO_TEST_FAILURE("fs-9p-unsupported-driver");
+    DO_TEST_FAILURE("fs-9p-unsupported-accessmode");
+    driver.bhyvecaps &= ~BHYVE_CAP_VIRTIO_9P;
+    DO_TEST_FAILURE("fs-9p");
 
     /* Address allocation tests */
     DO_TEST("addr-single-sata-disk");
@@ -219,6 +250,9 @@ mymain(void)
     DO_TEST("addr-more-than-32-sata-disks");
     DO_TEST("addr-single-virtio-disk");
     DO_TEST("addr-multiple-virtio-disks");
+    DO_TEST("addr-isa-controller-on-slot-1");
+    DO_TEST("addr-isa-controller-on-slot-31");
+    DO_TEST("addr-non-isa-controller-on-slot-1");
 
     /* The same without 32 devs per controller support */
     driver.bhyvecaps ^= BHYVE_CAP_AHCI32SLOT;
@@ -251,14 +285,21 @@ mymain(void)
     driver.bhyvecaps &= ~BHYVE_CAP_CPUTOPOLOGY;
     DO_TEST_FAILURE("cputopology");
 
+    driver.bhyvecaps &= ~BHYVE_CAP_SOUND_HDA;
+    DO_TEST_FAILURE("sound");
+
+    driver.bhyvecaps &= ~BHYVE_CAP_VNC_PASSWORD;
+    DO_TEST_FAILURE("vnc-password");
+
     virObjectUnref(driver.caps);
     virObjectUnref(driver.xmlopt);
     virPortAllocatorRangeFree(driver.remotePorts);
+    virObjectUnref(driver.config);
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/bhyvexml2argvmock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("bhyvexml2argv"))
 
 #else
 

@@ -33,20 +33,21 @@
 
 VIR_LOG_INIT("datatypes");
 
-virClassPtr virConnectClass;
-virClassPtr virConnectCloseCallbackDataClass;
-virClassPtr virDomainClass;
-virClassPtr virDomainCheckpointClass;
-virClassPtr virDomainSnapshotClass;
-virClassPtr virInterfaceClass;
-virClassPtr virNetworkClass;
-virClassPtr virNodeDeviceClass;
-virClassPtr virNWFilterClass;
-virClassPtr virNWFilterBindingClass;
-virClassPtr virSecretClass;
-virClassPtr virStreamClass;
-virClassPtr virStorageVolClass;
-virClassPtr virStoragePoolClass;
+virClass *virConnectClass;
+virClass *virConnectCloseCallbackDataClass;
+virClass *virDomainClass;
+virClass *virDomainCheckpointClass;
+virClass *virDomainSnapshotClass;
+virClass *virInterfaceClass;
+virClass *virNetworkClass;
+virClass *virNetworkPortClass;
+virClass *virNodeDeviceClass;
+virClass *virNWFilterClass;
+virClass *virNWFilterBindingClass;
+virClass *virSecretClass;
+virClass *virStreamClass;
+virClass *virStorageVolClass;
+virClass *virStoragePoolClass;
 
 static void virConnectDispose(void *obj);
 static void virConnectCloseCallbackDataDispose(void *obj);
@@ -55,6 +56,7 @@ static void virDomainCheckpointDispose(void *obj);
 static void virDomainSnapshotDispose(void *obj);
 static void virInterfaceDispose(void *obj);
 static void virNetworkDispose(void *obj);
+static void virNetworkPortDispose(void *obj);
 static void virNodeDeviceDispose(void *obj);
 static void virNWFilterDispose(void *obj);
 static void virNWFilterBindingDispose(void *obj);
@@ -63,16 +65,19 @@ static void virStreamDispose(void *obj);
 static void virStorageVolDispose(void *obj);
 static void virStoragePoolDispose(void *obj);
 
-virClassPtr virAdmConnectClass;
-virClassPtr virAdmConnectCloseCallbackDataClass;
+virClass *virAdmConnectClass;
+virClass *virAdmConnectCloseCallbackDataClass;
 
 static void virAdmConnectDispose(void *obj);
 static void virAdmConnectCloseCallbackDataDispose(void *obj);
 
-virClassPtr virAdmServerClass;
-virClassPtr virAdmClientClass;
+virClass *virAdmServerClass;
+virClass *virAdmClientClass;
 static void virAdmServerDispose(void *obj);
 static void virAdmClientDispose(void *obj);
+
+static __thread bool connectDisposed;
+static __thread bool admConnectDisposed;
 
 static int
 virDataTypesOnceInit(void)
@@ -92,6 +97,7 @@ virDataTypesOnceInit(void)
     DECLARE_CLASS(virDomainSnapshot);
     DECLARE_CLASS(virInterface);
     DECLARE_CLASS(virNetwork);
+    DECLARE_CLASS(virNetworkPort);
     DECLARE_CLASS(virNodeDevice);
     DECLARE_CLASS(virNWFilter);
     DECLARE_CLASS(virNWFilterBinding);
@@ -130,6 +136,27 @@ virGetConnect(void)
     return virObjectLockableNew(virConnectClass);
 }
 
+
+void virConnectWatchDispose(void)
+{
+    connectDisposed = false;
+}
+
+bool virConnectWasDisposed(void)
+{
+    return connectDisposed;
+}
+
+void virAdmConnectWatchDispose(void)
+{
+    admConnectDisposed = false;
+}
+
+bool virAdmConnectWasDisposed(void)
+{
+    return admConnectDisposed;
+}
+
 /**
  * virConnectDispose:
  * @obj: the hypervisor connection to release
@@ -142,6 +169,7 @@ virConnectDispose(void *obj)
 {
     virConnectPtr conn = obj;
 
+    connectDisposed = true;
     if (conn->driver)
         conn->driver->connectClose(conn);
 
@@ -152,7 +180,7 @@ virConnectDispose(void *obj)
 
 
 static void
-virConnectCloseCallbackDataReset(virConnectCloseCallbackDataPtr closeData)
+virConnectCloseCallbackDataReset(virConnectCloseCallbackData *closeData)
 {
     if (closeData->freeCallback)
         closeData->freeCallback(closeData->opaque);
@@ -175,7 +203,7 @@ virConnectCloseCallbackDataDispose(void *obj)
     virConnectCloseCallbackDataReset(obj);
 }
 
-virConnectCloseCallbackDataPtr
+virConnectCloseCallbackData *
 virNewConnectCloseCallbackData(void)
 {
     if (virDataTypesInitialize() < 0)
@@ -184,7 +212,7 @@ virNewConnectCloseCallbackData(void)
     return virObjectLockableNew(virConnectCloseCallbackDataClass);
 }
 
-void virConnectCloseCallbackDataRegister(virConnectCloseCallbackDataPtr closeData,
+void virConnectCloseCallbackDataRegister(virConnectCloseCallbackData *closeData,
                                          virConnectPtr conn,
                                          virConnectCloseFunc cb,
                                          void *opaque,
@@ -208,7 +236,7 @@ void virConnectCloseCallbackDataRegister(virConnectCloseCallbackDataPtr closeDat
     virObjectUnlock(closeData);
 }
 
-void virConnectCloseCallbackDataUnregister(virConnectCloseCallbackDataPtr closeData,
+void virConnectCloseCallbackDataUnregister(virConnectCloseCallbackData *closeData,
                                            virConnectCloseFunc cb)
 {
     virObjectLock(closeData);
@@ -227,7 +255,7 @@ void virConnectCloseCallbackDataUnregister(virConnectCloseCallbackDataPtr closeD
     virObjectUnlock(closeData);
 }
 
-void virConnectCloseCallbackDataCall(virConnectCloseCallbackDataPtr closeData,
+void virConnectCloseCallbackDataCall(virConnectCloseCallbackData *closeData,
                                      int reason)
 {
     virObjectLock(closeData);
@@ -246,7 +274,7 @@ void virConnectCloseCallbackDataCall(virConnectCloseCallbackDataPtr closeData,
 }
 
 virConnectCloseFunc
-virConnectCloseCallbackDataGetCallback(virConnectCloseCallbackDataPtr closeData)
+virConnectCloseCallbackDataGetCallback(virConnectCloseCallbackData *closeData)
 {
     virConnectCloseFunc cb;
 
@@ -287,8 +315,7 @@ virGetDomain(virConnectPtr conn,
     if (!(ret = virObjectNew(virDomainClass)))
         goto error;
 
-    if (VIR_STRDUP(ret->name, name) < 0)
-        goto error;
+    ret->name = g_strdup(name);
 
     ret->conn = virObjectRef(conn);
     ret->id = id;
@@ -320,7 +347,7 @@ virDomainDispose(void *obj)
     virUUIDFormat(domain->uuid, uuidstr);
     VIR_DEBUG("release domain %p %s %s", domain, domain->name, uuidstr);
 
-    VIR_FREE(domain->name);
+    g_free(domain->name);
     virObjectUnref(domain->conn);
 }
 
@@ -351,8 +378,7 @@ virGetNetwork(virConnectPtr conn, const char *name, const unsigned char *uuid)
     if (!(ret = virObjectNew(virNetworkClass)))
         goto error;
 
-    if (VIR_STRDUP(ret->name, name) < 0)
-        goto error;
+    ret->name = g_strdup(name);
 
     ret->conn = virObjectRef(conn);
     memcpy(&(ret->uuid[0]), uuid, VIR_UUID_BUFLEN);
@@ -383,8 +409,65 @@ virNetworkDispose(void *obj)
     virUUIDFormat(network->uuid, uuidstr);
     VIR_DEBUG("release network %p %s %s", network, network->name, uuidstr);
 
-    VIR_FREE(network->name);
+    g_free(network->name);
     virObjectUnref(network->conn);
+}
+
+
+/**
+ * virGetNetworkPort:
+ * @net: the network object
+ * @uuid: pointer to the uuid
+ *
+ * Allocates a new network port object. When the object is no longer needed,
+ * virObjectUnref() must be called in order to not leak data.
+ *
+ * Returns a pointer to the network port object, or NULL on error.
+ */
+virNetworkPortPtr
+virGetNetworkPort(virNetworkPtr net, const unsigned char *uuid)
+{
+    virNetworkPortPtr ret = NULL;
+
+    if (virDataTypesInitialize() < 0)
+        return NULL;
+
+    virCheckNetworkGoto(net, error);
+    virCheckNonNullArgGoto(uuid, error);
+
+    if (!(ret = virObjectNew(virNetworkPortClass)))
+        goto error;
+
+    ret->net = virObjectRef(net);
+    memcpy(&(ret->uuid[0]), uuid, VIR_UUID_BUFLEN);
+
+    return ret;
+
+ error:
+    virObjectUnref(ret);
+    return NULL;
+}
+
+/**
+ * virNetworkPortDispose:
+ * @obj: the network port to release
+ *
+ * Unconditionally release all memory associated with a network port.
+ * The network port object must not be used once this method returns.
+ *
+ * It will also unreference the associated network object,
+ * which may also be released if its ref count hits zero.
+ */
+static void
+virNetworkPortDispose(void *obj)
+{
+    virNetworkPortPtr port = obj;
+    char uuidstr[VIR_UUID_STRING_BUFLEN];
+
+    virUUIDFormat(port->uuid, uuidstr);
+    VIR_DEBUG("release network port %p %s", port, uuidstr);
+
+    virObjectUnref(port->net);
 }
 
 
@@ -417,9 +500,8 @@ virGetInterface(virConnectPtr conn, const char *name, const char *mac)
     if (!(ret = virObjectNew(virInterfaceClass)))
         goto error;
 
-    if (VIR_STRDUP(ret->name, name) < 0 ||
-        VIR_STRDUP(ret->mac, mac) < 0)
-        goto error;
+    ret->name = g_strdup(name);
+    ret->mac = g_strdup(mac);
 
     ret->conn = virObjectRef(conn);
 
@@ -446,8 +528,8 @@ virInterfaceDispose(void *obj)
     virInterfacePtr iface = obj;
     VIR_DEBUG("release interface %p %s", iface, iface->name);
 
-    VIR_FREE(iface->name);
-    VIR_FREE(iface->mac);
+    g_free(iface->name);
+    g_free(iface->mac);
     virObjectUnref(iface->conn);
 }
 
@@ -482,8 +564,7 @@ virGetStoragePool(virConnectPtr conn, const char *name,
     if (!(ret = virObjectNew(virStoragePoolClass)))
         goto error;
 
-    if (VIR_STRDUP(ret->name, name) < 0)
-        goto error;
+    ret->name = g_strdup(name);
 
     ret->conn = virObjectRef(conn);
     memcpy(&(ret->uuid[0]), uuid, VIR_UUID_BUFLEN);
@@ -522,7 +603,7 @@ virStoragePoolDispose(void *obj)
     if (pool->privateDataFreeFunc)
         pool->privateDataFreeFunc(pool->privateData);
 
-    VIR_FREE(pool->name);
+    g_free(pool->name);
     virObjectUnref(pool->conn);
 }
 
@@ -558,10 +639,9 @@ virGetStorageVol(virConnectPtr conn, const char *pool, const char *name,
     if (!(ret = virObjectNew(virStorageVolClass)))
         goto error;
 
-    if (VIR_STRDUP(ret->pool, pool) < 0 ||
-        VIR_STRDUP(ret->name, name) < 0 ||
-        VIR_STRDUP(ret->key, key) < 0)
-        goto error;
+    ret->pool = g_strdup(pool);
+    ret->name = g_strdup(name);
+    ret->key = g_strdup(key);
 
     ret->conn = virObjectRef(conn);
 
@@ -596,9 +676,9 @@ virStorageVolDispose(void *obj)
     if (vol->privateDataFreeFunc)
         vol->privateDataFreeFunc(vol->privateData);
 
-    VIR_FREE(vol->key);
-    VIR_FREE(vol->name);
-    VIR_FREE(vol->pool);
+    g_free(vol->key);
+    g_free(vol->name);
+    g_free(vol->pool);
     virObjectUnref(vol->conn);
 }
 
@@ -627,8 +707,7 @@ virGetNodeDevice(virConnectPtr conn, const char *name)
     if (!(ret = virObjectNew(virNodeDeviceClass)))
         goto error;
 
-    if (VIR_STRDUP(ret->name, name) < 0)
-        goto error;
+    ret->name = g_strdup(name);
 
     ret->conn = virObjectRef(conn);
     return ret;
@@ -655,8 +734,8 @@ virNodeDeviceDispose(void *obj)
     virNodeDevicePtr dev = obj;
     VIR_DEBUG("release dev %p %s", dev, dev->name);
 
-    VIR_FREE(dev->name);
-    VIR_FREE(dev->parentName);
+    g_free(dev->name);
+    g_free(dev->parentName);
 
     virObjectUnref(dev->conn);
 }
@@ -689,8 +768,7 @@ virGetSecret(virConnectPtr conn, const unsigned char *uuid,
 
     memcpy(&(ret->uuid[0]), uuid, VIR_UUID_BUFLEN);
     ret->usageType = usageType;
-    if (VIR_STRDUP(ret->usageID, NULLSTR_EMPTY(usageID)) < 0)
-        goto error;
+    ret->usageID = g_strdup(NULLSTR_EMPTY(usageID));
 
     ret->conn = virObjectRef(conn);
 
@@ -720,7 +798,7 @@ virSecretDispose(void *obj)
     virUUIDFormat(secret->uuid, uuidstr);
     VIR_DEBUG("release secret %p %s", secret, uuidstr);
 
-    VIR_FREE(secret->usageID);
+    g_free(secret->usageID);
     virObjectUnref(secret->conn);
 }
 
@@ -799,8 +877,7 @@ virGetNWFilter(virConnectPtr conn, const char *name,
     if (!(ret = virObjectNew(virNWFilterClass)))
         goto error;
 
-    if (VIR_STRDUP(ret->name, name) < 0)
-        goto error;
+    ret->name = g_strdup(name);
 
     memcpy(&(ret->uuid[0]), uuid, VIR_UUID_BUFLEN);
 
@@ -833,7 +910,7 @@ virNWFilterDispose(void *obj)
     virUUIDFormat(nwfilter->uuid, uuidstr);
     VIR_DEBUG("release nwfilter %p %s %s", nwfilter, nwfilter->name, uuidstr);
 
-    VIR_FREE(nwfilter->name);
+    g_free(nwfilter->name);
     virObjectUnref(nwfilter->conn);
 }
 
@@ -864,11 +941,9 @@ virGetNWFilterBinding(virConnectPtr conn, const char *portdev,
     if (!(ret = virObjectNew(virNWFilterBindingClass)))
         goto error;
 
-    if (VIR_STRDUP(ret->portdev, portdev) < 0)
-        goto error;
+    ret->portdev = g_strdup(portdev);
 
-    if (VIR_STRDUP(ret->filtername, filtername) < 0)
-        goto error;
+    ret->filtername = g_strdup(filtername);
 
     ret->conn = virObjectRef(conn);
 
@@ -897,8 +972,8 @@ virNWFilterBindingDispose(void *obj)
 
     VIR_DEBUG("release binding %p %s", binding, binding->portdev);
 
-    VIR_FREE(binding->portdev);
-    VIR_FREE(binding->filtername);
+    g_free(binding->portdev);
+    g_free(binding->filtername);
     virObjectUnref(binding->conn);
 }
 
@@ -927,8 +1002,7 @@ virGetDomainCheckpoint(virDomainPtr domain,
 
     if (!(ret = virObjectNew(virDomainCheckpointClass)))
         goto error;
-    if (VIR_STRDUP(ret->name, name) < 0)
-        goto error;
+    ret->name = g_strdup(name);
 
     ret->domain = virObjectRef(domain);
 
@@ -956,7 +1030,7 @@ virDomainCheckpointDispose(void *obj)
     virDomainCheckpointPtr checkpoint = obj;
     VIR_DEBUG("release checkpoint %p %s", checkpoint, checkpoint->name);
 
-    VIR_FREE(checkpoint->name);
+    g_free(checkpoint->name);
     virObjectUnref(checkpoint->domain);
 }
 
@@ -984,8 +1058,7 @@ virGetDomainSnapshot(virDomainPtr domain, const char *name)
 
     if (!(ret = virObjectNew(virDomainSnapshotClass)))
         goto error;
-    if (VIR_STRDUP(ret->name, name) < 0)
-        goto error;
+    ret->name = g_strdup(name);
 
     ret->domain = virObjectRef(domain);
 
@@ -1013,7 +1086,7 @@ virDomainSnapshotDispose(void *obj)
     virDomainSnapshotPtr snapshot = obj;
     VIR_DEBUG("release snapshot %p %s", snapshot, snapshot->name);
 
-    VIR_FREE(snapshot->name);
+    g_free(snapshot->name);
     virObjectUnref(snapshot->domain);
 }
 
@@ -1044,6 +1117,7 @@ virAdmConnectDispose(void *obj)
 {
     virAdmConnectPtr conn = obj;
 
+    admConnectDisposed = true;
     if (conn->privateDataFreeFunc)
         conn->privateDataFreeFunc(conn);
 
@@ -1054,7 +1128,7 @@ virAdmConnectDispose(void *obj)
 static void
 virAdmConnectCloseCallbackDataDispose(void *obj)
 {
-    virAdmConnectCloseCallbackDataPtr cb_data = obj;
+    virAdmConnectCloseCallbackData *cb_data = obj;
 
     virObjectLock(cb_data);
     virAdmConnectCloseCallbackDataReset(cb_data);
@@ -1062,7 +1136,7 @@ virAdmConnectCloseCallbackDataDispose(void *obj)
 }
 
 void
-virAdmConnectCloseCallbackDataReset(virAdmConnectCloseCallbackDataPtr cbdata)
+virAdmConnectCloseCallbackDataReset(virAdmConnectCloseCallbackData *cbdata)
 {
     if (cbdata->freeCallback)
         cbdata->freeCallback(cbdata->opaque);
@@ -1075,7 +1149,7 @@ virAdmConnectCloseCallbackDataReset(virAdmConnectCloseCallbackDataPtr cbdata)
 }
 
 int
-virAdmConnectCloseCallbackDataUnregister(virAdmConnectCloseCallbackDataPtr cbdata,
+virAdmConnectCloseCallbackDataUnregister(virAdmConnectCloseCallbackData *cbdata,
                                          virAdmConnectCloseFunc cb)
 {
     int ret = -1;
@@ -1095,7 +1169,7 @@ virAdmConnectCloseCallbackDataUnregister(virAdmConnectCloseCallbackDataPtr cbdat
 }
 
 int
-virAdmConnectCloseCallbackDataRegister(virAdmConnectCloseCallbackDataPtr cbdata,
+virAdmConnectCloseCallbackDataRegister(virAdmConnectCloseCallbackData *cbdata,
                                        virAdmConnectPtr conn,
                                        virAdmConnectCloseFunc cb,
                                        void *opaque,
@@ -1132,8 +1206,7 @@ virAdmGetServer(virAdmConnectPtr conn, const char *name)
 
     if (!(ret = virObjectNew(virAdmServerClass)))
         goto error;
-    if (VIR_STRDUP(ret->name, name) < 0)
-        goto error;
+    ret->name = g_strdup(name);
 
     ret->conn = virObjectRef(conn);
 
@@ -1149,7 +1222,7 @@ virAdmServerDispose(void *obj)
     virAdmServerPtr srv = obj;
     VIR_DEBUG("release server srv=%p name=%s", srv, srv->name);
 
-    VIR_FREE(srv->name);
+    g_free(srv->name);
     virObjectUnref(srv->conn);
 }
 

@@ -23,8 +23,6 @@
 
 #include <config.h>
 
-#include <netdb.h>
-
 #include "internal.h"
 #include "datatypes.h"
 #include "viralloc.h"
@@ -34,13 +32,14 @@
 #include "esx_private.h"
 #include "esx_util.h"
 #include "virstring.h"
+#include "virsocket.h"
 
 #define VIR_FROM_THIS VIR_FROM_ESX
 
 VIR_LOG_INIT("esx.esx_util");
 
 int
-esxUtil_ParseUri(esxUtil_ParsedUri **parsedUri, virURIPtr uri)
+esxUtil_ParseUri(esxUtil_ParsedUri **parsedUri, virURI *uri)
 {
     int result = -1;
     size_t i;
@@ -50,17 +49,15 @@ esxUtil_ParseUri(esxUtil_ParsedUri **parsedUri, virURIPtr uri)
 
     ESX_VI_CHECK_ARG_LIST(parsedUri);
 
-    if (VIR_ALLOC(*parsedUri) < 0)
-        return -1;
+    *parsedUri = g_new0(esxUtil_ParsedUri, 1);
 
     for (i = 0; i < uri->paramsCount; i++) {
-        virURIParamPtr queryParam = &uri->params[i];
+        virURIParam *queryParam = &uri->params[i];
 
         if (STRCASEEQ(queryParam->name, "transport")) {
-            VIR_FREE((*parsedUri)->transport);
+            g_free((*parsedUri)->transport);
 
-            if (VIR_STRDUP((*parsedUri)->transport, queryParam->value) < 0)
-                goto cleanup;
+            (*parsedUri)->transport = g_strdup(queryParam->value);
 
             if (STRNEQ((*parsedUri)->transport, "http") &&
                 STRNEQ((*parsedUri)->transport, "https")) {
@@ -71,10 +68,9 @@ esxUtil_ParseUri(esxUtil_ParsedUri **parsedUri, virURIPtr uri)
                 goto cleanup;
             }
         } else if (STRCASEEQ(queryParam->name, "vcenter")) {
-            VIR_FREE((*parsedUri)->vCenter);
+            g_free((*parsedUri)->vCenter);
 
-            if (VIR_STRDUP((*parsedUri)->vCenter, queryParam->value) < 0)
-                goto cleanup;
+            (*parsedUri)->vCenter = g_strdup(queryParam->value);
         } else if (STRCASEEQ(queryParam->name, "no_verify")) {
             if (virStrToLong_i(queryParam->value, NULL, 10, &noVerify) < 0 ||
                 (noVerify != 0 && noVerify != 1)) {
@@ -99,7 +95,7 @@ esxUtil_ParseUri(esxUtil_ParsedUri **parsedUri, virURIPtr uri)
             /* Expected format: [<type>://]<hostname>[:<port>] */
             (*parsedUri)->proxy = true;
             (*parsedUri)->proxy_type = CURLPROXY_HTTP;
-            VIR_FREE((*parsedUri)->proxy_hostname);
+            g_clear_pointer(&(*parsedUri)->proxy_hostname, g_free);
             (*parsedUri)->proxy_port = 1080;
 
             if ((tmp = STRSKIP(queryParam->value, "http://"))) {
@@ -123,8 +119,7 @@ esxUtil_ParseUri(esxUtil_ParsedUri **parsedUri, virURIPtr uri)
                 tmp = queryParam->value;
             }
 
-            if (VIR_STRDUP((*parsedUri)->proxy_hostname, tmp) < 0)
-                goto cleanup;
+            (*parsedUri)->proxy_hostname = g_strdup(tmp);
 
             if ((tmp = strchr((*parsedUri)->proxy_hostname, ':'))) {
                 if (tmp == (*parsedUri)->proxy_hostname) {
@@ -153,12 +148,10 @@ esxUtil_ParseUri(esxUtil_ParsedUri **parsedUri, virURIPtr uri)
         }
     }
 
-    if (VIR_STRDUP((*parsedUri)->path, uri->path) < 0)
-        goto cleanup;
+    (*parsedUri)->path = g_strdup(uri->path);
 
-    if (!(*parsedUri)->transport &&
-        VIR_STRDUP((*parsedUri)->transport, "https") < 0)
-        goto cleanup;
+    if (!(*parsedUri)->transport)
+        (*parsedUri)->transport = g_strdup("https");
 
     result = 0;
 
@@ -178,12 +171,12 @@ esxUtil_FreeParsedUri(esxUtil_ParsedUri **parsedUri)
     if (!parsedUri || !(*parsedUri))
         return;
 
-    VIR_FREE((*parsedUri)->transport);
-    VIR_FREE((*parsedUri)->vCenter);
-    VIR_FREE((*parsedUri)->proxy_hostname);
-    VIR_FREE((*parsedUri)->path);
+    g_free((*parsedUri)->transport);
+    g_free((*parsedUri)->vCenter);
+    g_free((*parsedUri)->proxy_hostname);
+    g_free((*parsedUri)->path);
 
-    VIR_FREE(*parsedUri);
+    g_free(*parsedUri);
 }
 
 
@@ -214,7 +207,7 @@ esxUtil_ParseDatastorePath(const char *datastorePath, char **datastoreName,
                            char **directoryName, char **directoryAndFileName)
 {
     int result = -1;
-    char *copyOfDatastorePath = NULL;
+    g_autofree char *copyOfDatastorePath = NULL;
     char *tmp = NULL;
     char *saveptr = NULL;
     char *preliminaryDatastoreName = NULL;
@@ -227,22 +220,19 @@ esxUtil_ParseDatastorePath(const char *datastorePath, char **datastoreName,
         return -1;
     }
 
-    if (VIR_STRDUP(copyOfDatastorePath, datastorePath) < 0)
-        goto cleanup;
+    copyOfDatastorePath = g_strdup(datastorePath);
 
     /* Expected format: '[<datastore>] <path>' where <path> is optional */
     if (!(tmp = STRSKIP(copyOfDatastorePath, "[")) || *tmp == ']' ||
         !(preliminaryDatastoreName = strtok_r(tmp, "]", &saveptr))) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
+        virReportError(VIR_ERR_INVALID_ARG,
                        _("Datastore path '%s' doesn't have expected format "
                          "'[<datastore>] <path>'"), datastorePath);
         goto cleanup;
     }
 
-    if (datastoreName &&
-        VIR_STRDUP(*datastoreName, preliminaryDatastoreName) < 0) {
-        goto cleanup;
-    }
+    if (datastoreName)
+        *datastoreName = g_strdup(preliminaryDatastoreName);
 
     preliminaryDirectoryAndFileName = strtok_r(NULL, "", &saveptr);
 
@@ -253,10 +243,8 @@ esxUtil_ParseDatastorePath(const char *datastorePath, char **datastoreName,
           strspn(preliminaryDirectoryAndFileName, " ");
     }
 
-    if (directoryAndFileName &&
-        VIR_STRDUP(*directoryAndFileName, preliminaryDirectoryAndFileName) < 0) {
-        goto cleanup;
-    }
+    if (directoryAndFileName)
+        *directoryAndFileName = g_strdup(preliminaryDirectoryAndFileName);
 
     if (directoryName) {
         /* Split <path> into <directory>/<file> and remove /<file> */
@@ -265,8 +253,7 @@ esxUtil_ParseDatastorePath(const char *datastorePath, char **datastoreName,
         if (tmp)
             *tmp = '\0';
 
-        if (VIR_STRDUP(*directoryName, preliminaryDirectoryAndFileName) < 0)
-            goto cleanup;
+        *directoryName = g_strdup(preliminaryDirectoryAndFileName);
     }
 
     result = 0;
@@ -274,16 +261,14 @@ esxUtil_ParseDatastorePath(const char *datastorePath, char **datastoreName,
  cleanup:
     if (result < 0) {
         if (datastoreName)
-            VIR_FREE(*datastoreName);
+            g_clear_pointer(datastoreName, g_free);
 
         if (directoryName)
-            VIR_FREE(*directoryName);
+            g_clear_pointer(directoryName, g_free);
 
         if (directoryAndFileName)
-            VIR_FREE(*directoryAndFileName);
+            g_clear_pointer(directoryAndFileName, g_free);
     }
-
-    VIR_FREE(copyOfDatastorePath);
 
     return result;
 }
@@ -291,12 +276,12 @@ esxUtil_ParseDatastorePath(const char *datastorePath, char **datastoreName,
 
 
 int
-esxUtil_ResolveHostname(const char *hostname,
-                        char *ipAddress, size_t ipAddress_length)
+esxUtil_ResolveHostname(const char *hostname, char **ipAddress)
 {
     struct addrinfo hints;
     struct addrinfo *result = NULL;
     int errcode;
+    g_autofree char *address = NULL;
 
     memset(&hints, 0, sizeof(hints));
 
@@ -321,18 +306,19 @@ esxUtil_ResolveHostname(const char *hostname,
         return -1;
     }
 
-    errcode = getnameinfo(result->ai_addr, result->ai_addrlen, ipAddress,
-                          ipAddress_length, NULL, 0, NI_NUMERICHOST);
+    address = g_new0(char, NI_MAXHOST);
+    errcode = getnameinfo(result->ai_addr, result->ai_addrlen, address,
+                          NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
+    freeaddrinfo(result);
 
     if (errcode != 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Formatting IP address for host '%s' failed: %s"), hostname,
                        gai_strerror(errcode));
-        freeaddrinfo(result);
         return -1;
     }
 
-    freeaddrinfo(result);
+    *ipAddress = g_strdup(address);
 
     return 0;
 }
@@ -369,7 +355,7 @@ esxUtil_EscapeBase64(const char *string)
     static const char *base64 =
       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,";
 
-    virBuffer buffer = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buffer = VIR_BUFFER_INITIALIZER;
     const char *tmp1 = string;
     size_t length;
     unsigned char c1, c2, c3;
@@ -409,9 +395,6 @@ esxUtil_EscapeBase64(const char *string)
         }
     }
 
-    if (virBufferCheckError(&buffer) < 0)
-        return NULL;
-
     return virBufferContentAndReset(&buffer);
 }
 
@@ -444,27 +427,19 @@ esxUtil_ReplaceSpecialWindowsPathChars(char *string)
 char *
 esxUtil_EscapeDatastoreItem(const char *string)
 {
-    char *replaced;
-    char *escaped1;
-    char *escaped2 = NULL;
+    g_autofree char *replaced = NULL;
+    g_autofree char *escaped1 = NULL;
 
-    if (VIR_STRDUP(replaced, string) < 0)
-        return NULL;
+    replaced = g_strdup(string);
 
     esxUtil_ReplaceSpecialWindowsPathChars(replaced);
 
     escaped1 = virVMXEscapeHexPercent(replaced);
 
     if (!escaped1)
-        goto cleanup;
+        return NULL;
 
-    escaped2 = esxUtil_EscapeBase64(escaped1);
-
- cleanup:
-    VIR_FREE(replaced);
-    VIR_FREE(escaped1);
-
-    return escaped2;
+    return esxUtil_EscapeBase64(escaped1);
 }
 
 
@@ -472,12 +447,9 @@ esxUtil_EscapeDatastoreItem(const char *string)
 char *
 esxUtil_EscapeForXml(const char *string)
 {
-    virBuffer buffer = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buffer = VIR_BUFFER_INITIALIZER;
 
     virBufferEscapeString(&buffer, "%s", string);
-
-    if (virBufferCheckError(&buffer) < 0)
-        return NULL;
 
     return virBufferContentAndReset(&buffer);
 }

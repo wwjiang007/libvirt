@@ -13,7 +13,7 @@
   <on_reboot>restart</on_reboot>
   <on_crash>destroy</on_crash>
   <devices>
-    <emulator>/usr/bin/qemu-system-i686</emulator>
+    <emulator>/usr/bin/qemu-system-i386</emulator>
     <disk type='block' device='disk'>
       <driver name='qemu' type='raw'/>
       <source dev='/dev/HostVG/QEMUGuest1'/>
@@ -33,6 +33,7 @@
       <listen type='address' address='1.2.3.4'/>
       <listen type='network' network='Bobsnetwork'/>
     </graphics>
+    <audio id='1' type='none'/>
     <video>
       <model type='cirrus' vram='16384' heads='1' primary='yes'/>
       <address type='pci' domain='0x0000' bus='0x00' slot='0x02' function='0x0'/>

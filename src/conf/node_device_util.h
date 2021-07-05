@@ -16,20 +16,17 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_NODE_DEVICE_UTIL_H
-# define LIBVIRT_NODE_DEVICE_UTIL_H
+#pragma once
 
-# include "conf/storage_adapter_conf.h"
+#include "conf/storage_adapter_conf.h"
 
 char *
 virNodeDeviceGetParentName(virConnectPtr conn,
                            const char *nodedev_name);
 
 char *
-virNodeDeviceCreateVport(virStorageAdapterFCHostPtr fchost);
+virNodeDeviceCreateVport(virStorageAdapterFCHost *fchost);
 
 int
 virNodeDeviceDeleteVport(virConnectPtr conn,
-                         virStorageAdapterFCHostPtr fchost);
-
-#endif /* LIBVIRT_NODE_DEVICE_UTIL_H */
+                         virStorageAdapterFCHost *fchost);

@@ -22,10 +22,8 @@
 #include "virsh-nwfilter.h"
 
 #include "internal.h"
-#include "virbuffer.h"
 #include "viralloc.h"
 #include "virfile.h"
-#include "virutil.h"
 #include "vsh-table.h"
 
 virNWFilterPtr
@@ -35,7 +33,7 @@ virshCommandOptNWFilterBy(vshControl *ctl, const vshCmd *cmd,
     virNWFilterPtr nwfilter = NULL;
     const char *n = NULL;
     const char *optname = "nwfilter";
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     virCheckFlags(VIRSH_BYUUID | VIRSH_BYNAME, NULL);
 
@@ -93,7 +91,7 @@ cmdNWFilterDefine(vshControl *ctl, const vshCmd *cmd)
     const char *from = NULL;
     bool ret = true;
     char *buffer;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     if (vshCommandOptStringReq(ctl, cmd, "file", &from) < 0)
         return false;
@@ -224,10 +222,9 @@ struct virshNWFilterList {
     virNWFilterPtr *filters;
     size_t nfilters;
 };
-typedef struct virshNWFilterList *virshNWFilterListPtr;
 
 static void
-virshNWFilterListFree(virshNWFilterListPtr list)
+virshNWFilterListFree(struct virshNWFilterList *list)
 {
     size_t i;
 
@@ -236,16 +233,16 @@ virshNWFilterListFree(virshNWFilterListPtr list)
             if (list->filters[i])
                 virNWFilterFree(list->filters[i]);
         }
-        VIR_FREE(list->filters);
+        g_free(list->filters);
     }
-    VIR_FREE(list);
+    g_free(list);
 }
 
-static virshNWFilterListPtr
+static struct virshNWFilterList *
 virshNWFilterListCollect(vshControl *ctl,
                          unsigned int flags)
 {
-    virshNWFilterListPtr list = vshMalloc(ctl, sizeof(*list));
+    struct virshNWFilterList *list = g_new0(struct virshNWFilterList, 1);
     size_t i;
     int ret;
     virNWFilterPtr filter;
@@ -253,7 +250,7 @@ virshNWFilterListCollect(vshControl *ctl,
     size_t deleted = 0;
     int nfilters = 0;
     char **names = NULL;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     /* try the list with flags support (0.10.2 and later) */
     if ((ret = virConnectListAllNWFilters(priv->conn,
@@ -287,7 +284,7 @@ virshNWFilterListCollect(vshControl *ctl,
     if (nfilters == 0)
         return list;
 
-    names = vshMalloc(ctl, sizeof(char *) * nfilters);
+    names = g_new0(char *, nfilters);
 
     nfilters = virConnectListNWFilters(priv->conn, names, nfilters);
     if (nfilters < 0) {
@@ -295,7 +292,7 @@ virshNWFilterListCollect(vshControl *ctl,
         goto cleanup;
     }
 
-    list->filters = vshMalloc(ctl, sizeof(virNWFilterPtr) * nfilters);
+    list->filters = g_new0(virNWFilterPtr, nfilters);
     list->nfilters = 0;
 
     /* get the network filters */
@@ -351,13 +348,13 @@ static const vshCmdOptDef opts_nwfilter_list[] = {
 };
 
 static bool
-cmdNWFilterList(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
+cmdNWFilterList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
 {
     size_t i;
     char uuid[VIR_UUID_STRING_BUFLEN];
     bool ret = false;
-    virshNWFilterListPtr list = NULL;
-    vshTablePtr table = NULL;
+    struct virshNWFilterList *list = NULL;
+    vshTable *table = NULL;
 
     if (!(list = virshNWFilterListCollect(ctl, 0)))
         return false;
@@ -415,7 +412,7 @@ cmdNWFilterEdit(vshControl *ctl, const vshCmd *cmd)
     bool ret = false;
     virNWFilterPtr nwfilter = NULL;
     virNWFilterPtr nwfilter_edited = NULL;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     nwfilter = virshCommandOptNWFilter(ctl, cmd, NULL);
     if (nwfilter == NULL)
@@ -458,7 +455,7 @@ virshCommandOptNWFilterBindingBy(vshControl *ctl,
     virNWFilterBindingPtr binding = NULL;
     const char *n = NULL;
     const char *optname = "binding";
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     virCheckFlags(0, NULL);
 
@@ -508,7 +505,7 @@ cmdNWFilterBindingCreate(vshControl *ctl, const vshCmd *cmd)
     const char *from = NULL;
     bool ret = true;
     char *buffer;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     if (vshCommandOptStringReq(ctl, cmd, "file", &from) < 0)
         return false;
@@ -643,11 +640,10 @@ struct virshNWFilterBindingList {
     virNWFilterBindingPtr *bindings;
     size_t nbindings;
 };
-typedef struct virshNWFilterBindingList *virshNWFilterBindingListPtr;
 
 
 static void
-virshNWFilterBindingListFree(virshNWFilterBindingListPtr list)
+virshNWFilterBindingListFree(struct virshNWFilterBindingList *list)
 {
     size_t i;
 
@@ -656,20 +652,20 @@ virshNWFilterBindingListFree(virshNWFilterBindingListPtr list)
             if (list->bindings[i])
                 virNWFilterBindingFree(list->bindings[i]);
         }
-        VIR_FREE(list->bindings);
+        g_free(list->bindings);
     }
-    VIR_FREE(list);
+    g_free(list);
 }
 
 
-static virshNWFilterBindingListPtr
+static struct virshNWFilterBindingList *
 virshNWFilterBindingListCollect(vshControl *ctl,
                                 unsigned int flags)
 {
-    virshNWFilterBindingListPtr list = vshMalloc(ctl, sizeof(*list));
+    struct virshNWFilterBindingList *list = g_new0(struct virshNWFilterBindingList, 1);
     int ret;
     bool success = false;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     if ((ret = virConnectListAllNWFilterBindings(priv->conn,
                                                  &list->bindings,
@@ -716,12 +712,12 @@ static const vshCmdOptDef opts_nwfilter_binding_list[] = {
 };
 
 static bool
-cmdNWFilterBindingList(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
+cmdNWFilterBindingList(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
 {
     size_t i;
     bool ret = false;
-    virshNWFilterBindingListPtr list = NULL;
-    vshTablePtr table = NULL;
+    struct virshNWFilterBindingList *list = NULL;
+    vshTable *table = NULL;
 
     if (!(list = virshNWFilterBindingListCollect(ctl, 0)))
         return false;

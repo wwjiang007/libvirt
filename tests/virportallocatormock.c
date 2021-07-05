@@ -18,15 +18,12 @@
 
 #include <config.h>
 
-#if HAVE_DLFCN_H
+#if WITH_DLFCN_H
 # include <dlfcn.h>
 #endif
 
 #if defined(__linux__) && defined(RTLD_NEXT)
-# include "internal.h"
-# include <sys/socket.h>
-# include <arpa/inet.h>
-# include <netinet/in.h>
+# include "virsocket.h"
 # include <unistd.h>
 
 static bool host_has_ipv6;
@@ -68,9 +65,9 @@ int socket(int domain,
     return realsocket(domain, type, protocol);
 }
 
-int bind(int sockfd ATTRIBUTE_UNUSED,
+int bind(int sockfd G_GNUC_UNUSED,
          const struct sockaddr *addr,
-         socklen_t addrlen ATTRIBUTE_UNUSED)
+         socklen_t addrlen G_GNUC_UNUSED)
 {
     struct sockaddr_in saddr;
 

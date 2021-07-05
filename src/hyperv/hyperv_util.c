@@ -35,7 +35,7 @@
 VIR_LOG_INIT("hyperv.hyperv_util");
 
 int
-hypervParseUri(hypervParsedUri **parsedUri, virURIPtr uri)
+hypervParseUri(hypervParsedUri **parsedUri, virURI *uri)
 {
     int result = -1;
     size_t i;
@@ -45,17 +45,15 @@ hypervParseUri(hypervParsedUri **parsedUri, virURIPtr uri)
         return -1;
     }
 
-    if (VIR_ALLOC(*parsedUri) < 0)
-        return -1;
+    *parsedUri = g_new0(hypervParsedUri, 1);
 
     for (i = 0; i < uri->paramsCount; i++) {
-        virURIParamPtr queryParam = &uri->params[i];
+        virURIParam *queryParam = &uri->params[i];
 
         if (STRCASEEQ(queryParam->name, "transport")) {
             VIR_FREE((*parsedUri)->transport);
 
-            if (VIR_STRDUP((*parsedUri)->transport, queryParam->value) < 0)
-                goto cleanup;
+            (*parsedUri)->transport = g_strdup(queryParam->value);
 
             if (STRNEQ((*parsedUri)->transport, "http") &&
                 STRNEQ((*parsedUri)->transport, "https")) {
@@ -71,9 +69,8 @@ hypervParseUri(hypervParsedUri **parsedUri, virURIPtr uri)
         }
     }
 
-    if (!(*parsedUri)->transport &&
-        VIR_STRDUP((*parsedUri)->transport, "https") < 0)
-        goto cleanup;
+    if (!(*parsedUri)->transport)
+        (*parsedUri)->transport = g_strdup("https");
 
     result = 0;
 
@@ -83,7 +80,6 @@ hypervParseUri(hypervParsedUri **parsedUri, virURIPtr uri)
 
     return result;
 }
-
 
 
 void

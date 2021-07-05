@@ -28,11 +28,11 @@
 
 struct test_virStoragePoolCapsFormatData {
     const char *filename;
-    virCapsPtr driverCaps;
+    virCaps *driverCaps;
 };
 
 static void
-test_virCapabilitiesAddFullStoragePool(virCapsPtr caps)
+test_virCapabilitiesAddFullStoragePool(virCaps *caps)
 {
     size_t i;
 
@@ -42,7 +42,7 @@ test_virCapabilitiesAddFullStoragePool(virCapsPtr caps)
 
 
 static void
-test_virCapabilitiesAddFSStoragePool(virCapsPtr caps)
+test_virCapabilitiesAddFSStoragePool(virCaps *caps)
 {
     virCapabilitiesAddStoragePool(caps, VIR_STORAGE_POOL_FS);
 }
@@ -53,19 +53,17 @@ test_virStoragePoolCapsFormat(const void *opaque)
 {
     struct test_virStoragePoolCapsFormatData *data =
         (struct test_virStoragePoolCapsFormatData *) opaque;
-    virCapsPtr driverCaps = data->driverCaps;
-    VIR_AUTOUNREF(virStoragePoolCapsPtr) poolCaps = NULL;
-    VIR_AUTOFREE(char *) path = NULL;
-    VIR_AUTOFREE(char *) poolCapsXML = NULL;
+    virCaps *driverCaps = data->driverCaps;
+    g_autoptr(virStoragePoolCaps) poolCaps = NULL;
+    g_autofree char *path = NULL;
+    g_autofree char *poolCapsXML = NULL;
 
 
     if (!(poolCaps = virStoragePoolCapsNew(driverCaps)))
         return -1;
 
-    if (virAsprintf(&path, "%s/storagepoolcapsschemadata/poolcaps-%s.xml",
-                    abs_srcdir, data->filename) < 0) {
-        return -1;
-    }
+    path = g_strdup_printf("%s/storagepoolcapsschemadata/poolcaps-%s.xml",
+                           abs_srcdir, data->filename);
 
     if (!(poolCapsXML = virStoragePoolCapsFormat(poolCaps)))
         return -1;
@@ -81,8 +79,8 @@ static int
 mymain(void)
 {
     int ret = 0;
-    VIR_AUTOUNREF(virCapsPtr) fullCaps = NULL;
-    VIR_AUTOUNREF(virCapsPtr) fsCaps = NULL;
+    g_autoptr(virCaps) fullCaps = NULL;
+    g_autoptr(virCaps) fsCaps = NULL;
 
 #define DO_TEST(Filename, DriverCaps) \
     do { \
@@ -103,7 +101,7 @@ mymain(void)
     DO_TEST("full", fullCaps);
     DO_TEST("fs", fsCaps);
 
-    return ret;
+    return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 VIR_TEST_MAIN(mymain)

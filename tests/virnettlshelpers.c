@@ -19,15 +19,15 @@
 #include <config.h>
 
 #include <fcntl.h>
-#include <sys/socket.h>
 
 #include "virnettlshelpers.h"
 #include "viralloc.h"
 #include "virlog.h"
 #include "virfile.h"
 #include "virsocketaddr.h"
+#include "virutil.h"
 
-#if !defined WIN32 && HAVE_LIBTASN1_H && LIBGNUTLS_VERSION_NUMBER >= 0x020600
+#if !defined WIN32 && WITH_LIBTASN1_H && LIBGNUTLS_VERSION_NUMBER >= 0x020600
 
 # define VIR_FROM_THIS VIR_FROM_RPC
 
@@ -37,8 +37,8 @@ VIR_LOG_INIT("tests.nettlshelpers");
  * These store some static data that is needed when
  * encoding extensions in the x509 certs
  */
-ASN1_TYPE pkix_asn1;
-extern const ASN1_ARRAY_TYPE pkix_asn1_tab[];
+asn1_node pkix_asn1;
+extern const asn1_static_node pkix_asn1_tab[];
 
 /*
  * To avoid consuming random entropy to generate keys,
@@ -47,22 +47,10 @@ extern const ASN1_ARRAY_TYPE pkix_asn1_tab[];
 gnutls_x509_privkey_t privkey;
 # define PRIVATE_KEY \
     "-----BEGIN PRIVATE KEY-----\n" \
-    "MIICdQIBADANBgkqhkiG9w0BAQEFAASCAl8wggJbAgEAAoGBALVcr\n" \
-    "BL40Tm6yq88FBhJNw1aaoCjmtg0l4dWQZ/e9Fimx4ARxFpT+ji4FE\n" \
-    "Cgl9s/SGqC+1nvlkm9ViSo0j7MKDbnDB+VRHDvMAzQhA2X7e8M0n9\n" \
-    "rPolUY2lIVC83q0BBaOBkCj2RSmT2xTEbbC2xLukSrg2WP/ihVOxc\n" \
-    "kXRuyFtzAgMBAAECgYB7slBexDwXrtItAMIH6m/U+LUpNe0Xx48OL\n" \
-    "IOn4a4whNgO/o84uIwygUK27ZGFZT0kAGAk8CdF9hA6ArcbQ62s1H\n" \
-    "myxrUbF9/mrLsQw1NEqpuUk9Ay2Tx5U/wPx35S3W/X2AvR/ZpTnCn\n" \
-    "2q/7ym9fyiSoj86drD7BTvmKXlOnOwQJBAPOFMp4mMa9NGpGuEssO\n" \
-    "m3Uwbp6lhcP0cA9MK+iOmeANpoKWfBdk5O34VbmeXnGYWEkrnX+9J\n" \
-    "bM4wVhnnBWtgBMCQQC+qAEmvwcfhauERKYznMVUVksyeuhxhCe7EK\n" \
-    "mPh+U2+g0WwdKvGDgO0PPt1gq0ILEjspMDeMHVdTwkaVBo/uMhAkA\n" \
-    "Z5SsZyCP2aTOPFDypXRdI4eqRcjaEPOUBq27r3uYb/jeboVb2weLa\n" \
-    "L1MmVuHiIHoa5clswPdWVI2y0em2IGoDAkBPSp/v9VKJEZabk9Frd\n" \
-    "a+7u4fanrM9QrEjY3KhduslSilXZZSxrWjjAJPyPiqFb3M8XXA26W\n" \
-    "nz1KYGnqYKhLcBAkB7dt57n9xfrhDpuyVEv+Uv1D3VVAhZlsaZ5Pp\n" \
-    "dcrhrkJn2sa/+O8OKvdrPSeeu/N5WwYhJf61+CPoenMp7IFci\n" \
+    "MIG2AgEAMBAGByqGSM49AgEGBSuBBAAiBIGeMIGbAgEBBDD39t6GRLeEmsYjRGR6\n" \
+    "iQiIN2S4zXsgLGS/2GloXdG7K+i/3vEJDt9celZ0DfCLcG6hZANiAAQTJIe13jy7\n" \
+    "k4KTXMkHQHEJa/asH263JaPL5kTbfRa6tMq3DS3pzWlOj+NHY/9JzthrKD+Ece+g\n" \
+    "2g/POHa0gfXRYXGiHTs8mY0AHFqNNmF38eIVGjOqobIi90MkyI3wx4g=\n" \
     "-----END PRIVATE KEY-----\n"
 
 /*
@@ -119,7 +107,7 @@ void testTLSCleanup(const char *keyfile)
 /*
  * Turns an ASN1 object into a DER encoded byte array
  */
-static void testTLSDerEncode(ASN1_TYPE src,
+static void testTLSDerEncode(asn1_node src,
                              const char *src_name,
                              gnutls_datum_t * res)
 {
@@ -129,8 +117,7 @@ static void testTLSDerEncode(ASN1_TYPE src,
     size = 0;
     asn1_der_coding(src, src_name, NULL, &size, NULL);
 
-    if (VIR_ALLOC_N(data, size) < 0)
-        abort();
+    data = g_new0(char, size);
 
     asn1_der_coding(src, src_name, data, &size, NULL);
 
@@ -280,7 +267,7 @@ testTLSGenerateCert(struct testTLSCertReq *req,
      * the 'critical' field which we want control over
      */
     if (req->basicConstraintsEnable) {
-        ASN1_TYPE ext = ASN1_TYPE_EMPTY;
+        asn1_node ext = NULL;
 
         asn1_create_element(pkix_asn1, "PKIX1.BasicConstraints", &ext);
         asn1_write_value(ext, "cA", req->basicConstraintsIsCA ? "TRUE" : "FALSE", 1);
@@ -305,7 +292,7 @@ testTLSGenerateCert(struct testTLSCertReq *req,
      * to be 'critical'
      */
     if (req->keyUsageEnable) {
-        ASN1_TYPE ext = ASN1_TYPE_EMPTY;
+        asn1_node ext = NULL;
         char str[2];
 
         str[0] = req->keyUsageValue & 0xff;
@@ -334,7 +321,7 @@ testTLSGenerateCert(struct testTLSCertReq *req,
      * set this the hard way building up ASN1 data ourselves
      */
     if (req->keyPurposeEnable) {
-        ASN1_TYPE ext = ASN1_TYPE_EMPTY;
+        asn1_node ext = NULL;
 
         asn1_create_element(pkix_asn1, "PKIX1.ExtKeyUsageSyntax", &ext);
         if (req->keyPurposeOID1) {

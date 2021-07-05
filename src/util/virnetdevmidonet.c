@@ -37,15 +37,15 @@
  */
 int
 virNetDevMidonetBindPort(const char *ifname,
-                         virNetDevVPortProfilePtr virtualport)
+                         const virNetDevVPortProfile *virtualport)
 {
     int ret = -1;
-    virCommandPtr cmd = NULL;
+    virCommand *cmd = NULL;
     char virtportuuid[VIR_UUID_STRING_BUFLEN];
 
     virUUIDFormat(virtualport->interfaceID, virtportuuid);
 
-    cmd = virCommandNew(MMCTL);
+    cmd = virCommandNew(MM_CTL);
 
     virCommandAddArgList(cmd, "--bind-port", virtportuuid, ifname, NULL);
 
@@ -71,15 +71,15 @@ virNetDevMidonetBindPort(const char *ifname,
  * Returns 0 in case of success or -1 in case of failure.
  */
 int
-virNetDevMidonetUnbindPort(virNetDevVPortProfilePtr virtualport)
+virNetDevMidonetUnbindPort(const virNetDevVPortProfile *virtualport)
 {
     int ret = -1;
-    virCommandPtr cmd = NULL;
+    virCommand *cmd = NULL;
     char virtportuuid[VIR_UUID_STRING_BUFLEN];
 
     virUUIDFormat(virtualport->interfaceID, virtportuuid);
 
-    cmd = virCommandNew(MMCTL);
+    cmd = virCommandNew(MM_CTL);
     virCommandAddArgList(cmd, "--unbind-port", virtportuuid, NULL);
 
     if (virCommandRun(cmd, NULL) < 0) {

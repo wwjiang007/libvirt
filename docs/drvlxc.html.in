@@ -75,7 +75,7 @@ would use the following XML
 <p>
 When the container "init" process is started, it will be given several useful
 environment variables. The following standard environment variables are mandated
-by <a href="http://www.freedesktop.org/wiki/Software/systemd/ContainerInterface">systemd container interface</a>
+by <a href="https://www.freedesktop.org/wiki/Software/systemd/ContainerInterface">systemd container interface</a>
 to be provided by all container technologies on Linux.
 </p>
 
@@ -278,6 +278,16 @@ the scope of this document, however LWN has
 From the libvirt point of view, the key thing to remember is that defining
 an ID mapping for users and groups in the container XML configuration
 causes libvirt to activate the user namespace feature.
+</p>
+
+
+<h2><a id="configFiles">Location of configuration files</a></h2>
+
+<p>
+The LXC driver comes with sane default values. However, during its
+initialization it reads a configuration file which offers system
+administrator to override some of that default. The file is located
+under <code>/etc/libvirt/lxc.conf</code>
 </p>
 
 

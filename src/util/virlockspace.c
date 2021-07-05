@@ -42,8 +42,6 @@ VIR_LOG_INIT("util.lockspace");
 #define VIR_LOCKSPACE_TABLE_SIZE 10
 
 typedef struct _virLockSpaceResource virLockSpaceResource;
-typedef virLockSpaceResource *virLockSpaceResourcePtr;
-
 struct _virLockSpaceResource {
     char *name;
     char *path;
@@ -58,23 +56,23 @@ struct _virLockSpace {
     char *dir;
     virMutex lock;
 
-    virHashTablePtr resources;
+    GHashTable *resources;
 };
 
 
-static char *virLockSpaceGetResourcePath(virLockSpacePtr lockspace,
+static char *virLockSpaceGetResourcePath(virLockSpace *lockspace,
                                          const char *resname)
 {
     char *ret;
     if (lockspace->dir)
-        ignore_value(virAsprintf(&ret, "%s/%s", lockspace->dir, resname));
+        ret = g_strdup_printf("%s/%s", lockspace->dir, resname);
     else
-        ignore_value(VIR_STRDUP(ret, resname));
+        ret = g_strdup(resname);
     return ret;
 }
 
 
-static void virLockSpaceResourceFree(virLockSpaceResourcePtr res)
+static void virLockSpaceResourceFree(virLockSpaceResource *res)
 {
     if (!res)
         return;
@@ -89,46 +87,42 @@ static void virLockSpaceResourceFree(virLockSpaceResourcePtr res)
             } else {
                 if (unlink(res->path) < 0 &&
                     errno != ENOENT) {
-                    char ebuf[1024];
                     VIR_WARN("Failed to unlink resource %s: %s",
-                             res->path, virStrerror(errno, ebuf, sizeof(ebuf)));
+                             res->path, g_strerror(errno));
                 }
             }
         } else {
             if (unlink(res->path) < 0 &&
                 errno != ENOENT) {
-                char ebuf[1024];
                 VIR_WARN("Failed to unlink resource %s: %s",
-                         res->path, virStrerror(errno, ebuf, sizeof(ebuf)));
+                         res->path, g_strerror(errno));
             }
         }
     }
 
-    VIR_FREE(res->owners);
+    g_free(res->owners);
     VIR_FORCE_CLOSE(res->fd);
-    VIR_FREE(res->path);
-    VIR_FREE(res->name);
-    VIR_FREE(res);
+    g_free(res->path);
+    g_free(res->name);
+    g_free(res);
 }
 
 
-static virLockSpaceResourcePtr
-virLockSpaceResourceNew(virLockSpacePtr lockspace,
+static virLockSpaceResource *
+virLockSpaceResourceNew(virLockSpace *lockspace,
                         const char *resname,
                         unsigned int flags,
                         pid_t owner)
 {
-    virLockSpaceResourcePtr res;
+    virLockSpaceResource *res;
     bool shared = !!(flags & VIR_LOCK_SPACE_ACQUIRE_SHARED);
 
-    if (VIR_ALLOC(res) < 0)
-        return NULL;
+    res = g_new0(virLockSpaceResource, 1);
 
     res->fd = -1;
     res->flags = flags;
 
-    if (VIR_STRDUP(res->name, resname) < 0)
-        goto error;
+    res->name = g_strdup(resname);
 
     if (!(res->path = virLockSpaceGetResourcePath(lockspace, resname)))
         goto error;
@@ -174,9 +168,8 @@ virLockSpaceResourceNew(virLockSpacePtr lockspace,
              * one that now exists on the filesystem
              */
             if (stat(res->path, &a) < 0) {
-                char ebuf[1024] ATTRIBUTE_UNUSED;
                 VIR_DEBUG("Resource '%s' disappeared: %s",
-                          res->path, virStrerror(errno, ebuf, sizeof(ebuf)));
+                          res->path, g_strerror(errno));
                 VIR_FORCE_CLOSE(res->fd);
                 /* Someone else must be racing with us, so try again */
                 continue;
@@ -219,9 +212,7 @@ virLockSpaceResourceNew(virLockSpacePtr lockspace,
     }
     res->lockHeld = true;
 
-    if (VIR_EXPAND_N(res->owners, res->nOwners, 1) < 0)
-        goto error;
-
+    VIR_EXPAND_N(res->owners, res->nOwners, 1);
     res->owners[res->nOwners-1] = owner;
 
     return res;
@@ -232,21 +223,20 @@ virLockSpaceResourceNew(virLockSpacePtr lockspace,
 }
 
 
-static void virLockSpaceResourceDataFree(void *opaque, const void *name ATTRIBUTE_UNUSED)
+static void virLockSpaceResourceDataFree(void *opaque)
 {
-    virLockSpaceResourcePtr res = opaque;
+    virLockSpaceResource *res = opaque;
     virLockSpaceResourceFree(res);
 }
 
 
-virLockSpacePtr virLockSpaceNew(const char *directory)
+virLockSpace *virLockSpaceNew(const char *directory)
 {
-    virLockSpacePtr lockspace;
+    virLockSpace *lockspace;
 
     VIR_DEBUG("directory=%s", NULLSTR(directory));
 
-    if (VIR_ALLOC(lockspace) < 0)
-        return NULL;
+    lockspace = g_new0(virLockSpace, 1);
 
     if (virMutexInit(&lockspace->lock) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -255,11 +245,9 @@ virLockSpacePtr virLockSpaceNew(const char *directory)
         return NULL;
     }
 
-    if (VIR_STRDUP(lockspace->dir, directory) < 0)
-        goto error;
+    lockspace->dir = g_strdup(directory);
 
-    if (!(lockspace->resources = virHashCreate(VIR_LOCKSPACE_TABLE_SIZE,
-                                               virLockSpaceResourceDataFree)))
+    if (!(lockspace->resources = virHashNew(virLockSpaceResourceDataFree)))
         goto error;
 
     if (directory) {
@@ -271,7 +259,7 @@ virLockSpacePtr virLockSpaceNew(const char *directory)
                 goto error;
             }
         } else {
-            if (virFileMakePathWithMode(directory, 0700) < 0) {
+            if (g_mkdir_with_parents(directory, 0700) < 0) {
                 virReportSystemError(errno,
                                      _("Unable to create lockspace %s"),
                                      directory);
@@ -289,16 +277,15 @@ virLockSpacePtr virLockSpaceNew(const char *directory)
 
 
 
-virLockSpacePtr virLockSpaceNewPostExecRestart(virJSONValuePtr object)
+virLockSpace *virLockSpaceNewPostExecRestart(virJSONValue *object)
 {
-    virLockSpacePtr lockspace;
-    virJSONValuePtr resources;
+    virLockSpace *lockspace;
+    virJSONValue *resources;
     size_t i;
 
     VIR_DEBUG("object=%p", object);
 
-    if (VIR_ALLOC(lockspace) < 0)
-        return NULL;
+    lockspace = g_new0(virLockSpace, 1);
 
     if (virMutexInit(&lockspace->lock) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -307,14 +294,12 @@ virLockSpacePtr virLockSpaceNewPostExecRestart(virJSONValuePtr object)
         return NULL;
     }
 
-    if (!(lockspace->resources = virHashCreate(VIR_LOCKSPACE_TABLE_SIZE,
-                                               virLockSpaceResourceDataFree)))
+    if (!(lockspace->resources = virHashNew(virLockSpaceResourceDataFree)))
         goto error;
 
     if (virJSONValueObjectHasKey(object, "directory")) {
         const char *dir = virJSONValueObjectGetString(object, "directory");
-        if (VIR_STRDUP(lockspace->dir, dir) < 0)
-            goto error;
+        lockspace->dir = g_strdup(dir);
     }
 
     if (!(resources = virJSONValueObjectGet(object, "resources"))) {
@@ -330,15 +315,13 @@ virLockSpacePtr virLockSpaceNewPostExecRestart(virJSONValuePtr object)
     }
 
     for (i = 0; i < virJSONValueArraySize(resources); i++) {
-        virJSONValuePtr child = virJSONValueArrayGet(resources, i);
-        virLockSpaceResourcePtr res;
+        virJSONValue *child = virJSONValueArrayGet(resources, i);
+        virLockSpaceResource *res;
         const char *tmp;
-        virJSONValuePtr owners;
+        virJSONValue *owners;
         size_t j;
-        size_t m;
 
-        if (VIR_ALLOC(res) < 0)
-            goto error;
+        res = g_new0(virLockSpaceResource, 1);
         res->fd = -1;
 
         if (!(tmp = virJSONValueObjectGetString(child, "name"))) {
@@ -347,10 +330,7 @@ virLockSpacePtr virLockSpaceNewPostExecRestart(virJSONValuePtr object)
             virLockSpaceResourceFree(res);
             goto error;
         }
-        if (VIR_STRDUP(res->name, tmp) < 0) {
-            virLockSpaceResourceFree(res);
-            goto error;
-        }
+        res->name = g_strdup(tmp);
 
         if (!(tmp = virJSONValueObjectGetString(child, "path"))) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -358,10 +338,7 @@ virLockSpacePtr virLockSpaceNewPostExecRestart(virJSONValuePtr object)
             virLockSpaceResourceFree(res);
             goto error;
         }
-        if (VIR_STRDUP(res->path, tmp) < 0) {
-            virLockSpaceResourceFree(res);
-            goto error;
-        }
+        res->path = g_strdup(tmp);
         if (virJSONValueObjectGetNumberInt(child, "fd", &res->fd) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                            _("Missing resource fd in JSON document"));
@@ -402,16 +379,12 @@ virLockSpacePtr virLockSpaceNewPostExecRestart(virJSONValuePtr object)
             goto error;
         }
 
-        m = virJSONValueArraySize(owners);
-        if (VIR_ALLOC_N(res->owners, res->nOwners) < 0) {
-            virLockSpaceResourceFree(res);
-            goto error;
-        }
-        res->nOwners = m;
+        res->nOwners = virJSONValueArraySize(owners);
+        res->owners = g_new0(pid_t, res->nOwners);
 
         for (j = 0; j < res->nOwners; j++) {
             unsigned long long int owner;
-            virJSONValuePtr ownerval = virJSONValueArrayGet(owners, j);
+            virJSONValue *ownerval = virJSONValueArrayGet(owners, j);
 
             if (virJSONValueGetNumberUlong(ownerval, &owner) < 0) {
                 virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -437,14 +410,12 @@ virLockSpacePtr virLockSpaceNewPostExecRestart(virJSONValuePtr object)
 }
 
 
-virJSONValuePtr virLockSpacePreExecRestart(virLockSpacePtr lockspace)
+virJSONValue *virLockSpacePreExecRestart(virLockSpace *lockspace)
 {
-    virJSONValuePtr object = virJSONValueNewObject();
-    virJSONValuePtr resources;
-    virHashKeyValuePairPtr pairs = NULL, tmp;
-
-    if (!object)
-        return NULL;
+    g_autoptr(virJSONValue) object = virJSONValueNewObject();
+    g_autoptr(virJSONValue) resources = virJSONValueNewArray();
+    g_autofree virHashKeyValuePair *pairs = NULL;
+    virHashKeyValuePair *tmp;
 
     virMutexLock(&lockspace->lock);
 
@@ -452,28 +423,13 @@ virJSONValuePtr virLockSpacePreExecRestart(virLockSpacePtr lockspace)
         virJSONValueObjectAppendString(object, "directory", lockspace->dir) < 0)
         goto error;
 
-    if (!(resources = virJSONValueNewArray()))
-        goto error;
 
-    if (virJSONValueObjectAppend(object, "resources", resources) < 0) {
-        virJSONValueFree(resources);
-        goto error;
-    }
-
-    tmp = pairs = virHashGetItems(lockspace->resources, NULL);
+    tmp = pairs = virHashGetItems(lockspace->resources, NULL, false);
     while (tmp && tmp->value) {
-        virLockSpaceResourcePtr res = (virLockSpaceResourcePtr)tmp->value;
-        virJSONValuePtr child = virJSONValueNewObject();
-        virJSONValuePtr owners = NULL;
+        virLockSpaceResource *res = (virLockSpaceResource *)tmp->value;
+        g_autoptr(virJSONValue) child = virJSONValueNewObject();
+        g_autoptr(virJSONValue) owners = virJSONValueNewArray();
         size_t i;
-
-        if (!child)
-            goto error;
-
-        if (virJSONValueArrayAppend(resources, child) < 0) {
-            virJSONValueFree(child);
-            goto error;
-        }
 
         if (virJSONValueObjectAppendString(child, "name", res->name) < 0 ||
             virJSONValueObjectAppendString(child, "path", res->path) < 0 ||
@@ -488,63 +444,59 @@ virJSONValuePtr virLockSpacePreExecRestart(virLockSpacePtr lockspace)
             goto error;
         }
 
-        if (!(owners = virJSONValueNewArray()))
-            goto error;
-
-        if (virJSONValueObjectAppend(child, "owners", owners) < 0) {
-            virJSONValueFree(owners);
-            goto error;
-        }
-
         for (i = 0; i < res->nOwners; i++) {
-            virJSONValuePtr owner = virJSONValueNewNumberUlong(res->owners[i]);
+            g_autoptr(virJSONValue) owner = virJSONValueNewNumberUlong(res->owners[i]);
             if (!owner)
                 goto error;
 
-            if (virJSONValueArrayAppend(owners, owner) < 0) {
-                virJSONValueFree(owner);
+            if (virJSONValueArrayAppend(owners, &owner) < 0)
                 goto error;
-            }
         }
+
+        if (virJSONValueObjectAppend(child, "owners", &owners) < 0)
+            goto error;
+
+        if (virJSONValueArrayAppend(resources, &child) < 0)
+            goto error;
 
         tmp++;
     }
-    VIR_FREE(pairs);
+
+    if (virJSONValueObjectAppend(object, "resources", &resources) < 0)
+        goto error;
 
     virMutexUnlock(&lockspace->lock);
-    return object;
+    return g_steal_pointer(&object);
 
  error:
-    VIR_FREE(pairs);
-    virJSONValueFree(object);
     virMutexUnlock(&lockspace->lock);
     return NULL;
 }
 
 
-void virLockSpaceFree(virLockSpacePtr lockspace)
+void virLockSpaceFree(virLockSpace *lockspace)
 {
     if (!lockspace)
         return;
 
     virHashFree(lockspace->resources);
-    VIR_FREE(lockspace->dir);
+    g_free(lockspace->dir);
     virMutexDestroy(&lockspace->lock);
-    VIR_FREE(lockspace);
+    g_free(lockspace);
 }
 
 
-const char *virLockSpaceGetDirectory(virLockSpacePtr lockspace)
+const char *virLockSpaceGetDirectory(virLockSpace *lockspace)
 {
     return lockspace->dir;
 }
 
 
-int virLockSpaceCreateResource(virLockSpacePtr lockspace,
+int virLockSpaceCreateResource(virLockSpace *lockspace,
                                const char *resname)
 {
     int ret = -1;
-    char *respath = NULL;
+    g_autofree char *respath = NULL;
 
     VIR_DEBUG("lockspace=%p resname=%s", lockspace, resname);
 
@@ -567,16 +519,15 @@ int virLockSpaceCreateResource(virLockSpacePtr lockspace,
 
  cleanup:
     virMutexUnlock(&lockspace->lock);
-    VIR_FREE(respath);
     return ret;
 }
 
 
-int virLockSpaceDeleteResource(virLockSpacePtr lockspace,
+int virLockSpaceDeleteResource(virLockSpace *lockspace,
                                const char *resname)
 {
     int ret = -1;
-    char *respath = NULL;
+    g_autofree char *respath = NULL;
 
     VIR_DEBUG("lockspace=%p resname=%s", lockspace, resname);
 
@@ -604,18 +555,17 @@ int virLockSpaceDeleteResource(virLockSpacePtr lockspace,
 
  cleanup:
     virMutexUnlock(&lockspace->lock);
-    VIR_FREE(respath);
     return ret;
 }
 
 
-int virLockSpaceAcquireResource(virLockSpacePtr lockspace,
+int virLockSpaceAcquireResource(virLockSpace *lockspace,
                                 const char *resname,
                                 pid_t owner,
                                 unsigned int flags)
 {
     int ret = -1;
-    virLockSpaceResourcePtr res;
+    virLockSpaceResource *res;
 
     VIR_DEBUG("lockspace=%p resname=%s flags=0x%x owner=%lld",
               lockspace, resname, flags, (unsigned long long)owner);
@@ -629,8 +579,7 @@ int virLockSpaceAcquireResource(virLockSpacePtr lockspace,
         if ((res->flags & VIR_LOCK_SPACE_ACQUIRE_SHARED) &&
             (flags & VIR_LOCK_SPACE_ACQUIRE_SHARED)) {
 
-            if (VIR_EXPAND_N(res->owners, res->nOwners, 1) < 0)
-                goto cleanup;
+            VIR_EXPAND_N(res->owners, res->nOwners, 1);
             res->owners[res->nOwners-1] = owner;
 
             goto done;
@@ -658,12 +607,12 @@ int virLockSpaceAcquireResource(virLockSpacePtr lockspace,
 }
 
 
-int virLockSpaceReleaseResource(virLockSpacePtr lockspace,
+int virLockSpaceReleaseResource(virLockSpace *lockspace,
                                 const char *resname,
                                 pid_t owner)
 {
     int ret = -1;
-    virLockSpaceResourcePtr res;
+    virLockSpaceResource *res;
     size_t i;
 
     VIR_DEBUG("lockspace=%p resname=%s owner=%lld",
@@ -712,10 +661,10 @@ struct virLockSpaceRemoveData {
 
 static int
 virLockSpaceRemoveResourcesForOwner(const void *payload,
-                                    const void *name ATTRIBUTE_UNUSED,
+                                    const char *name G_GNUC_UNUSED,
                                     const void *opaque)
 {
-    virLockSpaceResourcePtr res = (virLockSpaceResourcePtr)payload;
+    virLockSpaceResource *res = (virLockSpaceResource *)payload;
     struct virLockSpaceRemoveData *data = (struct virLockSpaceRemoveData *)opaque;
     size_t i;
 
@@ -743,7 +692,7 @@ virLockSpaceRemoveResourcesForOwner(const void *payload,
 }
 
 
-int virLockSpaceReleaseResourcesForOwner(virLockSpacePtr lockspace,
+int virLockSpaceReleaseResourcesForOwner(virLockSpace *lockspace,
                                          pid_t owner)
 {
     int ret = 0;

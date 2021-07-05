@@ -19,14 +19,13 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_BRIDGE_DRIVER_PLATFORM_H
-# define LIBVIRT_BRIDGE_DRIVER_PLATFORM_H
+#pragma once
 
-# include "internal.h"
-# include "virthread.h"
-# include "virdnsmasq.h"
-# include "virnetworkobj.h"
-# include "object_event.h"
+#include "internal.h"
+#include "virthread.h"
+#include "virdnsmasq.h"
+#include "virnetworkobj.h"
+#include "object_event.h"
 
 /* Main driver state */
 struct _virNetworkDriverState {
@@ -35,8 +34,11 @@ struct _virNetworkDriverState {
     /* Read-only */
     bool privileged;
 
+    /* pid file FD, ensures two copies of the driver can't use the same root */
+    int lockFD;
+
     /* Immutable pointer, self-locking APIs */
-    virNetworkObjListPtr networks;
+    virNetworkObjList *networks;
 
     /* Immutable pointers, Immutable objects */
     char *networkConfigDir;
@@ -49,22 +51,21 @@ struct _virNetworkDriverState {
     /* Require lock to get a reference on the object,
      * lockless access thereafter
      */
-    dnsmasqCapsPtr dnsmasqCaps;
+    dnsmasqCaps *dnsmasqCaps;
 
     /* Immutable pointer, self-locking APIs */
-    virObjectEventStatePtr networkEventState;
+    virObjectEventState *networkEventState;
+
+    virNetworkXMLOption *xmlopt;
 };
 
 typedef struct _virNetworkDriverState virNetworkDriverState;
-typedef virNetworkDriverState *virNetworkDriverStatePtr;
 
-void networkPreReloadFirewallRules(bool startup);
+void networkPreReloadFirewallRules(virNetworkDriverState *driver, bool startup, bool force);
 void networkPostReloadFirewallRules(bool startup);
 
-int networkCheckRouteCollision(virNetworkDefPtr def);
+int networkCheckRouteCollision(virNetworkDef *def);
 
-int networkAddFirewallRules(virNetworkDefPtr def);
+int networkAddFirewallRules(virNetworkDef *def);
 
-void networkRemoveFirewallRules(virNetworkDefPtr def);
-
-#endif /* LIBVIRT_BRIDGE_DRIVER_PLATFORM_H */
+void networkRemoveFirewallRules(virNetworkDef *def);

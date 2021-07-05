@@ -18,18 +18,15 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_BHYVE_DRIVER_H
-# define LIBVIRT_BHYVE_DRIVER_H
+#pragma once
 
-# include "capabilities.h"
-# include "bhyve_utils.h"
+#include "capabilities.h"
+#include "bhyve_utils.h"
 
 int bhyveRegister(void);
 
-unsigned bhyveDriverGetCaps(virConnectPtr conn);
+unsigned bhyveDriverGetBhyveCaps(struct _bhyveConn *driver);
 
-unsigned bhyveDriverGetGrubCaps(virConnectPtr conn);
+unsigned bhyveDriverGetGrubCaps(struct _bhyveConn *driver);
 
-virCapsPtr bhyveDriverGetCapabilities(bhyveConnPtr driver);
-
-#endif /* LIBVIRT_BHYVE_DRIVER_H */
+virCaps *bhyveDriverGetCapabilities(struct _bhyveConn *driver);

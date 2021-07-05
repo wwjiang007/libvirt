@@ -28,7 +28,7 @@
 #include "viralloc.h"
 #include "viruuid.h"
 #include "storage_conf.h"
-#include "virstoragefile.h"
+#include "storage_source_conf.h"
 #include "esx_storage_backend_iscsi.h"
 #include "esx_private.h"
 #include "esx_vi.h"
@@ -43,7 +43,7 @@
  * The UUID of a storage pool is the MD5 sum of its mount path. Therefore,
  * verify that UUID and MD5 sum match in size, because we rely on that.
  */
-verify(VIR_CRYPTO_HASH_SIZE_MD5 == VIR_UUID_BUFLEN);
+G_STATIC_ASSERT(VIR_CRYPTO_HASH_SIZE_MD5 == VIR_UUID_BUFLEN);
 
 
 
@@ -127,8 +127,7 @@ esxConnectListStoragePools(virConnectPtr conn, char **const names,
      */
     for (target = hostInternetScsiHba->configuredStaticTarget;
          target && count < maxnames; target = target->_next) {
-        if (VIR_STRDUP(names[count], target->iScsiName) < 0)
-            goto cleanup;
+        names[count] = g_strdup(target->iScsiName);
 
         ++count;
     }
@@ -149,13 +148,31 @@ esxConnectListStoragePools(virConnectPtr conn, char **const names,
 
 
 static virStoragePoolPtr
+targetToStoragePool(virConnectPtr conn,
+                    const char *name,
+                    esxVI_HostInternetScsiHbaStaticTarget *target)
+{
+    /* VIR_CRYPTO_HASH_SIZE_MD5 = VIR_UUID_BUFLEN = 16 */
+    unsigned char md5[VIR_CRYPTO_HASH_SIZE_MD5];
+
+    /*
+     * HostInternetScsiHbaStaticTarget does not provide a uuid field,
+     * but iScsiName (or widely known as IQN) is unique across the multiple
+     * hosts, using it to compute key
+     */
+    if (virCryptoHashBuf(VIR_CRYPTO_HASH_MD5, target->iScsiName, md5) < 0)
+        return NULL;
+
+    return virGetStoragePool(conn, name, md5, &esxStorageBackendISCSI, NULL);
+}
+
+
+static virStoragePoolPtr
 esxStoragePoolLookupByName(virConnectPtr conn,
                            const char *name)
 {
     esxPrivate *priv = conn->privateData;
     esxVI_HostInternetScsiHbaStaticTarget *target = NULL;
-    /* VIR_CRYPTO_HASH_SIZE_MD5 = VIR_UUID_BUFLEN = 16 */
-    unsigned char md5[VIR_CRYPTO_HASH_SIZE_MD5];
     virStoragePoolPtr pool = NULL;
 
     /*
@@ -173,15 +190,7 @@ esxStoragePoolLookupByName(virConnectPtr conn,
         goto cleanup;
     }
 
-    /*
-     * HostInternetScsiHbaStaticTarget does not provide a uuid field,
-     * but iScsiName (or widely known as IQN) is unique across the multiple
-     * hosts, using it to compute key
-     */
-    if (virCryptoHashBuf(VIR_CRYPTO_HASH_MD5, target->iScsiName, md5) < 0)
-        goto cleanup;
-
-    pool = virGetStoragePool(conn, name, md5, &esxStorageBackendISCSI, NULL);
+    pool = targetToStoragePool(conn, name, target);
 
  cleanup:
     esxVI_HostInternetScsiHbaStaticTarget_Free(&target);
@@ -276,7 +285,7 @@ esxStoragePoolRefresh(virStoragePoolPtr pool,
 
 
 static int
-esxStoragePoolGetInfo(virStoragePoolPtr pool ATTRIBUTE_UNUSED,
+esxStoragePoolGetInfo(virStoragePoolPtr pool G_GNUC_UNUSED,
                       virStoragePoolInfoPtr info)
 {
     /* These fields are not valid for iSCSI pool */
@@ -312,7 +321,7 @@ esxStoragePoolGetXMLDesc(virStoragePoolPtr pool, unsigned int flags)
 
     if (!target) {
         /* pool not found */
-        virReportError(VIR_ERR_INTERNAL_ERROR,
+        virReportError(VIR_ERR_NO_STORAGE_POOL,
                        _("Could not find storage pool with name '%s'"),
                        pool->name);
         goto cleanup;
@@ -328,8 +337,7 @@ esxStoragePoolGetXMLDesc(virStoragePoolPtr pool, unsigned int flags)
 
     def.source.nhost = 1;
 
-    if (VIR_ALLOC_N(def.source.hosts, def.source.nhost) < 0)
-        goto cleanup;
+    def.source.hosts = g_new0(virStoragePoolSourceHost, def.source.nhost);
 
     def.source.hosts[0].name = target->address;
 
@@ -340,7 +348,7 @@ esxStoragePoolGetXMLDesc(virStoragePoolPtr pool, unsigned int flags)
     xml = virStoragePoolDefFormat(&def);
 
  cleanup:
-    VIR_FREE(def.source.hosts);
+    g_free(def.source.hosts);
     esxVI_HostInternetScsiHba_Free(&hostInternetScsiHba);
 
     return xml;
@@ -406,8 +414,7 @@ esxStoragePoolListVolumes(virStoragePoolPtr pool, char **const names,
              hostScsiTopologyLun && count < maxnames;
              hostScsiTopologyLun = hostScsiTopologyLun->_next) {
             if (STREQ(hostScsiTopologyLun->scsiLun, scsiLun->key)) {
-                if (VIR_STRDUP(names[count], scsiLun->deviceName) < 0)
-                    goto cleanup;
+                names[count] = g_strdup(scsiLun->deviceName);
 
                 ++count;
             }
@@ -487,7 +494,6 @@ esxStorageVolLookupByPath(virConnectPtr conn, const char *path)
     esxVI_ScsiLun *scsiLunList = NULL;
     esxVI_ScsiLun *scsiLun;
     esxVI_HostScsiDisk *hostScsiDisk = NULL;
-    char *poolName = NULL;
     /* VIR_CRYPTO_HASH_SIZE_MD5 = VIR_UUID_BUFLEN = 16 */
     unsigned char md5[VIR_CRYPTO_HASH_SIZE_MD5];
     char uuid_string[VIR_UUID_STRING_BUFLEN] = "";
@@ -496,11 +502,12 @@ esxStorageVolLookupByPath(virConnectPtr conn, const char *path)
         goto cleanup;
 
     for (scsiLun = scsiLunList; scsiLun; scsiLun = scsiLun->_next) {
+        g_autofree char *poolName = NULL;
+
         hostScsiDisk = esxVI_HostScsiDisk_DynamicCast(scsiLun);
 
         if (hostScsiDisk && STREQ(hostScsiDisk->devicePath, path)) {
             /* Found matching device */
-            VIR_FREE(poolName);
 
             if (esxVI_LookupStoragePoolNameByScsiLunKey(priv->primary,
                                                         hostScsiDisk->key,
@@ -520,8 +527,6 @@ esxStorageVolLookupByPath(virConnectPtr conn, const char *path)
 
  cleanup:
     esxVI_ScsiLun_Free(&scsiLunList);
-    VIR_FREE(poolName);
-
     return volume;
 }
 
@@ -532,7 +537,6 @@ esxStorageVolLookupByKey(virConnectPtr conn, const char *key)
 {
     virStorageVolPtr volume = NULL;
     esxPrivate *priv = conn->privateData;
-    char *poolName = NULL;
     esxVI_ScsiLun *scsiLunList = NULL;
     esxVI_ScsiLun *scsiLun;
     /* VIR_CRYPTO_HASH_SIZE_MD5 = VIR_UUID_BUFLEN = 16 */
@@ -548,6 +552,8 @@ esxStorageVolLookupByKey(virConnectPtr conn, const char *key)
 
     for (scsiLun = scsiLunList; scsiLun;
          scsiLun = scsiLun->_next) {
+        g_autofree char *poolName = NULL;
+
         memset(uuid_string, '\0', sizeof(uuid_string));
         memset(md5, '\0', sizeof(md5));
 
@@ -557,7 +563,6 @@ esxStorageVolLookupByKey(virConnectPtr conn, const char *key)
 
         if (STREQ(key, uuid_string)) {
             /* Found matching UUID */
-            VIR_FREE(poolName);
 
             if (esxVI_LookupStoragePoolNameByScsiLunKey(priv->primary,
                                                         scsiLun->key,
@@ -574,16 +579,14 @@ esxStorageVolLookupByKey(virConnectPtr conn, const char *key)
 
  cleanup:
     esxVI_ScsiLun_Free(&scsiLunList);
-    VIR_FREE(poolName);
-
     return volume;
 }
 
 
 
 static virStorageVolPtr
-esxStorageVolCreateXML(virStoragePoolPtr pool ATTRIBUTE_UNUSED,
-                       const char *xmldesc ATTRIBUTE_UNUSED,
+esxStorageVolCreateXML(virStoragePoolPtr pool G_GNUC_UNUSED,
+                       const char *xmldesc G_GNUC_UNUSED,
                        unsigned int flags)
 {
     virCheckFlags(0, NULL);
@@ -597,9 +600,9 @@ esxStorageVolCreateXML(virStoragePoolPtr pool ATTRIBUTE_UNUSED,
 
 
 static virStorageVolPtr
-esxStorageVolCreateXMLFrom(virStoragePoolPtr pool ATTRIBUTE_UNUSED,
-                           const char *xmldesc ATTRIBUTE_UNUSED,
-                           virStorageVolPtr sourceVolume ATTRIBUTE_UNUSED,
+esxStorageVolCreateXMLFrom(virStoragePoolPtr pool G_GNUC_UNUSED,
+                           const char *xmldesc G_GNUC_UNUSED,
+                           virStorageVolPtr sourceVolume G_GNUC_UNUSED,
                            unsigned int flags)
 {
     virCheckFlags(0, NULL);
@@ -691,7 +694,7 @@ esxStorageVolGetXMLDesc(virStorageVolPtr volume,
     }
 
     if (!scsiLun) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
+        virReportError(VIR_ERR_NO_STORAGE_VOL,
                        _("Could find volume with name: %s"), volume->name);
         goto cleanup;
     }
@@ -705,8 +708,7 @@ esxStorageVolGetXMLDesc(virStorageVolPtr volume,
 
     virUUIDFormat(md5, uuid_string);
 
-    if (VIR_STRDUP(def.key, uuid_string) < 0)
-        goto cleanup;
+    def.key = g_strdup(uuid_string);
 
     /* iSCSI LUN exposes a block device */
     def.type = VIR_STORAGE_VOL_BLOCK;
@@ -725,7 +727,7 @@ esxStorageVolGetXMLDesc(virStorageVolPtr volume,
 
  cleanup:
     esxVI_ScsiLun_Free(&scsiLunList);
-    VIR_FREE(def.key);
+    g_free(def.key);
 
     return xml;
 }
@@ -733,7 +735,7 @@ esxStorageVolGetXMLDesc(virStorageVolPtr volume,
 
 
 static int
-esxStorageVolDelete(virStorageVolPtr volume ATTRIBUTE_UNUSED,
+esxStorageVolDelete(virStorageVolPtr volume G_GNUC_UNUSED,
                     unsigned int flags)
 {
     virCheckFlags(0, -1);
@@ -747,7 +749,7 @@ esxStorageVolDelete(virStorageVolPtr volume ATTRIBUTE_UNUSED,
 
 
 static int
-esxStorageVolWipe(virStorageVolPtr volume ATTRIBUTE_UNUSED,
+esxStorageVolWipe(virStorageVolPtr volume G_GNUC_UNUSED,
                   unsigned int flags)
 {
     virCheckFlags(0, -1);
@@ -766,7 +768,7 @@ esxStorageVolGetPath(virStorageVolPtr volume)
 {
     char *path;
 
-    ignore_value(VIR_STRDUP(path, volume->name));
+    path = g_strdup(volume->name);
     return path;
 }
 

@@ -20,16 +20,15 @@
  *
  */
 
-#ifndef LIBVIRT_VIRAUTH_H
-# define LIBVIRT_VIRAUTH_H
+#pragma once
 
-# include "internal.h"
-# include "viruri.h"
+#include "internal.h"
+#include "viruri.h"
 
 int virAuthGetConfigFilePath(virConnectPtr conn,
                              char **path);
 
-int virAuthGetConfigFilePathURI(virURIPtr uri,
+int virAuthGetConfigFilePathURI(virURI *uri,
                                 char **path);
 
 
@@ -53,4 +52,3 @@ char * virAuthGetPasswordPath(const char *path,
                               const char *servicename,
                               const char *username,
                               const char *hostname);
-#endif /* LIBVIRT_VIRAUTH_H */

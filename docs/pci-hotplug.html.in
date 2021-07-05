@@ -56,7 +56,7 @@
     </p>
     <p>
       If you have a very specific use case, such as the appliances
-      used by <a href="http://libguestfs.org/">libguestfs</a> behind
+      used by <a href="https://libguestfs.org/">libguestfs</a> behind
       the scenes to access disk images, and this automatically-added
       <code>pcie-root-port</code> controller ends up being a nuisance,
       you can prevent libvirt from adding it by manually managing PCI
@@ -99,13 +99,12 @@
     </p>
 
 <pre>
-&lt;controller type='pci' model='dmi-to-pci-bridge'/&gt;
-&lt;controller type='pci' model='pci-bridge'/&gt;</pre>
+&lt;controller type='pci' model='pcie-to-pci-bridge'/&gt;</pre>
 
     <p>
       and you'll be able to hotplug up to 31 legacy PCI devices,
       either emulated or assigned from the host, in the slots
-      from 0x01 to 0x1f of the <code>pci-bridge</code> controller.
+      from 0x01 to 0x1f of the <code>pcie-to-pci-bridge</code> controller.
     </p>
 
     <h3><a id="x86_64-i440fx">i440fx (pc) machine type</a></h3>

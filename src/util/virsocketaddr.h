@@ -16,29 +16,11 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRSOCKETADDR_H
-# define LIBVIRT_VIRSOCKETADDR_H
+#pragma once
 
-# include <netinet/in.h>
-# include <sys/socket.h>
-# ifdef HAVE_SYS_UN_H
-#  include <sys/un.h>
-# endif
+#include "virsocket.h"
 
-# include "internal.h"
-# include "virautoclean.h"
-
-/* On architectures which lack these limits, define them (ie. Cygwin).
- * Note that the libvirt code should be robust enough to handle the
- * case where actual value is longer than these limits (eg. by setting
- * length correctly in second argument to gethostname and by always
- * using strncpy instead of strcpy).
- */
-# ifndef INET_ADDRSTRLEN
-#  define INET_ADDRSTRLEN 16
-# endif
-
-# define VIR_LOOPBACK_IPV4_ADDR "127.0.0.1"
+#define VIR_LOOPBACK_IPV4_ADDR "127.0.0.1"
 
 typedef struct {
     union {
@@ -46,99 +28,99 @@ typedef struct {
         struct sockaddr_storage stor;
         struct sockaddr_in inet4;
         struct sockaddr_in6 inet6;
-# ifdef HAVE_SYS_UN_H
+#ifndef WIN32
         struct sockaddr_un un;
-# endif
+#endif
     } data;
     socklen_t len;
 } virSocketAddr;
 
-# define VIR_SOCKET_ADDR_VALID(s) \
+#define VIR_SOCKET_ADDR_VALID(s) \
     ((s)->data.sa.sa_family != AF_UNSPEC)
 
-# define VIR_SOCKET_ADDR_IS_FAMILY(s, f) \
+#define VIR_SOCKET_ADDR_IS_FAMILY(s, f) \
     ((s)->data.sa.sa_family == f)
 
-# define VIR_SOCKET_ADDR_FAMILY(s) \
+#define VIR_SOCKET_ADDR_FAMILY(s) \
     ((s)->data.sa.sa_family)
 
-# define VIR_SOCKET_ADDR_IPV4_ALL "0.0.0.0"
-# define VIR_SOCKET_ADDR_IPV6_ALL "::"
+#define VIR_SOCKET_ADDR_IPV4_ALL "0.0.0.0"
+#define VIR_SOCKET_ADDR_IPV6_ALL "::"
 
-# define VIR_SOCKET_ADDR_IPV4_ARPA "in-addr.arpa"
-# define VIR_SOCKET_ADDR_IPV6_ARPA "ip6.arpa"
-
-typedef virSocketAddr *virSocketAddrPtr;
+#define VIR_SOCKET_ADDR_IPV4_ARPA "in-addr.arpa"
+#define VIR_SOCKET_ADDR_IPV6_ARPA "ip6.arpa"
 
 typedef struct _virSocketAddrRange virSocketAddrRange;
-typedef virSocketAddrRange *virSocketAddrRangePtr;
 struct _virSocketAddrRange {
     virSocketAddr start;
     virSocketAddr end;
 };
 
 typedef struct _virPortRange virPortRange;
-typedef virPortRange *virPortRangePtr;
 struct _virPortRange {
     unsigned int start;
     unsigned int end;
 };
 
-int virSocketAddrParse(virSocketAddrPtr addr,
+int virSocketAddrParse(virSocketAddr *addr,
                        const char *val,
                        int family);
 
-int virSocketAddrParseAny(virSocketAddrPtr addr,
+int virSocketAddrParseAny(virSocketAddr *addr,
                           const char *val,
                           int family,
                           bool reportError);
 
-int virSocketAddrParseIPv4(virSocketAddrPtr addr,
+int virSocketAddrParseIPv4(virSocketAddr *addr,
                            const char *val);
 
-int virSocketAddrParseIPv6(virSocketAddrPtr addr,
+int virSocketAddrParseIPv6(virSocketAddr *addr,
                            const char *val);
 
-void virSocketAddrSetIPv4AddrNetOrder(virSocketAddrPtr s, uint32_t addr);
-void virSocketAddrSetIPv4Addr(virSocketAddrPtr s, uint32_t addr);
-void virSocketAddrSetIPv6AddrNetOrder(virSocketAddrPtr s, uint32_t addr[4]);
-void virSocketAddrSetIPv6Addr(virSocketAddrPtr s, uint32_t addr[4]);
+int virSocketAddrResolveService(const char *service);
+
+void virSocketAddrSetIPv4AddrNetOrder(virSocketAddr *addr, uint32_t val);
+void virSocketAddrSetIPv4Addr(virSocketAddr *addr, uint32_t val);
+void virSocketAddrSetIPv6AddrNetOrder(virSocketAddr *addr, uint32_t val[4]);
+void virSocketAddrSetIPv6Addr(virSocketAddr *addr, uint32_t val[4]);
 
 char *virSocketAddrFormat(const virSocketAddr *addr);
 char *virSocketAddrFormatFull(const virSocketAddr *addr,
                               bool withService,
                               const char *separator);
 
-int virSocketAddrSetPort(virSocketAddrPtr addr, int port);
+char *virSocketAddrGetPath(virSocketAddr *addr);
 
-int virSocketAddrGetPort(virSocketAddrPtr addr);
+int virSocketAddrSetPort(virSocketAddr *addr, int port);
 
-int virSocketAddrGetRange(virSocketAddrPtr start,
-                          virSocketAddrPtr end,
-                          virSocketAddrPtr network,
+int virSocketAddrGetPort(virSocketAddr *addr);
+
+int virSocketAddrGetRange(virSocketAddr *start,
+                          virSocketAddr *end,
+                          virSocketAddr *network,
                           int prefix);
 
-int virSocketAddrIsNetmask(virSocketAddrPtr netmask);
+int virSocketAddrIsNetmask(virSocketAddr *netmask);
 
-int virSocketAddrCheckNetmask(virSocketAddrPtr addr1,
-                              virSocketAddrPtr addr2,
-                              virSocketAddrPtr netmask);
+int virSocketAddrCheckNetmask(virSocketAddr *addr1,
+                              virSocketAddr *addr2,
+                              virSocketAddr *netmask);
 int virSocketAddrMask(const virSocketAddr *addr,
                       const virSocketAddr *netmask,
-                      virSocketAddrPtr network);
+                      virSocketAddr *network);
 int virSocketAddrMaskByPrefix(const virSocketAddr *addr,
                               unsigned int prefix,
-                              virSocketAddrPtr network);
+                              virSocketAddr *network);
 int virSocketAddrBroadcast(const virSocketAddr *addr,
                            const virSocketAddr *netmask,
-                           virSocketAddrPtr broadcast);
+                           virSocketAddr *broadcast);
 int virSocketAddrBroadcastByPrefix(const virSocketAddr *addr,
                                    unsigned int prefix,
-                                   virSocketAddrPtr broadcast);
+                                   virSocketAddr *broadcast);
 
 int virSocketAddrGetNumNetmaskBits(const virSocketAddr *netmask);
 int virSocketAddrPrefixToNetmask(unsigned int prefix,
-                                 virSocketAddrPtr netmask,
+                                 virSocketAddr *netmask,
                                  int family);
 int virSocketAddrGetIPPrefix(const virSocketAddr *address,
                              const virSocketAddr *netmask,
@@ -158,8 +140,6 @@ int virSocketAddrPTRDomain(const virSocketAddr *addr,
                            char **ptr)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
 
-void virSocketAddrFree(virSocketAddrPtr addr);
+void virSocketAddrFree(virSocketAddr *addr);
 
-VIR_DEFINE_AUTOPTR_FUNC(virSocketAddr, virSocketAddrFree);
-
-#endif /* LIBVIRT_VIRSOCKETADDR_H */
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virSocketAddr, virSocketAddrFree);

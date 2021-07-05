@@ -14,14 +14,15 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_TESTUTILSLXC_H
-# define LIBVIRT_TESTUTILSLXC_H
+#pragma once
 
-# include "capabilities.h"
+#include "capabilities.h"
 
-# define FAKEDEVDIR0 "/fakedevdir0/bla/fasl"
-# define FAKEDEVDIR1 "/fakedevdir1/bla/fasl"
+#include "lxc/lxc_conf.h"
 
-virCapsPtr testLXCCapsInit(void);
+#define FAKEDEVDIR0 "/fakedevdir0/bla/fasl"
+#define FAKEDEVDIR1 "/fakedevdir1/bla/fasl"
 
-#endif /* LIBVIRT_TESTUTILSLXC_H */
+virCaps *testLXCCapsInit(void);
+virLXCDriver *testLXCDriverInit(void);
+void testLXCDriverFree(virLXCDriver *driver);

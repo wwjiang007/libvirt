@@ -18,13 +18,11 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRBUFFER_H
-# define LIBVIRT_VIRBUFFER_H
+#pragma once
 
-# include <stdarg.h>
+#include <stdarg.h>
 
-# include "internal.h"
-# include "virautoclean.h"
+#include "internal.h"
 
 
 /**
@@ -33,87 +31,66 @@
  * A buffer structure.
  */
 typedef struct _virBuffer virBuffer;
-typedef virBuffer *virBufferPtr;
 
-# define VIR_BUFFER_INITIALIZER { 0, 0, 0, 0, NULL }
+#define VIR_BUFFER_INITIALIZER { NULL, 0 }
+
+/**
+ * VIR_BUFFER_INIT_CHILD:
+ * @parentbuf: parent buffer for XML element formatting
+ *
+ * Initialize a virBuffer structure and set up the indentation level for
+ * formatting XML subelements of @parentbuf.
+ */
+#define VIR_BUFFER_INIT_CHILD(parentbuf) { NULL, (parentbuf)->indent + 2 }
 
 struct _virBuffer {
-    size_t size;
-    size_t use;
-    int error; /* errno value, or -1 for usage error */
+    GString *str;
     int indent;
-    char *content;
 };
 
-const char *virBufferCurrentContent(virBufferPtr buf);
-char *virBufferContentAndReset(virBufferPtr buf);
-void virBufferFreeAndReset(virBufferPtr buf);
-int virBufferError(const virBuffer *buf);
-int virBufferCheckErrorInternal(const virBuffer *buf,
-                                int domcode,
-                                const char *filename,
-                                const char *funcname,
-                                size_t linenr)
-    ATTRIBUTE_NONNULL(1);
+const char *virBufferCurrentContent(virBuffer *buf);
+char *virBufferContentAndReset(virBuffer *buf);
+void virBufferFreeAndReset(virBuffer *buf);
 
-VIR_DEFINE_AUTOCLEAN_FUNC(virBuffer, virBufferFreeAndReset);
+G_DEFINE_AUTO_CLEANUP_CLEAR_FUNC(virBuffer, virBufferFreeAndReset);
 
-/**
- * virBufferCheckError
- *
- * Checks if the buffer is in error state and reports an error.
- *
- * Returns 0 if no error has occurred, otherwise an error is reported
- * and -1 is returned.
- */
-# define virBufferCheckError(buf) \
-    virBufferCheckErrorInternal(buf, VIR_FROM_THIS, __FILE__, __FUNCTION__, \
-    __LINE__)
 size_t virBufferUse(const virBuffer *buf);
-void virBufferAdd(virBufferPtr buf, const char *str, int len);
-void virBufferAddBuffer(virBufferPtr buf, virBufferPtr toadd);
-void virBufferAddChar(virBufferPtr buf, char c);
-void virBufferAsprintf(virBufferPtr buf, const char *format, ...)
-  ATTRIBUTE_FMT_PRINTF(2, 3);
-void virBufferVasprintf(virBufferPtr buf, const char *format, va_list ap)
-  ATTRIBUTE_FMT_PRINTF(2, 0);
-void virBufferStrcat(virBufferPtr buf, ...)
-  ATTRIBUTE_SENTINEL;
-void virBufferStrcatVArgs(virBufferPtr buf, va_list ap);
+void virBufferAdd(virBuffer *buf, const char *str, int len);
+void virBufferAddBuffer(virBuffer *buf, virBuffer *toadd);
+void virBufferAddChar(virBuffer *buf, char c);
+void virBufferAsprintf(virBuffer *buf, const char *format, ...)
+  G_GNUC_PRINTF(2, 3);
+void virBufferVasprintf(virBuffer *buf, const char *format, va_list ap)
+  G_GNUC_PRINTF(2, 0);
+void virBufferStrcat(virBuffer *buf, ...)
+  G_GNUC_NULL_TERMINATED;
+void virBufferStrcatVArgs(virBuffer *buf, va_list ap);
 
-void virBufferEscape(virBufferPtr buf, char escape, const char *toescape,
+void virBufferEscape(virBuffer *buf, char escape, const char *toescape,
                      const char *format, const char *str);
-void virBufferEscapeString(virBufferPtr buf, const char *format,
+void virBufferEscapeString(virBuffer *buf, const char *format,
                            const char *str);
-void virBufferEscapeSexpr(virBufferPtr buf, const char *format,
+void virBufferEscapeSexpr(virBuffer *buf, const char *format,
                           const char *str);
-void virBufferEscapeRegex(virBufferPtr buf,
+void virBufferEscapeRegex(virBuffer *buf,
                           const char *format,
                           const char *str);
-void virBufferEscapeSQL(virBufferPtr buf,
+void virBufferEscapeSQL(virBuffer *buf,
                         const char *format,
                         const char *str);
-void virBufferEscapeShell(virBufferPtr buf, const char *str);
-void virBufferURIEncodeString(virBufferPtr buf, const char *str);
+void virBufferEscapeShell(virBuffer *buf, const char *str);
+void virBufferURIEncodeString(virBuffer *buf, const char *str);
 
-# define virBufferAddLit(buf_, literal_string_) \
+#define virBufferAddLit(buf_, literal_string_) \
     virBufferAdd(buf_, "" literal_string_ "", sizeof(literal_string_) - 1)
 
-void virBufferAdjustIndent(virBufferPtr buf, int indent);
-void virBufferSetIndent(virBufferPtr, int indent);
+void virBufferAdjustIndent(virBuffer *buf, int indent);
+void virBufferSetIndent(virBuffer *, int indent);
 
-/**
- * virBufferSetChildIndent
- *
- * Gets the parent indentation, increments it by 2 and sets it to
- * child buffer.
- */
-# define virBufferSetChildIndent(childBuf_, parentBuf_) \
-    virBufferSetIndent(childBuf_, virBufferGetIndent(parentBuf_, false) + 2)
+size_t virBufferGetIndent(const virBuffer *buf);
+size_t virBufferGetEffectiveIndent(const virBuffer *buf);
 
-int virBufferGetIndent(const virBuffer *buf, bool dynamic);
-
-void virBufferTrim(virBufferPtr buf, const char *trim, int len);
-void virBufferAddStr(virBufferPtr buf, const char *str);
-
-#endif /* LIBVIRT_VIRBUFFER_H */
+void virBufferTrim(virBuffer *buf, const char *trim);
+void virBufferTrimChars(virBuffer *buf, const char *trim);
+void virBufferTrimLen(virBuffer *buf, int len);
+void virBufferAddStr(virBuffer *buf, const char *str);

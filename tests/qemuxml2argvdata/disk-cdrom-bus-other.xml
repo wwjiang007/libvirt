@@ -14,7 +14,7 @@
   <on_reboot>restart</on_reboot>
   <on_crash>destroy</on_crash>
   <devices>
-    <emulator>/usr/bin/qemu-system-i686</emulator>
+    <emulator>/usr/bin/qemu-system-i386</emulator>
     <disk type='file' device='cdrom'>
       <driver name='qemu' type='raw'/>
       <source file='/root/boot.iso'/>
@@ -24,17 +24,6 @@
     <disk type='file' device='cdrom'>
       <driver name='qemu' type='raw'/>
       <target dev='sdb' bus='usb'/>
-      <readonly/>
-    </disk>
-    <disk type='file' device='cdrom'>
-      <driver name='qemu' type='raw'/>
-      <source file='/root/boot2.iso'/>
-      <target dev='sdc' bus='sd'/>
-      <readonly/>
-    </disk>
-    <disk type='file' device='cdrom'>
-      <driver name='qemu' type='raw'/>
-      <target dev='sdd' bus='sd'/>
       <readonly/>
     </disk>
     <controller type='usb' index='0'/>

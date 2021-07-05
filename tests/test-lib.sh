@@ -200,7 +200,7 @@ test_expensive()
   if test "$VIR_TEST_EXPENSIVE" != 1; then
     skip_test_ '
 This test is very expensive, so it is disabled by default.
-To run it anyway, rerun: make check VIR_TEST_EXPENSIVE=1
+To change the default, configure with: meson -Dexpensive_tests=enabled
 '
   fi
 }
@@ -256,8 +256,7 @@ fi
 # a partition, or to undo any other global state changes.
 cleanup_() { :; }
 
-mktempd="$abs_top_srcdir/build-aux/mktempd"
-t_=$("$SHELL" "$mktempd" "$test_dir_" lv-$this_test.XXXXXXXXXX) \
+t_=$("mktemp" "-d" "$test_dir_/lv-$this_test.XXXXXXXXXX") \
     || error_ "failed to create temporary directory in $test_dir_"
 
 # Run each test from within a temporary sub-directory named after the

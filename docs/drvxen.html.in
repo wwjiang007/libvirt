@@ -50,6 +50,17 @@ xen+tcp://example.com/system      (remote access, SASl/Kerberos)
 xen+ssh://root@example.com/system (remote access, SSH tunnelled)
 </pre>
 
+
+    <h2><a id="configFiles">Location of configuration files</a></h2>
+
+    <p>
+      The libxl driver comes with sane default values. However, during its
+      initialization it reads a configuration file which offers system
+      administrator to override some of that default. The file is located
+      under <code>/etc/libvirt/libxl.conf</code>
+    </p>
+
+
     <h2><a id="imex">Import and export of libvirt domain XML configs</a></h2>
 
     <p>
@@ -58,8 +69,7 @@ xen+ssh://root@example.com/system (remote access, SSH tunnelled)
       original Xen virtual machine config format used by the legacy
       xm/xend toolstack. The second, known as <code>xen-sxpr</code>,
       is also one of the original formats that was used by xend's
-      legacy HTTP RPC service. For compatibility, import and export
-      of these legacy formats is supported by the libxl driver.
+      legacy HTTP RPC service (<span class='removed'>removed in 5.6.0</span>)
     </p>
 
     <p>
@@ -141,6 +151,35 @@ vncunused = 1
 vnclisten = "0.0.0.0"
 disk = [ "tap:aio:/var/lib/xen/images/rhel5pv.img,xvda,w", "tap:qcow:/root/qcow1-xen.img,xvdd,w" ]
 vif = [ "mac=00:16:3e:60:36:ba,bridge=virbr0,script=vif-bridge,vifname=vif5.0" ]</pre>
+
+    <h2><a id="xencommand">Pass-through of arbitrary command-line arguments
+    to the qemu device model</a></h2>
+
+    <p><span class="since">Since 6.7.0</span>, the Xen driver supports passing
+      arbitrary command-line arguments to the qemu device model used by Xen with
+      the <code>&lt;xen:commandline&gt;</code> element under <code>domain</code>.
+      In order to use command-line pass-through, an XML namespace request must be
+      issued that pulls in <code>http://libvirt.org/schemas/domain/xen/1.0</code>.
+      With the namespace in place, it is then possible to add
+      <code>&lt;xen:arg&gt;</code>sub-elements to
+      <code>&lt;xen:commandline&gt;</code> describing each argument passed to
+      the device model when starting the domain.
+    </p>
+    <p>The following example illustrates passing arguments to the QEMU device
+      model that define a floppy drive, which Xen does not support through its
+      public APIs:
+    </p>
+    <pre>
+&lt;domain type="xen" xmlns:xen="http://libvirt.org/schemas/domain/xen/1.0"&gt;
+  ...
+  &lt;xen:commandline&gt;
+    &lt;xen:arg value='-drive'/&gt;
+    &lt;xen:arg value='file=/path/to/image,format=raw,if=none,id=drive-fdc0-0-0'/&gt;
+    &lt;xen:arg value='-global'/&gt;
+    &lt;xen:arg value='isa-fdc.driveA=drive-fdc0-0-0'/&gt;
+  &lt;/xen:commandline&gt;
+&lt;/domain&gt;
+    </pre>
 
     <h2><a id="xmlconfig">Example domain XML config</a></h2>
 

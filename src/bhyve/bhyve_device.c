@@ -31,50 +31,41 @@
 VIR_LOG_INIT("bhyve.bhyve_device");
 
 static int
-bhyveCollectPCIAddress(virDomainDefPtr def ATTRIBUTE_UNUSED,
-                       virDomainDeviceDefPtr device ATTRIBUTE_UNUSED,
-                       virDomainDeviceInfoPtr info,
+bhyveCollectPCIAddress(virDomainDef *def G_GNUC_UNUSED,
+                       virDomainDeviceDef *device G_GNUC_UNUSED,
+                       virDomainDeviceInfo *info,
                        void *opaque)
 {
-    int ret = -1;
     if (info->type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_DRIVE)
         return 0;
 
-    virDomainPCIAddressSetPtr addrs = opaque;
-    virPCIDeviceAddressPtr addr = &info->addr.pci;
+    virDomainPCIAddressSet *addrs = opaque;
+    virPCIDeviceAddress *addr = &info->addr.pci;
 
-    if (addr->domain == 0 && addr->bus == 0) {
-        if (addr->slot == 0) {
+    if (addr->domain == 0 && addr->bus == 0 && addr->slot == 0) {
             return 0;
-        } else if (addr->slot == 1) {
-            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                           _("PCI bus 0 slot 1 is reserved for the implicit "
-                             "LPC PCI-ISA bridge"));
-            return -1;
-        }
     }
 
     if (virDomainPCIAddressReserveAddr(addrs, addr,
                                        VIR_PCI_CONNECT_TYPE_PCI_DEVICE, 0) < 0) {
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
-virDomainPCIAddressSetPtr
-bhyveDomainPCIAddressSetCreate(virDomainDefPtr def, unsigned int nbuses)
+virDomainPCIAddressSet *
+bhyveDomainPCIAddressSetCreate(virDomainDef *def, unsigned int nbuses)
 {
-    virDomainPCIAddressSetPtr addrs;
+    virDomainPCIAddressSet *addrs;
 
     if ((addrs = virDomainPCIAddressSetAlloc(nbuses,
                                              VIR_PCI_ADDRESS_EXTENSION_NONE)) == NULL)
         return NULL;
 
     if (virDomainPCIAddressBusSetModel(&addrs->buses[0],
-                                       VIR_DOMAIN_CONTROLLER_MODEL_PCI_ROOT) < 0)
+                                       VIR_DOMAIN_CONTROLLER_MODEL_PCI_ROOT,
+                                       true) < 0)
         goto error;
 
     if (virDomainDeviceInfoIterate(def, bhyveCollectPCIAddress, addrs) < 0)
@@ -88,26 +79,44 @@ bhyveDomainPCIAddressSetCreate(virDomainDefPtr def, unsigned int nbuses)
 }
 
 static int
-bhyveAssignDevicePCISlots(virDomainDefPtr def,
-                          virDomainPCIAddressSetPtr addrs)
+bhyveAssignDevicePCISlots(virDomainDef *def,
+                          virDomainPCIAddressSet *addrs)
 {
     size_t i;
     virPCIDeviceAddress lpc_addr;
 
-    /* explicitly reserve slot 1 for LPC-ISA bridge */
     memset(&lpc_addr, 0, sizeof(lpc_addr));
     lpc_addr.slot = 0x1;
 
-    if (virDomainPCIAddressReserveAddr(addrs, &lpc_addr,
-                                       VIR_PCI_CONNECT_TYPE_PCI_DEVICE, 0) < 0) {
-        goto error;
+    /* If the user didn't explicitly specify slot 1 for some of the devices,
+       reserve it for LPC, even if there's no LPC device configured.
+       If the slot 1 is used by some other device, LPC will have an address
+       auto-assigned.
+
+       The idea behind that is to try to use slot 1 for the LPC device unless
+       user specifically configured otherwise.*/
+    if (!virDomainPCIAddressSlotInUse(addrs, &lpc_addr)) {
+        if (virDomainPCIAddressReserveAddr(addrs, &lpc_addr,
+                                           VIR_PCI_CONNECT_TYPE_PCI_DEVICE, 0) < 0) {
+            return -1;
+        }
+
+        for (i = 0; i < def->ncontrollers; i++) {
+             if ((def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_ISA) &&
+                  virDeviceInfoPCIAddressIsWanted(&def->controllers[i]->info)) {
+                 def->controllers[i]->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_PCI;
+                 def->controllers[i]->info.addr.pci = lpc_addr;
+                 break;
+             }
+        }
     }
 
     for (i = 0; i < def->ncontrollers; i++) {
         if ((def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_PCI) ||
             (def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_SATA) ||
             ((def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_USB) &&
-             (def->controllers[i]->model == VIR_DOMAIN_CONTROLLER_MODEL_USB_NEC_XHCI))) {
+             (def->controllers[i]->model == VIR_DOMAIN_CONTROLLER_MODEL_USB_NEC_XHCI)) ||
+            def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_ISA) {
             if (def->controllers[i]->model == VIR_DOMAIN_CONTROLLER_MODEL_PCI_ROOT ||
                 !virDeviceInfoPCIAddressIsWanted(&def->controllers[i]->info))
                 continue;
@@ -116,7 +125,7 @@ bhyveAssignDevicePCISlots(virDomainDefPtr def,
                                                    &def->controllers[i]->info,
                                                    VIR_PCI_CONNECT_TYPE_PCI_DEVICE,
                                                    -1) < 0)
-                goto error;
+                return -1;
         }
     }
 
@@ -127,7 +136,7 @@ bhyveAssignDevicePCISlots(virDomainDefPtr def,
                                                &def->nets[i]->info,
                                                VIR_PCI_CONNECT_TYPE_PCI_DEVICE,
                                                -1) < 0)
-            goto error;
+            return -1;
     }
 
     for (i = 0; i < def->ndisks; i++) {
@@ -143,7 +152,7 @@ bhyveAssignDevicePCISlots(virDomainDefPtr def,
         if (virDomainPCIAddressReserveNextAddr(addrs, &def->disks[i]->info,
                                                VIR_PCI_CONNECT_TYPE_PCI_DEVICE,
                                                -1) < 0)
-            goto error;
+            return -1;
     }
 
     for (i = 0; i < def->nvideos; i++) {
@@ -153,29 +162,43 @@ bhyveAssignDevicePCISlots(virDomainDefPtr def,
                                                &def->videos[i]->info,
                                                VIR_PCI_CONNECT_TYPE_PCI_DEVICE,
                                                -1) < 0)
-            goto error;
+            return -1;
     }
 
+    for (i = 0; i < def->nsounds; i++) {
+        if (!virDeviceInfoPCIAddressIsWanted(&def->sounds[i]->info))
+            continue;
+        if (virDomainPCIAddressReserveNextAddr(addrs,
+                                               &def->sounds[i]->info,
+                                               VIR_PCI_CONNECT_TYPE_PCI_DEVICE,
+                                               -1) < 0)
+            return -1;
+    }
+
+    for (i = 0; i < def->nfss; i++) {
+        if (!virDeviceInfoPCIAddressIsWanted(&def->fss[i]->info))
+            continue;
+        if (virDomainPCIAddressReserveNextAddr(addrs,
+                                               &def->fss[i]->info,
+                                               VIR_PCI_CONNECT_TYPE_PCI_DEVICE,
+                                               -1) < 0)
+            return -1;
+    }
 
     return 0;
-
- error:
-    return -1;
 }
 
-int bhyveDomainAssignPCIAddresses(virDomainDefPtr def,
-                                  virDomainObjPtr obj)
+int bhyveDomainAssignPCIAddresses(virDomainDef *def,
+                                  virDomainObj *obj)
 {
-    virDomainPCIAddressSetPtr addrs = NULL;
-    bhyveDomainObjPrivatePtr priv = NULL;
-
-    int ret = -1;
+    virDomainPCIAddressSet *addrs = NULL;
+    bhyveDomainObjPrivate *priv = NULL;
 
     if (!(addrs = bhyveDomainPCIAddressSetCreate(def, 1)))
-        goto cleanup;
+        return -1;
 
     if (bhyveAssignDevicePCISlots(def, addrs) < 0)
-        goto cleanup;
+        return -1;
 
     if (obj && obj->privateData) {
         priv = obj->privateData;
@@ -188,13 +211,10 @@ int bhyveDomainAssignPCIAddresses(virDomainDefPtr def,
         }
     }
 
-    ret = 0;
-
- cleanup:
-    return ret;
+    return 0;
 }
 
-int bhyveDomainAssignAddresses(virDomainDefPtr def, virDomainObjPtr obj)
+int bhyveDomainAssignAddresses(virDomainDef *def, virDomainObj *obj)
 {
     return bhyveDomainAssignPCIAddresses(def, obj);
 }

@@ -19,7 +19,6 @@
 #include <config.h>
 
 #include <fcntl.h>
-#include <sys/socket.h>
 
 #include "testutils.h"
 #include "virnettlshelpers.h"
@@ -29,9 +28,9 @@
 #include "virlog.h"
 #include "virfile.h"
 #include "vircommand.h"
-#include "virsocketaddr.h"
+#include "virsocket.h"
 
-#if !defined WIN32 && HAVE_LIBTASN1_H && LIBGNUTLS_VERSION_NUMBER >= 0x020600
+#if !defined WIN32 && WITH_LIBTASN1_H && LIBGNUTLS_VERSION_NUMBER >= 0x020600
 
 # define VIR_FROM_THIS VIR_FROM_RPC
 
@@ -78,10 +77,10 @@ static ssize_t testRead(char *buf, size_t len, void *opaque)
 static int testTLSSessionInit(const void *opaque)
 {
     struct testTLSSessionData *data = (struct testTLSSessionData *)opaque;
-    virNetTLSContextPtr clientCtxt = NULL;
-    virNetTLSContextPtr serverCtxt = NULL;
-    virNetTLSSessionPtr clientSess = NULL;
-    virNetTLSSessionPtr serverSess = NULL;
+    virNetTLSContext *clientCtxt = NULL;
+    virNetTLSContext *serverCtxt = NULL;
+    virNetTLSSession *clientSess = NULL;
+    virNetTLSSession *serverSess = NULL;
     int ret = -1;
     int channel[2];
     bool clientShake = false;
@@ -239,7 +238,7 @@ mymain(void)
 {
     int ret = 0;
 
-    setenv("GNUTLS_FORCE_FIPS_MODE", "2", 1);
+    g_setenv("GNUTLS_FORCE_FIPS_MODE", "2", TRUE);
 
     testTLSInit(KEYFILE);
 
@@ -278,6 +277,7 @@ mymain(void)
             ret = -1; \
     } while (0)
 
+    VIR_WARNINGS_NO_DECLARATION_AFTER_STATEMENT
 # define TLS_CERT_REQ(varname, cavarname, \
                       co, cn, an1, an2, ia1, ia2, bce, bcc, bci, \
                       kue, kuc, kuv, kpe, kpc, kpo1, kpo2, so, eo) \
@@ -456,10 +456,12 @@ mymain(void)
 
     testTLSWriteCertChain("cacertchain-sess.pem",
                           certchain,
-                          ARRAY_CARDINALITY(certchain));
+                          G_N_ELEMENTS(certchain));
 
     DO_SESS_TEST("cacertchain-sess.pem", servercertlevel3areq.filename, clientcertlevel2breq.filename,
                  false, false, "libvirt.org", NULL);
+
+    VIR_WARNINGS_RESET
 
     testTLSDiscardCert(&clientcertreq);
     testTLSDiscardCert(&clientcertaltreq);
@@ -484,7 +486,7 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/virrandommock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("virrandom"))
 
 #else
 

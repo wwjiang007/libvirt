@@ -18,36 +18,34 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VSH_H
-# define LIBVIRT_VSH_H
+#pragma once
 
-# include <stdarg.h>
-# include <unistd.h>
-# include <sys/stat.h>
+#include <stdarg.h>
+#ifndef WIN32
 # include <termios.h>
+#endif
 
-# include "internal.h"
-# include "virerror.h"
-# include "virthread.h"
+#include "internal.h"
+#include "virerror.h"
+#include "virthread.h"
 
-# define VIR_FROM_THIS VIR_FROM_NONE
+#define VIR_FROM_THIS VIR_FROM_NONE
 
-# define GETTIMEOFDAY(T) gettimeofday(T, NULL)
-# define VSH_MAX_XML_FILE (10*1024*1024)
-# define VSH_MATCH(FLAG) (flags & (FLAG))
+#define VSH_MAX_XML_FILE (10*1024*1024)
+#define VSH_MATCH(FLAG) (flags & (FLAG))
 
 /**
  * The log configuration
  */
-# define MSG_BUFFER    4096
-# define DIR_MODE      (S_IWUSR | S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH)  /* 0755 */
-# define FILE_MODE     (S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH)                                /* 0644 */
-# define LOCK_MODE     (S_IWUSR | S_IRUSR)                                                    /* 0600 */
-# define LVL_DEBUG     "DEBUG"
-# define LVL_INFO      "INFO"
-# define LVL_NOTICE    "NOTICE"
-# define LVL_WARNING   "WARNING"
-# define LVL_ERROR     "ERROR"
+#define MSG_BUFFER    4096
+#define DIR_MODE      (S_IWUSR | S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH)  /* 0755 */
+#define FILE_MODE     (S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH)                                /* 0644 */
+#define LOCK_MODE     (S_IWUSR | S_IRUSR)                                                    /* 0600 */
+#define LVL_DEBUG     "DEBUG"
+#define LVL_INFO      "INFO"
+#define LVL_NOTICE    "NOTICE"
+#define LVL_WARNING   "WARNING"
+#define LVL_ERROR     "ERROR"
 
 /**
  * vshErrorLevel:
@@ -62,7 +60,7 @@ typedef enum {
     VSH_ERR_ERROR
 } vshErrorLevel;
 
-# define VSH_DEBUG_DEFAULT VSH_ERR_ERROR
+#define VSH_DEBUG_DEFAULT VSH_ERR_ERROR
 
 /*
  * virsh command line grammar:
@@ -154,6 +152,8 @@ struct _vshCmdOptDef {
 struct _vshCmdOpt {
     const vshCmdOptDef *def;    /* non-NULL pointer to option definition */
     char *data;                 /* allocated data, or NULL for bool option */
+    bool completeThis;          /* true if this is the option user's wishing to
+                                   autocomplete */
     vshCmdOpt *next;
 };
 
@@ -218,9 +218,9 @@ struct _vshControl {
     int keepalive_interval;     /* Client keepalive interval */
     int keepalive_count;        /* Client keepalive count */
 
-# ifndef WIN32
+#ifndef WIN32
     struct termios termattr;    /* settings of the tty terminal */
-# endif
+#endif
     bool istty;                 /* is the terminal a tty */
 
     const vshClientHooks *hooks;/* mandatory client specific hooks */
@@ -241,61 +241,61 @@ struct _vshCmdGrp {
 };
 
 void vshError(vshControl *ctl, const char *format, ...)
-    ATTRIBUTE_FMT_PRINTF(2, 3);
+    G_GNUC_PRINTF(2, 3);
 void vshOpenLogFile(vshControl *ctl);
 void vshOutputLogFile(vshControl *ctl, int log_level, const char *format,
                       va_list ap)
-    ATTRIBUTE_FMT_PRINTF(3, 0);
+    G_GNUC_PRINTF(3, 0);
 void vshCloseLogFile(vshControl *ctl);
 
 const char *vshCmddefGetInfo(const vshCmdDef *cmd, const char *info);
 const vshCmdDef *vshCmddefSearch(const char *cmdname);
-bool vshCmddefHelp(vshControl *ctl, const vshCmdDef *def);
 const vshCmdGrp *vshCmdGrpSearch(const char *grpname);
 bool vshCmdGrpHelp(vshControl *ctl, const vshCmdGrp *grp);
 
 int vshCommandOptInt(vshControl *ctl, const vshCmd *cmd,
                      const char *name, int *value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptUInt(vshControl *ctl, const vshCmd *cmd,
                       const char *name, unsigned int *value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptUIntWrap(vshControl *ctl, const vshCmd *cmd,
                           const char *name, unsigned int *value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptUL(vshControl *ctl, const vshCmd *cmd,
                     const char *name, unsigned long *value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptULWrap(vshControl *ctl, const vshCmd *cmd,
                         const char *name, unsigned long *value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptStringQuiet(vshControl *ctl, const vshCmd *cmd,
                              const char *name, const char **value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptStringReq(vshControl *ctl, const vshCmd *cmd,
                            const char *name, const char **value)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptLongLong(vshControl *ctl, const vshCmd *cmd,
                           const char *name, long long *value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptULongLong(vshControl *ctl, const vshCmd *cmd,
                            const char *name, unsigned long long *value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptULongLongWrap(vshControl *ctl, const vshCmd *cmd,
                                const char *name, unsigned long long *value)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshCommandOptScaledInt(vshControl *ctl, const vshCmd *cmd,
                            const char *name, unsigned long long *value,
                            int scale, unsigned long long max)
-    ATTRIBUTE_NONNULL(4) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(4) G_GNUC_WARN_UNUSED_RESULT;
 int vshBlockJobOptionBandwidth(vshControl *ctl,
                                const vshCmd *cmd,
                                bool bytes,
                                unsigned long *bandwidth);
 bool vshCommandOptBool(const vshCmd *cmd, const char *name);
 bool vshCommandRun(vshControl *ctl, const vshCmd *cmd);
-bool vshCommandStringParse(vshControl *ctl, char *cmdstr, vshCmd **partial);
+bool vshCommandStringParse(vshControl *ctl, char *cmdstr,
+                           vshCmd **partial, size_t point);
 
 const vshCmdOpt *vshCommandOptArgv(vshControl *ctl, const vshCmd *cmd,
                                    const vshCmdOpt *opt);
@@ -303,17 +303,17 @@ bool vshCommandArgvParse(vshControl *ctl, int nargs, char **argv);
 int vshCommandOptTimeoutToMs(vshControl *ctl, const vshCmd *cmd, int *timeout);
 
 void vshPrint(vshControl *ctl, const char *format, ...)
-    ATTRIBUTE_FMT_PRINTF(2, 3);
+    G_GNUC_PRINTF(2, 3);
 void vshPrintExtra(vshControl *ctl, const char *format, ...)
-    ATTRIBUTE_FMT_PRINTF(2, 3);
+    G_GNUC_PRINTF(2, 3);
 bool vshInit(vshControl *ctl, const vshCmdGrp *groups, const vshCmdDef *set);
 bool vshInitReload(vshControl *ctl);
 void vshDeinit(vshControl *ctl);
 void vshDebug(vshControl *ctl, int level, const char *format, ...)
-    ATTRIBUTE_FMT_PRINTF(3, 4);
+    G_GNUC_PRINTF(3, 4);
 
 /* User visible sort, so we want locale-specific case comparison.  */
-# define vshStrcasecmp(S1, S2) strcasecmp(S1, S2)
+#define vshStrcasecmp(S1, S2) strcasecmp(S1, S2)
 int vshNameSorter(const void *a, const void *b);
 
 virTypedParameterPtr vshFindTypedParamByName(const char *name,
@@ -386,7 +386,7 @@ bool cmdQuit(vshControl *ctl, const vshCmd *cmd);
 bool cmdSelfTest(vshControl *ctl, const vshCmd *cmd);
 bool cmdComplete(vshControl *ctl, const vshCmd *cmd);
 
-# define VSH_CMD_CD \
+#define VSH_CMD_CD \
     { \
         .name = "cd", \
         .handler = cmdCd, \
@@ -395,7 +395,7 @@ bool cmdComplete(vshControl *ctl, const vshCmd *cmd);
         .flags = VSH_CMD_FLAG_NOCONNECT \
     }
 
-# define VSH_CMD_ECHO \
+#define VSH_CMD_ECHO \
     { \
         .name = "echo", \
         .handler = cmdEcho, \
@@ -404,7 +404,7 @@ bool cmdComplete(vshControl *ctl, const vshCmd *cmd);
         .flags = VSH_CMD_FLAG_NOCONNECT \
     }
 
-# define VSH_CMD_EXIT \
+#define VSH_CMD_EXIT \
     { \
         .name = "exit", \
         .handler = cmdQuit, \
@@ -413,7 +413,7 @@ bool cmdComplete(vshControl *ctl, const vshCmd *cmd);
         .flags = VSH_CMD_FLAG_NOCONNECT \
     }
 
-# define VSH_CMD_HELP \
+#define VSH_CMD_HELP \
     { \
         .name = "help", \
         .handler = cmdHelp, \
@@ -422,7 +422,7 @@ bool cmdComplete(vshControl *ctl, const vshCmd *cmd);
         .flags = VSH_CMD_FLAG_NOCONNECT \
     }
 
-# define VSH_CMD_PWD \
+#define VSH_CMD_PWD \
     { \
         .name = "pwd", \
         .handler = cmdPwd, \
@@ -431,7 +431,7 @@ bool cmdComplete(vshControl *ctl, const vshCmd *cmd);
         .flags = VSH_CMD_FLAG_NOCONNECT \
     }
 
-# define VSH_CMD_QUIT \
+#define VSH_CMD_QUIT \
     { \
         .name = "quit", \
         .handler = cmdQuit, \
@@ -440,7 +440,7 @@ bool cmdComplete(vshControl *ctl, const vshCmd *cmd);
         .flags = VSH_CMD_FLAG_NOCONNECT \
     }
 
-# define VSH_CMD_SELF_TEST \
+#define VSH_CMD_SELF_TEST \
     { \
         .name = "self-test", \
         .handler = cmdSelfTest, \
@@ -450,7 +450,7 @@ bool cmdComplete(vshControl *ctl, const vshCmd *cmd);
         .alias = "self-test" \
     }
 
-# define VSH_CMD_COMPLETE \
+#define VSH_CMD_COMPLETE \
     { \
         .name = "complete", \
         .handler = cmdComplete, \
@@ -465,18 +465,7 @@ bool cmdComplete(vshControl *ctl, const vshCmd *cmd);
 /* readline */
 char * vshReadline(vshControl *ctl, const char *prompt);
 
-/* allocation wrappers */
-void *_vshMalloc(vshControl *ctl, size_t sz, const char *filename, int line);
-# define vshMalloc(_ctl, _sz)    _vshMalloc(_ctl, _sz, __FILE__, __LINE__)
-
-void *_vshCalloc(vshControl *ctl, size_t nmemb, size_t sz,
-                 const char *filename, int line);
-# define vshCalloc(_ctl, _nmemb, _sz) \
-    _vshCalloc(_ctl, _nmemb, _sz, __FILE__, __LINE__)
-
-char *_vshStrdup(vshControl *ctl, const char *s, const char *filename,
-                 int line);
-# define vshStrdup(_ctl, _s)    _vshStrdup(_ctl, _s, __FILE__, __LINE__)
+void vshReadlineHistoryAdd(const char *cmd);
 
 /* Macros to help dealing with mutually exclusive options. */
 
@@ -493,7 +482,7 @@ char *_vshStrdup(vshControl *ctl, const char *s, const char *filename,
  * This helper does an early return and therefore it has to be called
  * before anything that would require cleanup.
  */
-# define VSH_EXCLUSIVE_OPTIONS_EXPR(NAME1, EXPR1, NAME2, EXPR2) \
+#define VSH_EXCLUSIVE_OPTIONS_EXPR(NAME1, EXPR1, NAME2, EXPR2) \
     if ((EXPR1) && (EXPR2)) { \
         vshError(ctl, _("Options --%s and --%s are mutually exclusive"), \
                  NAME1, NAME2); \
@@ -511,7 +500,7 @@ char *_vshStrdup(vshControl *ctl, const char *s, const char *filename,
  * This helper does an early return and therefore it has to be called
  * before anything that would require cleanup.
  */
-# define VSH_EXCLUSIVE_OPTIONS(NAME1, NAME2) \
+#define VSH_EXCLUSIVE_OPTIONS(NAME1, NAME2) \
     VSH_EXCLUSIVE_OPTIONS_EXPR(NAME1, vshCommandOptBool(cmd, NAME1), \
                                NAME2, vshCommandOptBool(cmd, NAME2))
 
@@ -526,7 +515,7 @@ char *_vshStrdup(vshControl *ctl, const char *s, const char *filename,
  * This helper does an early return and therefore it has to be called
  * before anything that would require cleanup.
  */
-# define VSH_EXCLUSIVE_OPTIONS_VAR(VARNAME1, VARNAME2) \
+#define VSH_EXCLUSIVE_OPTIONS_VAR(VARNAME1, VARNAME2) \
     VSH_EXCLUSIVE_OPTIONS_EXPR(#VARNAME1, VARNAME1, #VARNAME2, VARNAME2)
 
 /* Macros to help dealing with required options. */
@@ -544,7 +533,7 @@ char *_vshStrdup(vshControl *ctl, const char *s, const char *filename,
  * This helper does an early return and therefore it has to be called
  * before anything that would require cleanup.
  */
-# define VSH_REQUIRE_OPTION_EXPR(NAME1, EXPR1, NAME2, EXPR2) \
+#define VSH_REQUIRE_OPTION_EXPR(NAME1, EXPR1, NAME2, EXPR2) \
     do { \
         if ((EXPR1) && !(EXPR2)) { \
             vshError(ctl, _("Option --%s is required by option --%s"), \
@@ -564,7 +553,7 @@ char *_vshStrdup(vshControl *ctl, const char *s, const char *filename,
  * This helper does an early return and therefore it has to be called
  * before anything that would require cleanup.
  */
-# define VSH_REQUIRE_OPTION(NAME1, NAME2) \
+#define VSH_REQUIRE_OPTION(NAME1, NAME2) \
     VSH_REQUIRE_OPTION_EXPR(NAME1, vshCommandOptBool(cmd, NAME1), \
                             NAME2, vshCommandOptBool(cmd, NAME2))
 
@@ -580,7 +569,5 @@ char *_vshStrdup(vshControl *ctl, const char *s, const char *filename,
  * This helper does an early return and therefore it has to be called
  * before anything that would require cleanup.
  */
-# define VSH_REQUIRE_OPTION_VAR(VARNAME1, VARNAME2) \
+#define VSH_REQUIRE_OPTION_VAR(VARNAME1, VARNAME2) \
     VSH_REQUIRE_OPTION_EXPR(#VARNAME1, VARNAME1, #VARNAME2, VARNAME2)
-
-#endif /* LIBVIRT_VSH_H */

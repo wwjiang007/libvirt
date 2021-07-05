@@ -28,7 +28,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#if HAVE_NET_ETHERNET_H
+#if WITH_NET_ETHERNET_H
 # include <net/ethernet.h>
 #endif
 #include <unistd.h>
@@ -42,7 +42,6 @@
 #include "nwfilter_params.h"
 #include "nwfilter_conf.h"
 #include "domain_conf.h"
-#include "c-ctype.h"
 #include "virfile.h"
 #include "virstring.h"
 
@@ -300,7 +299,7 @@ intMapGetByString(const struct int_map *intmap,
 
 
 void
-virNWFilterRuleDefFree(virNWFilterRuleDefPtr def)
+virNWFilterRuleDefFree(virNWFilterRuleDef *def)
 {
     size_t i;
     if (!def)
@@ -310,64 +309,64 @@ virNWFilterRuleDefFree(virNWFilterRuleDefPtr def)
         virNWFilterVarAccessFree(def->varAccess[i]);
 
     for (i = 0; i < def->nstrings; i++)
-        VIR_FREE(def->strings[i]);
+        g_free(def->strings[i]);
 
-    VIR_FREE(def->varAccess);
-    VIR_FREE(def->strings);
+    g_free(def->varAccess);
+    g_free(def->strings);
 
-    VIR_FREE(def);
+    g_free(def);
 }
 
 
 static void
-virNWFilterIncludeDefFree(virNWFilterIncludeDefPtr inc)
+virNWFilterIncludeDefFree(virNWFilterIncludeDef *inc)
 {
     if (!inc)
         return;
     virHashFree(inc->params);
-    VIR_FREE(inc->filterref);
-    VIR_FREE(inc);
+    g_free(inc->filterref);
+    g_free(inc);
 }
 
 
 static void
-virNWFilterEntryFree(virNWFilterEntryPtr entry)
+virNWFilterEntryFree(virNWFilterEntry *entry)
 {
     if (!entry)
         return;
 
     virNWFilterRuleDefFree(entry->rule);
     virNWFilterIncludeDefFree(entry->include);
-    VIR_FREE(entry);
+    g_free(entry);
 }
 
 
 void
-virNWFilterDefFree(virNWFilterDefPtr def)
+virNWFilterDefFree(virNWFilterDef *def)
 {
     size_t i;
     if (!def)
         return;
 
-    VIR_FREE(def->name);
+    g_free(def->name);
 
     for (i = 0; i < def->nentries; i++)
         virNWFilterEntryFree(def->filterEntries[i]);
 
-    VIR_FREE(def->filterEntries);
-    VIR_FREE(def->chainsuffix);
+    g_free(def->filterEntries);
+    g_free(def->chainsuffix);
 
-    VIR_FREE(def);
+    g_free(def);
 }
 
 
 static int
-virNWFilterRuleDefAddVar(virNWFilterRuleDefPtr nwf,
+virNWFilterRuleDefAddVar(virNWFilterRuleDef *nwf,
                          nwItemDesc *item,
                          const char *var)
 {
     size_t i = 0;
-    virNWFilterVarAccessPtr varAccess;
+    virNWFilterVarAccess *varAccess;
 
     varAccess = virNWFilterVarAccessParse(var);
     if (varAccess == NULL)
@@ -382,11 +381,7 @@ virNWFilterRuleDefAddVar(virNWFilterRuleDefPtr nwf,
             }
     }
 
-    if (VIR_EXPAND_N(nwf->varAccess, nwf->nVarAccess, 1) < 0) {
-        virNWFilterVarAccessFree(varAccess);
-        return -1;
-    }
-
+    VIR_EXPAND_N(nwf->varAccess, nwf->nVarAccess, 1);
     nwf->varAccess[nwf->nVarAccess - 1] = varAccess;
     item->varAccess = varAccess;
 
@@ -395,14 +390,14 @@ virNWFilterRuleDefAddVar(virNWFilterRuleDefPtr nwf,
 
 
 static char *
-virNWFilterRuleDefAddString(virNWFilterRuleDefPtr nwf,
+virNWFilterRuleDefAddString(virNWFilterRuleDef *nwf,
                             const char *string,
                             size_t maxstrlen)
 {
     char *tmp;
 
-    if (VIR_STRNDUP(tmp, string, maxstrlen) < 0 ||
-        VIR_APPEND_ELEMENT_COPY(nwf->strings, nwf->nstrings, tmp) < 0)
+    tmp = g_strndup(string, maxstrlen);
+    if (VIR_APPEND_ELEMENT_COPY(nwf->strings, nwf->nstrings, tmp) < 0)
         VIR_FREE(tmp);
 
     return tmp;
@@ -417,10 +412,10 @@ union data {
 };
 
 typedef bool (*valueValidator)(enum attrDatatype datatype, union data *valptr,
-                               virNWFilterRuleDefPtr nwf,
+                               virNWFilterRuleDef *nwf,
                                nwItemDesc *item);
-typedef bool (*valueFormatter)(virBufferPtr buf,
-                               virNWFilterRuleDefPtr nwf,
+typedef bool (*valueFormatter)(virBuffer *buf,
+                               virNWFilterRuleDef *nwf,
                                nwItemDesc *item);
 
 typedef struct _virXMLAttr2Struct virXMLAttr2Struct;
@@ -448,8 +443,8 @@ static const struct int_map macProtoMap[] = {
 static bool
 checkMacProtocolID(enum attrDatatype datatype,
                    union data *value,
-                   virNWFilterRuleDefPtr nwf ATTRIBUTE_UNUSED,
-                   nwItemDesc *item ATTRIBUTE_UNUSED)
+                   virNWFilterRuleDef *nwf G_GNUC_UNUSED,
+                   nwItemDesc *item G_GNUC_UNUSED)
 {
     int32_t res = -1;
 
@@ -475,9 +470,9 @@ checkMacProtocolID(enum attrDatatype datatype,
 
 
 static bool
-macProtocolIDFormatter(virBufferPtr buf,
-                       virNWFilterRuleDefPtr nwf,
-                       nwItemDesc *item ATTRIBUTE_UNUSED)
+macProtocolIDFormatter(virBuffer *buf,
+                       virNWFilterRuleDef *nwf,
+                       nwItemDesc *item G_GNUC_UNUSED)
 {
     const char *str = NULL;
     bool asHex = true;
@@ -499,8 +494,8 @@ macProtocolIDFormatter(virBufferPtr buf,
 static bool
 checkVlanVlanID(enum attrDatatype datatype,
                 union data *value,
-                virNWFilterRuleDefPtr nwf,
-                nwItemDesc *item ATTRIBUTE_UNUSED)
+                virNWFilterRuleDef *nwf,
+                nwItemDesc *item G_GNUC_UNUSED)
 {
     int32_t res;
 
@@ -521,8 +516,8 @@ checkVlanVlanID(enum attrDatatype datatype,
 static bool
 checkVlanProtocolID(enum attrDatatype datatype,
                     union data *value,
-                    virNWFilterRuleDefPtr nwf,
-                    nwItemDesc *item ATTRIBUTE_UNUSED)
+                    virNWFilterRuleDef *nwf,
+                    nwItemDesc *item G_GNUC_UNUSED)
 {
     int32_t res = -1;
 
@@ -548,9 +543,9 @@ checkVlanProtocolID(enum attrDatatype datatype,
 
 
 static bool
-vlanProtocolIDFormatter(virBufferPtr buf,
-                        virNWFilterRuleDefPtr nwf,
-                        nwItemDesc *item ATTRIBUTE_UNUSED)
+vlanProtocolIDFormatter(virBuffer *buf,
+                        virNWFilterRuleDef *nwf,
+                        nwItemDesc *item G_GNUC_UNUSED)
 {
     const char *str = NULL;
     bool asHex = true;
@@ -600,10 +595,10 @@ checkValidMask(unsigned char *data,
 
 
 static bool
-checkMACMask(enum attrDatatype datatype ATTRIBUTE_UNUSED,
+checkMACMask(enum attrDatatype datatype G_GNUC_UNUSED,
              union data *macMask,
-             virNWFilterRuleDefPtr nwf ATTRIBUTE_UNUSED,
-             nwItemDesc *item ATTRIBUTE_UNUSED)
+             virNWFilterRuleDef *nwf G_GNUC_UNUSED,
+             nwItemDesc *item G_GNUC_UNUSED)
 {
     return checkValidMask(macMask->uc, 6);
 }
@@ -629,8 +624,8 @@ static const struct int_map arpOpcodeMap[] = {
 static bool
 arpOpcodeValidator(enum attrDatatype datatype,
                    union data *value,
-                   virNWFilterRuleDefPtr nwf,
-                   nwItemDesc *item ATTRIBUTE_UNUSED)
+                   virNWFilterRuleDef *nwf,
+                   nwItemDesc *item G_GNUC_UNUSED)
 {
     int32_t res = -1;
 
@@ -653,9 +648,9 @@ arpOpcodeValidator(enum attrDatatype datatype,
 
 
 static bool
-arpOpcodeFormatter(virBufferPtr buf,
-                   virNWFilterRuleDefPtr nwf,
-                   nwItemDesc *item ATTRIBUTE_UNUSED)
+arpOpcodeFormatter(virBuffer *buf,
+                   virNWFilterRuleDef *nwf,
+                   nwItemDesc *item G_GNUC_UNUSED)
 {
     const char *str = NULL;
 
@@ -691,8 +686,8 @@ static const struct int_map ipProtoMap[] = {
 static bool
 checkIPProtocolID(enum attrDatatype datatype,
                   union data *value,
-                  virNWFilterRuleDefPtr nwf,
-                  nwItemDesc *item ATTRIBUTE_UNUSED)
+                  virNWFilterRuleDef *nwf,
+                  nwItemDesc *item G_GNUC_UNUSED)
 {
     int32_t res = -1;
 
@@ -715,9 +710,9 @@ checkIPProtocolID(enum attrDatatype datatype,
 
 
 static bool
-formatIPProtocolID(virBufferPtr buf,
-                   virNWFilterRuleDefPtr nwf,
-                   nwItemDesc *item ATTRIBUTE_UNUSED)
+formatIPProtocolID(virBuffer *buf,
+                   virNWFilterRuleDef *nwf,
+                   nwItemDesc *item G_GNUC_UNUSED)
 {
     const char *str = NULL;
     bool asHex = true;
@@ -739,8 +734,8 @@ formatIPProtocolID(virBufferPtr buf,
 static bool
 dscpValidator(enum attrDatatype datatype,
               union data *val,
-              virNWFilterRuleDefPtr nwf,
-              nwItemDesc *item ATTRIBUTE_UNUSED)
+              virNWFilterRuleDef *nwf,
+              nwItemDesc *item G_GNUC_UNUSED)
 {
     uint8_t dscp = val->ui;
     if (dscp > 63)
@@ -775,7 +770,7 @@ parseStringItems(const struct int_map *int_map,
     i = 0;
     while (input[i]) {
         found = false;
-        while (c_isspace(input[i]) || input[i] == sep)
+        while (g_ascii_isspace(input[i]) || input[i] == sep)
             i++;
         if (!input[i])
             break;
@@ -798,7 +793,7 @@ parseStringItems(const struct int_map *int_map,
 
 
 static int
-printStringItems(virBufferPtr buf,
+printStringItems(virBuffer *buf,
                  const struct int_map *int_map,
                  int32_t flags,
                  const char *sep)
@@ -842,7 +837,7 @@ parseStateMatch(const char *statematch,
 
 
 void
-virNWFilterPrintStateMatchFlags(virBufferPtr buf,
+virNWFilterPrintStateMatchFlags(virBuffer *buf,
                                 const char *prefix,
                                 int32_t flags,
                                 bool disp_none)
@@ -857,9 +852,9 @@ virNWFilterPrintStateMatchFlags(virBufferPtr buf,
 
 
 static bool
-stateValidator(enum attrDatatype datatype ATTRIBUTE_UNUSED,
+stateValidator(enum attrDatatype datatype G_GNUC_UNUSED,
                union data *val,
-               virNWFilterRuleDefPtr nwf,
+               virNWFilterRuleDef *nwf,
                nwItemDesc *item)
 {
     char *input = val->c;
@@ -878,8 +873,8 @@ stateValidator(enum attrDatatype datatype ATTRIBUTE_UNUSED,
 
 
 static bool
-stateFormatter(virBufferPtr buf,
-               virNWFilterRuleDefPtr nwf ATTRIBUTE_UNUSED,
+stateFormatter(virBuffer *buf,
+               virNWFilterRuleDef *nwf G_GNUC_UNUSED,
                nwItemDesc *item)
 {
     virNWFilterPrintStateMatchFlags(buf, "", item->u.u16, true);
@@ -902,9 +897,9 @@ static const struct int_map tcpFlags[] = {
 
 
 static bool
-tcpFlagsValidator(enum attrDatatype datatype ATTRIBUTE_UNUSED,
+tcpFlagsValidator(enum attrDatatype datatype G_GNUC_UNUSED,
                   union data *val,
-                  virNWFilterRuleDefPtr nwf ATTRIBUTE_UNUSED,
+                  virNWFilterRuleDef *nwf G_GNUC_UNUSED,
                   nwItemDesc *item)
 {
     bool rc = false;
@@ -934,7 +929,7 @@ tcpFlagsValidator(enum attrDatatype datatype ATTRIBUTE_UNUSED,
 
 
 static void
-printTCPFlags(virBufferPtr buf,
+printTCPFlags(virBuffer *buf,
               uint8_t flags)
 {
     if (flags == 0)
@@ -949,17 +944,15 @@ printTCPFlags(virBufferPtr buf,
 char *
 virNWFilterPrintTCPFlags(uint8_t flags)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     printTCPFlags(&buf, flags);
-    if (virBufferCheckError(&buf) < 0)
-        return NULL;
     return virBufferContentAndReset(&buf);
 }
 
 
 static bool
-tcpFlagsFormatter(virBufferPtr buf,
-                  virNWFilterRuleDefPtr nwf ATTRIBUTE_UNUSED,
+tcpFlagsFormatter(virBuffer *buf,
+                  virNWFilterRuleDef *nwf G_GNUC_UNUSED,
                   nwItemDesc *item)
 {
     printTCPFlags(buf, item->u.tcpFlags.mask);
@@ -971,9 +964,9 @@ tcpFlagsFormatter(virBufferPtr buf,
 
 
 static bool
-ipsetValidator(enum attrDatatype datatype ATTRIBUTE_UNUSED,
+ipsetValidator(enum attrDatatype datatype G_GNUC_UNUSED,
                union data *val,
-               virNWFilterRuleDefPtr nwf ATTRIBUTE_UNUSED,
+               virNWFilterRuleDef *nwf G_GNUC_UNUSED,
                nwItemDesc *item)
 {
     const char *errmsg = NULL;
@@ -999,8 +992,8 @@ ipsetValidator(enum attrDatatype datatype ATTRIBUTE_UNUSED,
 
 
 static bool
-ipsetFormatter(virBufferPtr buf,
-               virNWFilterRuleDefPtr nwf ATTRIBUTE_UNUSED,
+ipsetFormatter(virBuffer *buf,
+               virNWFilterRuleDef *nwf G_GNUC_UNUSED,
                nwItemDesc *item)
 {
     virBufferAdd(buf, item->u.ipset.setname, -1);
@@ -1010,9 +1003,9 @@ ipsetFormatter(virBufferPtr buf,
 
 
 static bool
-ipsetFlagsValidator(enum attrDatatype datatype ATTRIBUTE_UNUSED,
+ipsetFlagsValidator(enum attrDatatype datatype G_GNUC_UNUSED,
                     union data *val,
-                    virNWFilterRuleDefPtr nwf ATTRIBUTE_UNUSED,
+                    virNWFilterRuleDef *nwf G_GNUC_UNUSED,
                     nwItemDesc *item)
 {
     const char *errmsg = NULL;
@@ -1049,8 +1042,8 @@ ipsetFlagsValidator(enum attrDatatype datatype ATTRIBUTE_UNUSED,
 
 
 static bool
-ipsetFlagsFormatter(virBufferPtr buf,
-                    virNWFilterRuleDefPtr nwf ATTRIBUTE_UNUSED,
+ipsetFlagsFormatter(virBuffer *buf,
+                    virNWFilterRuleDef *nwf G_GNUC_UNUSED,
                     nwItemDesc *item)
 {
     uint8_t ctr;
@@ -1801,7 +1794,7 @@ static const virAttributes virAttr[] = {
 
 static int
 virNWFilterRuleDetailsParse(xmlNodePtr node,
-                            virNWFilterRuleDefPtr nwf,
+                            virNWFilterRuleDef *nwf,
                             const virXMLAttr2Struct *att)
 {
     int rc = 0, g_rc = 0;
@@ -1851,7 +1844,7 @@ virNWFilterRuleDetailsParse(xmlNodePtr node,
 
             att_datatypes = att[idx].datatype;
 
-            while (datatype <= DATATYPE_LAST && found == 0 && rc == 0) {
+            while (datatype <= DATATYPE_LAST && !found && rc == 0) {
                 if ((att_datatypes & datatype)) {
 
                     att_datatypes ^= datatype;
@@ -1863,7 +1856,7 @@ virNWFilterRuleDetailsParse(xmlNodePtr node,
                     switch (datatype) {
                         case DATATYPE_UINT8_HEX:
                             base = 16;
-                            ATTRIBUTE_FALLTHROUGH;
+                            G_GNUC_FALLTHROUGH;
                         case DATATYPE_UINT8:
                             if (virStrToLong_ui(prop, NULL, base, &uint_val) >= 0) {
                                 if (uint_val <= 0xff) {
@@ -1880,7 +1873,7 @@ virNWFilterRuleDetailsParse(xmlNodePtr node,
 
                         case DATATYPE_UINT16_HEX:
                             base = 16;
-                            ATTRIBUTE_FALLTHROUGH;
+                            G_GNUC_FALLTHROUGH;
                         case DATATYPE_UINT16:
                             if (virStrToLong_ui(prop, NULL, base, &uint_val) >= 0) {
                                 if (uint_val <= 0xffff) {
@@ -1897,7 +1890,7 @@ virNWFilterRuleDetailsParse(xmlNodePtr node,
 
                         case DATATYPE_UINT32_HEX:
                             base = 16;
-                            ATTRIBUTE_FALLTHROUGH;
+                            G_GNUC_FALLTHROUGH;
                         case DATATYPE_UINT32:
                             if (virStrToLong_ui(prop, NULL, base, &uint_val) >= 0) {
                                 item->u.u32 = uint_val;
@@ -2067,13 +2060,12 @@ virNWFilterRuleDetailsParse(xmlNodePtr node,
 }
 
 
-static virNWFilterIncludeDefPtr
+static virNWFilterIncludeDef *
 virNWFilterIncludeParse(xmlNodePtr cur)
 {
-    virNWFilterIncludeDefPtr ret;
+    virNWFilterIncludeDef *ret;
 
-    if (VIR_ALLOC(ret) < 0)
-        return NULL;
+    ret = g_new0(virNWFilterIncludeDef, 1);
 
     ret->filterref = virXMLPropString(cur, "filter");
     if (!ret->filterref) {
@@ -2087,18 +2079,16 @@ virNWFilterIncludeParse(xmlNodePtr cur)
     if (!ret->params)
         goto err_exit;
 
- cleanup:
     return ret;
 
  err_exit:
     virNWFilterIncludeDefFree(ret);
-    ret = NULL;
-    goto cleanup;
+    return NULL;
 }
 
 
 static void
-virNWFilterRuleDefFixupIPSet(ipHdrDataDefPtr ipHdr)
+virNWFilterRuleDefFixupIPSet(ipHdrDataDef *ipHdr)
 {
     if (HAS_ENTRY_ITEM(&ipHdr->dataIPSet) &&
         !HAS_ENTRY_ITEM(&ipHdr->dataIPSetFlags)) {
@@ -2119,11 +2109,11 @@ virNWFilterRuleDefFixupIPSet(ipHdrDataDefPtr ipHdr)
  * defined that cannot be instantiated.
  */
 static int
-virNWFilterRuleValidate(virNWFilterRuleDefPtr rule)
+virNWFilterRuleValidate(virNWFilterRuleDef *rule)
 {
     int ret = 0;
-    portDataDefPtr portData = NULL;
-    nwItemDescPtr dataProtocolID = NULL;
+    portDataDef *portData = NULL;
+    nwItemDesc *dataProtocolID = NULL;
     const char *protocol = NULL;
 
     switch (rule->prtclType) {
@@ -2131,7 +2121,7 @@ virNWFilterRuleValidate(virNWFilterRuleDefPtr rule)
         portData = &rule->p.ipHdrFilter.portData;
         protocol = "IP";
         dataProtocolID = &rule->p.ipHdrFilter.ipHdr.dataProtocolID;
-        ATTRIBUTE_FALLTHROUGH;
+        G_GNUC_FALLTHROUGH;
     case VIR_NWFILTER_RULE_PROTOCOL_IPV6:
         if (portData == NULL) {
             portData = &rule->p.ipv6HdrFilter.portData;
@@ -2199,7 +2189,7 @@ virNWFilterRuleValidate(virNWFilterRuleDefPtr rule)
 
 
 static void
-virNWFilterRuleDefFixup(virNWFilterRuleDefPtr rule)
+virNWFilterRuleDefFixup(virNWFilterRuleDef *rule)
 {
 #define COPY_NEG_SIGN(A, B) \
     (A).flags = ((A).flags & ~NWFILTER_ENTRY_ITEM_FLAG_IS_NEG) | \
@@ -2414,7 +2404,7 @@ virNWFilterRuleDefFixup(virNWFilterRuleDefPtr rule)
 }
 
 
-static virNWFilterRuleDefPtr
+static virNWFilterRuleDef *
 virNWFilterRuleParse(xmlNodePtr node)
 {
     char *action;
@@ -2426,10 +2416,9 @@ virNWFilterRuleParse(xmlNodePtr node)
     int priority;
 
     xmlNodePtr cur;
-    virNWFilterRuleDefPtr ret;
+    virNWFilterRuleDef *ret;
 
-    if (VIR_ALLOC(ret) < 0)
-        return NULL;
+    ret = g_new0(virNWFilterRuleDef, 1);
 
     action     = virXMLPropString(node, "action");
     direction  = virXMLPropString(node, "direction");
@@ -2566,7 +2555,7 @@ virNWFilterIsAllowedChain(const char *chainname)
     virNWFilterChainSuffixType i;
     const char *name;
     char *msg;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     bool printed = false;
 
     if (!virNWFilterIsValidChainName(chainname))
@@ -2600,33 +2589,28 @@ virNWFilterIsAllowedChain(const char *chainname)
         printed = true;
     }
 
-    if (virBufferCheckError(&buf) < 0)
-        goto err_exit;
-
     msg = virBufferContentAndReset(&buf);
 
     virReportError(VIR_ERR_INVALID_ARG, "%s", msg);
     VIR_FREE(msg);
 
- err_exit:
     return NULL;
 }
 
 
-static virNWFilterDefPtr
+static virNWFilterDef *
 virNWFilterDefParseXML(xmlXPathContextPtr ctxt)
 {
-    virNWFilterDefPtr ret;
+    virNWFilterDef *ret;
     xmlNodePtr curr = ctxt->node;
     char *uuid = NULL;
     char *chain = NULL;
     char *chain_pri_s = NULL;
-    virNWFilterEntryPtr entry;
+    virNWFilterEntry *entry;
     int chain_priority;
     const char *name_prefix;
 
-    if (VIR_ALLOC(ret) < 0)
-        return NULL;
+    ret = g_new0(virNWFilterDef, 1);
 
     ret->name = virXPathString("string(./@name)", ctxt);
     if (!ret->name) {
@@ -2660,7 +2644,7 @@ virNWFilterDefParseXML(xmlXPathContextPtr ctxt)
         name_prefix = virNWFilterIsAllowedChain(chain);
         if (name_prefix == NULL)
             goto cleanup;
-        ret->chainsuffix = chain;
+        ret->chainsuffix = g_steal_pointer(&chain);
 
         if (chain_pri_s) {
             ret->chainPriority = chain_priority;
@@ -2672,11 +2656,8 @@ virNWFilterDefParseXML(xmlXPathContextPtr ctxt)
                                       NWFILTER_MIN_FILTER_PRIORITY) / 2;
             }
         }
-        chain = NULL;
     } else {
-        if (VIR_STRDUP(ret->chainsuffix,
-                       virNWFilterChainSuffixTypeToString(VIR_NWFILTER_CHAINSUFFIX_ROOT)) < 0)
-            goto cleanup;
+        ret->chainsuffix = g_strdup(virNWFilterChainSuffixTypeToString(VIR_NWFILTER_CHAINSUFFIX_ROOT));
     }
 
     uuid = virXPathString("string(./uuid)", ctxt);
@@ -2700,8 +2681,7 @@ virNWFilterDefParseXML(xmlXPathContextPtr ctxt)
 
     while (curr != NULL) {
         if (curr->type == XML_ELEMENT_NODE) {
-            if (VIR_ALLOC(entry) < 0)
-                goto cleanup;
+            entry = g_new0(virNWFilterEntry, 1);
 
             if (virXMLNodeNameEqual(curr, "rule")) {
                 if (!(entry->rule = virNWFilterRuleParse(curr))) {
@@ -2742,40 +2722,32 @@ virNWFilterDefParseXML(xmlXPathContextPtr ctxt)
 }
 
 
-virNWFilterDefPtr
+virNWFilterDef *
 virNWFilterDefParseNode(xmlDocPtr xml,
                         xmlNodePtr root)
 {
-    xmlXPathContextPtr ctxt = NULL;
-    virNWFilterDefPtr def = NULL;
+    g_autoptr(xmlXPathContext) ctxt = NULL;
 
     if (STRNEQ((const char *)root->name, "filter")) {
         virReportError(VIR_ERR_XML_ERROR,
                        "%s",
                        _("unknown root element for nw filter"));
-        goto cleanup;
+        return NULL;
     }
 
-    ctxt = xmlXPathNewContext(xml);
-    if (ctxt == NULL) {
-        virReportOOMError();
-        goto cleanup;
-    }
+    if (!(ctxt = virXMLXPathContextNew(xml)))
+        return NULL;
 
     ctxt->node = root;
-    def = virNWFilterDefParseXML(ctxt);
-
- cleanup:
-    xmlXPathFreeContext(ctxt);
-    return def;
+    return virNWFilterDefParseXML(ctxt);
 }
 
 
-static virNWFilterDefPtr
+static virNWFilterDef *
 virNWFilterDefParse(const char *xmlStr,
                     const char *filename)
 {
-    virNWFilterDefPtr def = NULL;
+    virNWFilterDef *def = NULL;
     xmlDocPtr xml;
 
     if ((xml = virXMLParse(filename, xmlStr, _("(nwfilter_definition)")))) {
@@ -2787,14 +2759,14 @@ virNWFilterDefParse(const char *xmlStr,
 }
 
 
-virNWFilterDefPtr
+virNWFilterDef *
 virNWFilterDefParseString(const char *xmlStr)
 {
     return virNWFilterDefParse(xmlStr, NULL);
 }
 
 
-virNWFilterDefPtr
+virNWFilterDef *
 virNWFilterDefParseFile(const char *filename)
 {
     return virNWFilterDefParse(NULL, filename);
@@ -2803,7 +2775,7 @@ virNWFilterDefParseFile(const char *filename)
 
 int
 virNWFilterSaveConfig(const char *configDir,
-                      virNWFilterDefPtr def)
+                      virNWFilterDef *def)
 {
     int ret = -1;
     char *xml;
@@ -2830,7 +2802,7 @@ virNWFilterSaveConfig(const char *configDir,
 
 int
 virNWFilterDeleteDef(const char *configDir,
-                     virNWFilterDefPtr def)
+                     virNWFilterDef *def)
 {
     int ret = -1;
     char *configFile = NULL;
@@ -2853,8 +2825,8 @@ virNWFilterDeleteDef(const char *configDir,
 
 
 static void
-virNWIPAddressFormat(virBufferPtr buf,
-                     virSocketAddrPtr ipaddr)
+virNWIPAddressFormat(virBuffer *buf,
+                     virSocketAddr *ipaddr)
 {
     char *output = virSocketAddrFormat(ipaddr);
 
@@ -2866,10 +2838,10 @@ virNWIPAddressFormat(virBufferPtr buf,
 
 
 static void
-virNWFilterRuleDefDetailsFormat(virBufferPtr buf,
+virNWFilterRuleDefDetailsFormat(virBuffer *buf,
                                 const char *type,
                                 const virXMLAttr2Struct *att,
-                                virNWFilterRuleDefPtr def)
+                                virNWFilterRuleDef *def)
 {
     size_t i = 0, j;
     bool typeShown = false;
@@ -2883,10 +2855,13 @@ virNWFilterRuleDefDetailsFormat(virBufferPtr buf,
     nwItemDesc *item;
 
     while (att[i].name) {
+        virNWFilterEntryItemFlags flags;
+
         VIR_WARNINGS_NO_CAST_ALIGN
         item = (nwItemDesc *)((char *)def + att[i].dataIdx);
         VIR_WARNINGS_RESET
-        virNWFilterEntryItemFlags flags = item->flags;
+
+        flags = item->flags;
         if ((flags & NWFILTER_ENTRY_ITEM_FLAG_EXISTS)) {
             if (!typeShown) {
                 virBufferAsprintf(buf, "<%s", type);
@@ -2900,14 +2875,14 @@ virNWFilterRuleDefDetailsFormat(virBufferPtr buf,
                     matchShown = MATCH_NO;
                 } else if (matchShown == MATCH_YES) {
                     virBufferAddLit(buf, "/>\n");
-                    typeShown = 0;
+                    typeShown = false;
                     matchShown = MATCH_NONE;
                     continue;
                 }
             } else {
                 if (matchShown == MATCH_NO) {
                     virBufferAddLit(buf, "/>\n");
-                    typeShown = 0;
+                    typeShown = false;
                     matchShown = MATCH_NONE;
                     continue;
                 }
@@ -2922,7 +2897,7 @@ virNWFilterRuleDefDetailsFormat(virBufferPtr buf,
                                  _("formatter for %s %s reported error"),
                                  type,
                                  att[i].name);
-                   goto err_exit;
+                   return;
                }
             } else if ((flags & NWFILTER_ENTRY_ITEM_FLAG_HAS_VAR)) {
                 virBufferAddChar(buf, '$');
@@ -2934,7 +2909,7 @@ virNWFilterRuleDefDetailsFormat(virBufferPtr buf,
 
                case DATATYPE_UINT8_HEX:
                    asHex = true;
-                   ATTRIBUTE_FALLTHROUGH;
+                   G_GNUC_FALLTHROUGH;
                case DATATYPE_IPMASK:
                case DATATYPE_IPV6MASK:
                    /* display all masks in CIDR format */
@@ -2945,7 +2920,7 @@ virNWFilterRuleDefDetailsFormat(virBufferPtr buf,
 
                case DATATYPE_UINT16_HEX:
                    asHex = true;
-                   ATTRIBUTE_FALLTHROUGH;
+                   G_GNUC_FALLTHROUGH;
                case DATATYPE_UINT16:
                    virBufferAsprintf(buf, asHex ? "0x%x" : "%d",
                                      item->u.u16);
@@ -2953,7 +2928,7 @@ virNWFilterRuleDefDetailsFormat(virBufferPtr buf,
 
                case DATATYPE_UINT32_HEX:
                    asHex = true;
-                   ATTRIBUTE_FALLTHROUGH;
+                   G_GNUC_FALLTHROUGH;
                case DATATYPE_UINT32:
                    virBufferAsprintf(buf, asHex ? "0x%x" : "%u",
                                      item->u.u32);
@@ -3005,14 +2980,13 @@ virNWFilterRuleDefDetailsFormat(virBufferPtr buf,
        virBufferAsprintf(buf,
                          "<%s/>\n", type);
 
- err_exit:
     return;
 }
 
 
 static int
-virNWFilterRuleDefFormat(virBufferPtr buf,
-                         virNWFilterRuleDefPtr def)
+virNWFilterRuleDefFormat(virBuffer *buf,
+                         virNWFilterRuleDef *def)
 {
     size_t i;
     bool subelement = false;
@@ -3051,8 +3025,8 @@ virNWFilterRuleDefFormat(virBufferPtr buf,
 
 
 static int
-virNWFilterEntryFormat(virBufferPtr buf,
-                       virNWFilterEntryPtr entry)
+virNWFilterEntryFormat(virBuffer *buf,
+                       virNWFilterEntry *entry)
 {
     if (entry->rule)
         return virNWFilterRuleDefFormat(buf, entry->rule);
@@ -3064,7 +3038,7 @@ virNWFilterEntryFormat(virBufferPtr buf,
 char *
 virNWFilterDefFormat(const virNWFilterDef *def)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     char uuid[VIR_UUID_STRING_BUFLEN];
     size_t i;
 
@@ -3082,20 +3056,13 @@ virNWFilterDefFormat(const virNWFilterDef *def)
 
     for (i = 0; i < def->nentries; i++) {
         if (virNWFilterEntryFormat(&buf, def->filterEntries[i]) < 0)
-            goto err_exit;
+            return NULL;
     }
 
     virBufferAdjustIndent(&buf, -2);
     virBufferAddLit(&buf, "</filter>\n");
 
-    if (virBufferCheckError(&buf) < 0)
-        goto err_exit;
-
     return virBufferContentAndReset(&buf);
-
- err_exit:
-    virBufferFreeAndReset(&buf);
-    return NULL;
 }
 
 static virNWFilterTriggerRebuildCallback rebuildCallback;
@@ -3144,7 +3111,7 @@ virNWFilterTriggerRebuild(void)
 
 
 bool
-virNWFilterRuleIsProtocolIPv4(virNWFilterRuleDefPtr rule)
+virNWFilterRuleIsProtocolIPv4(virNWFilterRuleDef *rule)
 {
     if (rule->prtclType >= VIR_NWFILTER_RULE_PROTOCOL_TCP &&
         rule->prtclType <= VIR_NWFILTER_RULE_PROTOCOL_ALL)
@@ -3154,7 +3121,7 @@ virNWFilterRuleIsProtocolIPv4(virNWFilterRuleDefPtr rule)
 
 
 bool
-virNWFilterRuleIsProtocolIPv6(virNWFilterRuleDefPtr rule)
+virNWFilterRuleIsProtocolIPv6(virNWFilterRuleDef *rule)
 {
     if (rule->prtclType >= VIR_NWFILTER_RULE_PROTOCOL_TCPoIPV6 &&
         rule->prtclType <= VIR_NWFILTER_RULE_PROTOCOL_ALLoIPV6)
@@ -3164,7 +3131,7 @@ virNWFilterRuleIsProtocolIPv6(virNWFilterRuleDefPtr rule)
 
 
 bool
-virNWFilterRuleIsProtocolEthernet(virNWFilterRuleDefPtr rule)
+virNWFilterRuleIsProtocolEthernet(virNWFilterRuleDef *rule)
 {
     if (rule->prtclType <= VIR_NWFILTER_RULE_PROTOCOL_IPV6)
         return true;

@@ -20,23 +20,21 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_NODE_DEVICE_CONF_H
-# define LIBVIRT_NODE_DEVICE_CONF_H
+#pragma once
 
-# include "internal.h"
-# include "virbitmap.h"
-# include "virutil.h"
-# include "virscsihost.h"
-# include "virpci.h"
-# include "virvhba.h"
-# include "device_conf.h"
-# include "storage_adapter_conf.h"
-# include "virenum.h"
+#include "internal.h"
+#include "virbitmap.h"
+#include "virscsihost.h"
+#include "virpci.h"
+#include "virvhba.h"
+#include "device_conf.h"
+#include "storage_adapter_conf.h"
+#include "virenum.h"
 
-# include <libxml/tree.h>
+#include <libxml/tree.h>
 
-# define CREATE_DEVICE 1
-# define EXISTING_DEVICE 0
+#define CREATE_DEVICE 1
+#define EXISTING_DEVICE 0
 
 typedef enum {
     /* Keep in sync with VIR_ENUM_IMPL in node_device_conf.c */
@@ -66,6 +64,11 @@ typedef enum {
     VIR_NODE_DEV_CAP_MDEV_TYPES,        /* Device capable of mediated devices */
     VIR_NODE_DEV_CAP_MDEV,              /* Mediated device */
     VIR_NODE_DEV_CAP_CCW_DEV,           /* s390 CCW device */
+    VIR_NODE_DEV_CAP_CSS_DEV,           /* s390 channel subsystem device */
+    VIR_NODE_DEV_CAP_VDPA,              /* vDPA device */
+    VIR_NODE_DEV_CAP_AP_CARD,           /* s390 AP Card device */
+    VIR_NODE_DEV_CAP_AP_QUEUE,          /* s390 AP Queue */
+    VIR_NODE_DEV_CAP_AP_MATRIX,         /* s390 AP Matrix device */
 
     VIR_NODE_DEV_CAP_LAST
 } virNodeDevCapType;
@@ -103,6 +106,14 @@ typedef enum {
 } virNodeDevPCICapFlags;
 
 typedef enum {
+    VIR_NODE_DEV_CAP_FLAG_CSS_MDEV                  = (1 << 0),
+} virNodeDevCCWCapFlags;
+
+typedef enum {
+    VIR_NODE_DEV_CAP_FLAG_AP_MATRIX_MDEV            = (1 << 0),
+} virNodeDevAPMatrixCapFlags;
+
+typedef enum {
     /* Keep in sync with VIR_ENUM_IMPL in node_device_conf.c */
     VIR_NODE_DEV_DRM_PRIMARY,
     VIR_NODE_DEV_DRM_CONTROL,
@@ -114,7 +125,6 @@ typedef enum {
 VIR_ENUM_DECL(virNodeDevDRM);
 
 typedef struct _virNodeDevCapSystemHardware virNodeDevCapSystemHardware;
-typedef virNodeDevCapSystemHardware *virNodeDevCapSystemHardwarePtr;
 struct _virNodeDevCapSystemHardware {
     char *vendor_name;
     char *version;
@@ -123,7 +133,6 @@ struct _virNodeDevCapSystemHardware {
 };
 
 typedef struct _virNodeDevCapSystemFirmware virNodeDevCapSystemFirmware;
-typedef virNodeDevCapSystemFirmware *virNodeDevCapSystemFirmwarePtr;
 struct _virNodeDevCapSystemFirmware {
     char *vendor_name;
     char *version;
@@ -131,7 +140,6 @@ struct _virNodeDevCapSystemFirmware {
 };
 
 typedef struct _virNodeDevCapSystem virNodeDevCapSystem;
-typedef virNodeDevCapSystem *virNodeDevCapSystemPtr;
 struct _virNodeDevCapSystem {
     char *product_name;
     virNodeDevCapSystemHardware hardware;
@@ -139,14 +147,15 @@ struct _virNodeDevCapSystem {
 };
 
 typedef struct _virNodeDevCapMdev virNodeDevCapMdev;
-typedef virNodeDevCapMdev *virNodeDevCapMdevPtr;
 struct _virNodeDevCapMdev {
     char *type;
     unsigned int iommuGroupNumber;
+    char *uuid;
+    virMediatedDeviceAttr **attributes;
+    size_t nattributes;
 };
 
 typedef struct _virNodeDevCapPCIDev virNodeDevCapPCIDev;
-typedef virNodeDevCapPCIDev *virNodeDevCapPCIDevPtr;
 struct _virNodeDevCapPCIDev {
     unsigned int domain;
     unsigned int bus;
@@ -157,23 +166,22 @@ struct _virNodeDevCapPCIDev {
     int klass;
     char *product_name;
     char *vendor_name;
-    virPCIDeviceAddressPtr physical_function;
-    virPCIDeviceAddressPtr *virtual_functions;
+    virPCIDeviceAddress *physical_function;
+    virPCIDeviceAddress **virtual_functions;
     size_t num_virtual_functions;
     unsigned int max_virtual_functions;
     unsigned int flags;
-    virPCIDeviceAddressPtr *iommuGroupDevices;
+    virPCIDeviceAddress **iommuGroupDevices;
     size_t nIommuGroupDevices;
     unsigned int iommuGroupNumber;
     int numa_node;
-    virPCIEDeviceInfoPtr pci_express;
+    virPCIEDeviceInfo *pci_express;
     int hdrType; /* enum virPCIHeaderType or -1 */
-    virMediatedDeviceTypePtr *mdev_types;
+    virMediatedDeviceType **mdev_types;
     size_t nmdev_types;
 };
 
 typedef struct _virNodeDevCapUSBDev virNodeDevCapUSBDev;
-typedef virNodeDevCapUSBDev *virNodeDevCapUSBDevPtr;
 struct _virNodeDevCapUSBDev {
    unsigned int bus;
    unsigned int device;
@@ -184,7 +192,6 @@ struct _virNodeDevCapUSBDev {
 };
 
 typedef struct _virNodeDevCapUSBIf virNodeDevCapUSBIf;
-typedef virNodeDevCapUSBIf *virNodeDevCapUSBIfPtr;
 struct _virNodeDevCapUSBIf {
     unsigned int number;
     unsigned int klass;
@@ -194,18 +201,16 @@ struct _virNodeDevCapUSBIf {
 };
 
 typedef struct _virNodeDevCapNet virNodeDevCapNet;
-typedef virNodeDevCapNet *virNodeDevCapNetPtr;
 struct _virNodeDevCapNet {
     char *address;
     unsigned int address_len;
     char *ifname;
     virNetDevIfLink lnk;
     virNodeDevNetCapType subtype;  /* LAST -> no subtype */
-    virBitmapPtr features; /* enum virNetDevFeature */
+    virBitmap *features; /* enum virNetDevFeature */
 };
 
 typedef struct _virNodeDevCapSCSIHost virNodeDevCapSCSIHost;
-typedef virNodeDevCapSCSIHost *virNodeDevCapSCSIHostPtr;
 struct _virNodeDevCapSCSIHost {
     unsigned int host;
     int unique_id;
@@ -218,7 +223,6 @@ struct _virNodeDevCapSCSIHost {
 };
 
 typedef struct _virNodeDevCapSCSITarget virNodeDevCapSCSITarget;
-typedef virNodeDevCapSCSITarget *virNodeDevCapSCSITargetPtr;
 struct _virNodeDevCapSCSITarget {
     char *name;
     unsigned int flags; /* enum virNodeDevSCSITargetCapsFlags */
@@ -227,7 +231,6 @@ struct _virNodeDevCapSCSITarget {
 };
 
 typedef struct _virNodeDevCapSCSI virNodeDevCapSCSI;
-typedef virNodeDevCapSCSI *virNodeDevCapSCSIPtr;
 struct _virNodeDevCapSCSI {
     unsigned int host;
     unsigned int bus;
@@ -237,7 +240,6 @@ struct _virNodeDevCapSCSI {
 };
 
 typedef struct _virNodeDevCapStorage virNodeDevCapStorage;
-typedef virNodeDevCapStorage *virNodeDevCapStoragePtr;
 struct _virNodeDevCapStorage {
     unsigned long long size;
     unsigned long long num_blocks;
@@ -254,27 +256,50 @@ struct _virNodeDevCapStorage {
 };
 
 typedef struct _virNodeDevCapSCSIGeneric virNodeDevCapSCSIGeneric;
-typedef virNodeDevCapSCSIGeneric *virNodeDevCapSCSIGenericPtr;
 struct _virNodeDevCapSCSIGeneric {
     char *path;
 };
 
 typedef struct _virNodeDevCapDRM virNodeDevCapDRM;
-typedef virNodeDevCapDRM *virNodeDevCapDRMPtr;
 struct _virNodeDevCapDRM {
     virNodeDevDRMType type;
 };
 
 typedef struct _virNodeDevCapCCW virNodeDevCapCCW;
-typedef virNodeDevCapCCW *virNodeDevCapCCWPtr;
 struct _virNodeDevCapCCW {
     unsigned int cssid;
     unsigned int ssid;
     unsigned int devno;
+    unsigned int flags; /* enum virNodeDevCCWCapFlags */
+    virMediatedDeviceType **mdev_types;
+    size_t nmdev_types;
+};
+
+typedef struct _virNodeDevCapVDPA virNodeDevCapVDPA;
+struct _virNodeDevCapVDPA {
+    char *chardev;
+};
+
+typedef struct _virNodeDevCapAPCard virNodeDevCapAPCard;
+struct _virNodeDevCapAPCard {
+    unsigned int ap_adapter;
+};
+
+typedef struct _virNodeDevCapAPQueue virNodeDevCapAPQueue;
+struct _virNodeDevCapAPQueue {
+    unsigned int ap_adapter;
+    unsigned int ap_domain;
+};
+
+typedef struct _virNodeDevCapAPMatrix virNodeDevCapAPMatrix;
+struct _virNodeDevCapAPMatrix {
+    char *addr;
+    unsigned int flags; /* enum virNodeDevAPMatrixCapFlags */
+    virMediatedDeviceType **mdev_types;
+    size_t nmdev_types;
 };
 
 typedef struct _virNodeDevCapData virNodeDevCapData;
-typedef virNodeDevCapData *virNodeDevCapDataPtr;
 struct _virNodeDevCapData {
     virNodeDevCapType type;
     union {
@@ -291,19 +316,21 @@ struct _virNodeDevCapData {
         virNodeDevCapDRM drm;
         virNodeDevCapMdev mdev;
         virNodeDevCapCCW ccw_dev;
+        virNodeDevCapVDPA vdpa;
+        virNodeDevCapAPCard ap_card;
+        virNodeDevCapAPQueue ap_queue;
+        virNodeDevCapAPMatrix ap_matrix;
     };
 };
 
 typedef struct _virNodeDevCapsDef virNodeDevCapsDef;
-typedef virNodeDevCapsDef *virNodeDevCapsDefPtr;
 struct _virNodeDevCapsDef {
     virNodeDevCapData data;
-    virNodeDevCapsDefPtr next;          /* next capability */
+    virNodeDevCapsDef *next;            /* next capability */
 };
 
 
 typedef struct _virNodeDeviceDef virNodeDeviceDef;
-typedef virNodeDeviceDef *virNodeDeviceDefPtr;
 struct _virNodeDeviceDef {
     char *name;                         /* device name (unique on node) */
     char *sysfs_path;                   /* udev name/sysfs path */
@@ -315,40 +342,44 @@ struct _virNodeDeviceDef {
     char *driver;                       /* optional driver name */
     char *devnode;                      /* /dev path */
     char **devlinks;                    /* /dev links */
-    virNodeDevCapsDefPtr caps;          /* optional device capabilities */
+    virNodeDevCapsDef *caps;            /* optional device capabilities */
 };
 
 char *
 virNodeDeviceDefFormat(const virNodeDeviceDef *def);
 
-virNodeDeviceDefPtr
+virNodeDeviceDef *
 virNodeDeviceDefParseString(const char *str,
                             int create,
                             const char *virt_type);
 
-virNodeDeviceDefPtr
+virNodeDeviceDef *
 virNodeDeviceDefParseFile(const char *filename,
                           int create,
                           const char *virt_type);
 
-virNodeDeviceDefPtr
+virNodeDeviceDef *
 virNodeDeviceDefParseNode(xmlDocPtr xml,
                           xmlNodePtr root,
                           int create,
                           const char *virt_type);
 
 int
-virNodeDeviceGetWWNs(virNodeDeviceDefPtr def,
+virNodeDeviceGetWWNs(virNodeDeviceDef *def,
                      char **wwnn,
                      char **wwpn);
 
 void
-virNodeDeviceDefFree(virNodeDeviceDefPtr def);
+virNodeDeviceDefFree(virNodeDeviceDef *def);
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNodeDeviceDef, virNodeDeviceDefFree);
 
 void
-virNodeDevCapsDefFree(virNodeDevCapsDefPtr caps);
+virNodeDevCapsDefFree(virNodeDevCapsDef *caps);
 
-# define VIR_CONNECT_LIST_NODE_DEVICES_FILTERS_CAP \
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNodeDevCapsDef, virNodeDevCapsDefFree);
+
+#define VIR_CONNECT_LIST_NODE_DEVICES_FILTERS_CAP \
                 (VIR_CONNECT_LIST_NODE_DEVICES_CAP_SYSTEM        | \
                  VIR_CONNECT_LIST_NODE_DEVICES_CAP_PCI_DEV       | \
                  VIR_CONNECT_LIST_NODE_DEVICES_CAP_USB_DEV       | \
@@ -364,24 +395,43 @@ virNodeDevCapsDefFree(virNodeDevCapsDefPtr caps);
                  VIR_CONNECT_LIST_NODE_DEVICES_CAP_DRM           | \
                  VIR_CONNECT_LIST_NODE_DEVICES_CAP_MDEV_TYPES    | \
                  VIR_CONNECT_LIST_NODE_DEVICES_CAP_MDEV          | \
-                 VIR_CONNECT_LIST_NODE_DEVICES_CAP_CCW_DEV)
+                 VIR_CONNECT_LIST_NODE_DEVICES_CAP_CCW_DEV       | \
+                 VIR_CONNECT_LIST_NODE_DEVICES_CAP_CSS_DEV       | \
+                 VIR_CONNECT_LIST_NODE_DEVICES_CAP_VDPA          | \
+                 VIR_CONNECT_LIST_NODE_DEVICES_CAP_AP_CARD       | \
+                 VIR_CONNECT_LIST_NODE_DEVICES_CAP_AP_QUEUE      | \
+                 VIR_CONNECT_LIST_NODE_DEVICES_CAP_AP_MATRIX)
+
+#define VIR_CONNECT_LIST_NODE_DEVICES_FILTERS_ACTIVE \
+    VIR_CONNECT_LIST_NODE_DEVICES_ACTIVE | \
+    VIR_CONNECT_LIST_NODE_DEVICES_INACTIVE
+
+#define VIR_CONNECT_LIST_NODE_DEVICES_FILTERS_ALL \
+    VIR_CONNECT_LIST_NODE_DEVICES_FILTERS_CAP | \
+    VIR_CONNECT_LIST_NODE_DEVICES_FILTERS_ACTIVE
 
 int
-virNodeDeviceGetSCSIHostCaps(virNodeDevCapSCSIHostPtr scsi_host);
+virNodeDeviceGetSCSIHostCaps(virNodeDevCapSCSIHost *scsi_host);
 
 int
 virNodeDeviceGetSCSITargetCaps(const char *sysfsPath,
-                               virNodeDevCapSCSITargetPtr scsi_target);
+                               virNodeDevCapSCSITarget *scsi_target);
 
 int
 virNodeDeviceGetPCIDynamicCaps(const char *sysfsPath,
-                               virNodeDevCapPCIDevPtr pci_dev);
+                               virNodeDevCapPCIDev *pci_dev);
 
 int
-virNodeDeviceUpdateCaps(virNodeDeviceDefPtr def);
+virNodeDeviceGetCSSDynamicCaps(const char *sysfsPath,
+                               virNodeDevCapCCW *ccw_dev);
 
 int
-virNodeDeviceCapsListExport(virNodeDeviceDefPtr def,
+virNodeDeviceGetAPMatrixDynamicCaps(const char *sysfsPath,
+                                    virNodeDevCapAPMatrix *ap_matrix);
+
+int
+virNodeDeviceUpdateCaps(virNodeDeviceDef *def);
+
+int
+virNodeDeviceCapsListExport(virNodeDeviceDef *def,
                             virNodeDevCapType **list);
-
-#endif /* LIBVIRT_NODE_DEVICE_CONF_H */

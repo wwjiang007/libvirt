@@ -18,21 +18,14 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRURI_H
-# define LIBVIRT_VIRURI_H
+#pragma once
 
-# include <libxml/uri.h>
-
-# include "internal.h"
-# include "virconf.h"
-# include "virautoclean.h"
+#include "internal.h"
+#include "virconf.h"
 
 typedef struct _virURI virURI;
-typedef virURI *virURIPtr;
 
 typedef struct _virURIParam virURIParam;
-typedef virURIParam *virURIParamPtr;
-
 struct _virURIParam {
     char *name;  /* Name (unescaped). */
     char *value; /* Value (unescaped). */
@@ -50,20 +43,22 @@ struct _virURI {
 
     size_t paramsCount;
     size_t paramsAlloc;
-    virURIParamPtr params;
+    virURIParam *params;
 };
 
-virURIPtr virURIParse(const char *uri)
+virURI *virURIParse(const char *uri)
     ATTRIBUTE_NONNULL(1);
-char *virURIFormat(virURIPtr uri)
+char *virURIFormat(virURI *uri)
     ATTRIBUTE_NONNULL(1);
 
-char *virURIFormatParams(virURIPtr uri);
+char *virURIFormatParams(virURI *uri);
 
-void virURIFree(virURIPtr uri);
-VIR_DEFINE_AUTOPTR_FUNC(virURI, virURIFree);
-int virURIResolveAlias(virConfPtr conf, const char *alias, char **uri);
+void virURIFree(virURI *uri);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virURI, virURIFree);
+int virURIResolveAlias(virConf *conf, const char *alias, char **uri);
 
-# define VIR_URI_SERVER(uri) ((uri) && (uri)->server ? (uri)->server : "localhost")
+const char *virURIGetParam(virURI *uri, const char *name);
 
-#endif /* LIBVIRT_VIRURI_H */
+bool virURICheckUnixSocket(virURI *uri);
+
+#define VIR_URI_SERVER(uri) ((uri) && (uri)->server ? (uri)->server : "localhost")

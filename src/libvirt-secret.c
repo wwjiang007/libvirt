@@ -166,7 +166,7 @@ virConnectListSecrets(virConnectPtr conn, char **uuids, int maxuuids)
     virResetLastError();
 
     virCheckConnectReturn(conn, -1);
-    virCheckNonNullArgGoto(uuids, error);
+    virCheckNonNullArrayArgGoto(uuids, maxuuids, error);
     virCheckNonNegativeArgGoto(maxuuids, error);
 
     if (conn->secretDriver != NULL && conn->secretDriver->connectListSecrets != NULL) {
@@ -585,7 +585,7 @@ virSecretGetValue(virSecretPtr secret, size_t *value_size, unsigned int flags)
     if (conn->secretDriver != NULL && conn->secretDriver->secretGetValue != NULL) {
         unsigned char *ret;
 
-        ret = conn->secretDriver->secretGetValue(secret, value_size, flags, 0);
+        ret = conn->secretDriver->secretGetValue(secret, value_size, flags);
         if (ret == NULL)
             goto error;
         return ret;
@@ -658,8 +658,7 @@ virSecretUndefine(virSecretPtr secret)
 int
 virSecretRef(virSecretPtr secret)
 {
-    VIR_DEBUG("secret=%p refs=%d", secret,
-              secret ? secret->parent.u.s.refs : 0);
+    VIR_DEBUG("secret=%p", secret);
 
     virResetLastError();
 

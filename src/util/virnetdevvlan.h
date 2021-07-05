@@ -16,13 +16,9 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRNETDEVVLAN_H
-# define LIBVIRT_VIRNETDEVVLAN_H
+#pragma once
 
-# include <virutil.h>
-
-# include "virautoclean.h"
-# include "virenum.h"
+#include "virenum.h"
 
 typedef enum {
     VIR_NATIVE_VLAN_MODE_DEFAULT = 0,
@@ -35,7 +31,6 @@ typedef enum {
 VIR_ENUM_DECL(virNativeVlanMode);
 
 typedef struct _virNetDevVlan virNetDevVlan;
-typedef virNetDevVlan *virNetDevVlanPtr;
 struct _virNetDevVlan {
     bool trunk;        /* true if this is a trunk */
     int nTags;          /* number of tags in array */
@@ -44,11 +39,9 @@ struct _virNetDevVlan {
     unsigned int nativeTag;
 };
 
-void virNetDevVlanClear(virNetDevVlanPtr vlan);
-void virNetDevVlanFree(virNetDevVlanPtr vlan);
+void virNetDevVlanClear(virNetDevVlan *vlan);
+void virNetDevVlanFree(virNetDevVlan *vlan);
 int virNetDevVlanEqual(const virNetDevVlan *a, const virNetDevVlan *b);
-int virNetDevVlanCopy(virNetDevVlanPtr dst, const virNetDevVlan *src);
+int virNetDevVlanCopy(virNetDevVlan *dst, const virNetDevVlan *src);
 
-VIR_DEFINE_AUTOPTR_FUNC(virNetDevVlan, virNetDevVlanFree);
-
-#endif /* LIBVIRT_VIRNETDEVVLAN_H */
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNetDevVlan, virNetDevVlanFree);

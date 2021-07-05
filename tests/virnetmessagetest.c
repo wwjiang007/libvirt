@@ -31,9 +31,9 @@
 
 VIR_LOG_INIT("tests.netmessagetest");
 
-static int testMessageHeaderEncode(const void *args ATTRIBUTE_UNUSED)
+static int testMessageHeaderEncode(const void *args G_GNUC_UNUSED)
 {
-    virNetMessagePtr msg = virNetMessageNew(true);
+    virNetMessage *msg = virNetMessageNew(true);
     static const char expect[] = {
         0x00, 0x00, 0x00, 0x1c,  /* Length */
         0x11, 0x22, 0x33, 0x44,  /* Program */
@@ -61,7 +61,7 @@ static int testMessageHeaderEncode(const void *args ATTRIBUTE_UNUSED)
     if (virNetMessageEncodeHeader(msg) < 0)
         goto cleanup;
 
-    if (ARRAY_CARDINALITY(expect) != msg->bufferOffset) {
+    if (G_N_ELEMENTS(expect) != msg->bufferOffset) {
         VIR_DEBUG("Expect message offset %zu got %zu",
                   sizeof(expect), msg->bufferOffset);
         goto cleanup;
@@ -84,9 +84,9 @@ static int testMessageHeaderEncode(const void *args ATTRIBUTE_UNUSED)
     return ret;
 }
 
-static int testMessageHeaderDecode(const void *args ATTRIBUTE_UNUSED)
+static int testMessageHeaderDecode(const void *args G_GNUC_UNUSED)
 {
-    virNetMessagePtr msg = virNetMessageNew(true);
+    virNetMessage *msg = virNetMessageNew(true);
     static char input_buf [] =  {
         0x00, 0x00, 0x00, 0x1c,  /* Length */
         0x11, 0x22, 0x33, 0x44,  /* Program */
@@ -102,8 +102,7 @@ static int testMessageHeaderDecode(const void *args ATTRIBUTE_UNUSED)
         return -1;
 
     msg->bufferLength = 4;
-    if (VIR_ALLOC_N(msg->buffer, msg->bufferLength) < 0)
-        goto cleanup;
+    msg->buffer = g_new0(char, msg->bufferLength);
     memcpy(msg->buffer, input_buf, msg->bufferLength);
 
     msg->header.prog = 0x11223344;
@@ -180,10 +179,10 @@ static int testMessageHeaderDecode(const void *args ATTRIBUTE_UNUSED)
     return ret;
 }
 
-static int testMessagePayloadEncode(const void *args ATTRIBUTE_UNUSED)
+static int testMessagePayloadEncode(const void *args G_GNUC_UNUSED)
 {
     virNetMessageError err;
-    virNetMessagePtr msg = virNetMessageNew(true);
+    virNetMessage *msg = virNetMessageNew(true);
     int ret = -1;
     static const char expect[] = {
         0x00, 0x00, 0x00, 0x74,  /* Length */
@@ -227,15 +226,15 @@ static int testMessagePayloadEncode(const void *args ATTRIBUTE_UNUSED)
     err.domain = VIR_FROM_RPC;
     err.level = VIR_ERR_ERROR;
 
-    if (VIR_ALLOC(err.message) < 0 ||
-        VIR_STRDUP(*err.message, "Hello World") < 0 ||
-        VIR_ALLOC(err.str1) < 0 ||
-        VIR_STRDUP(*err.str1, "One") < 0 ||
-        VIR_ALLOC(err.str2) < 0 ||
-        VIR_STRDUP(*err.str2, "Two") < 0 ||
-        VIR_ALLOC(err.str3) < 0 ||
-        VIR_STRDUP(*err.str3, "Three") < 0)
-        goto cleanup;
+    err.message = g_new0(char *, 1);
+    err.str1 = g_new0(char *, 1);
+    err.str2 = g_new0(char *, 1);
+    err.str3 = g_new0(char *, 1);
+
+    *err.message = g_strdup("Hello World");
+    *err.str1 = g_strdup("One");
+    *err.str2 = g_strdup("Two");
+    *err.str3 = g_strdup("Three");
 
     err.int1 = 1;
     err.int2 = 2;
@@ -253,7 +252,7 @@ static int testMessagePayloadEncode(const void *args ATTRIBUTE_UNUSED)
     if (virNetMessageEncodePayload(msg, (xdrproc_t)xdr_virNetMessageError, &err) < 0)
         goto cleanup;
 
-    if (ARRAY_CARDINALITY(expect) != msg->bufferLength) {
+    if (G_N_ELEMENTS(expect) != msg->bufferLength) {
         VIR_DEBUG("Expect message length %zu got %zu",
                   sizeof(expect), msg->bufferLength);
         goto cleanup;
@@ -288,10 +287,10 @@ static int testMessagePayloadEncode(const void *args ATTRIBUTE_UNUSED)
     return ret;
 }
 
-static int testMessagePayloadDecode(const void *args ATTRIBUTE_UNUSED)
+static int testMessagePayloadDecode(const void *args G_GNUC_UNUSED)
 {
     virNetMessageError err;
-    virNetMessagePtr msg = virNetMessageNew(true);
+    virNetMessage *msg = virNetMessageNew(true);
     static char input_buffer[] = {
         0x00, 0x00, 0x00, 0x74,  /* Length */
         0x11, 0x22, 0x33, 0x44,  /* Program */
@@ -332,8 +331,7 @@ static int testMessagePayloadDecode(const void *args ATTRIBUTE_UNUSED)
         return -1;
 
     msg->bufferLength = 4;
-    if (VIR_ALLOC_N(msg->buffer, msg->bufferLength) < 0)
-        goto cleanup;
+    msg->buffer = g_new0(char, msg->bufferLength);
     memcpy(msg->buffer, input_buffer, msg->bufferLength);
 
     if (virNetMessageDecodeLength(msg) < 0) {
@@ -452,10 +450,10 @@ static int testMessagePayloadDecode(const void *args ATTRIBUTE_UNUSED)
     return ret;
 }
 
-static int testMessagePayloadStreamEncode(const void *args ATTRIBUTE_UNUSED)
+static int testMessagePayloadStreamEncode(const void *args G_GNUC_UNUSED)
 {
     char stream[] = "The quick brown fox jumps over the lazy dog";
-    virNetMessagePtr msg = virNetMessageNew(true);
+    virNetMessage *msg = virNetMessageNew(true);
     static const char expect[] = {
         0x00, 0x00, 0x00, 0x47,  /* Length */
         0x11, 0x22, 0x33, 0x44,  /* Program */
@@ -495,7 +493,7 @@ static int testMessagePayloadStreamEncode(const void *args ATTRIBUTE_UNUSED)
     if (virNetMessageEncodePayloadRaw(msg, stream, strlen(stream)) < 0)
         goto cleanup;
 
-    if (ARRAY_CARDINALITY(expect) != msg->bufferLength) {
+    if (G_N_ELEMENTS(expect) != msg->bufferLength) {
         VIR_DEBUG("Expect message length %zu got %zu",
                   sizeof(expect), msg->bufferLength);
         goto cleanup;
@@ -524,7 +522,9 @@ mymain(void)
 {
     int ret = 0;
 
+#ifndef WIN32
     signal(SIGPIPE, SIG_IGN);
+#endif /* WIN32 */
 
     if (virTestRun("Message Header Encode", testMessageHeaderEncode, NULL) < 0)
         ret = -1;

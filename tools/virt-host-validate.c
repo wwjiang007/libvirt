@@ -21,12 +21,13 @@
 
 #include <config.h>
 
-#ifdef HAVE_LIBINTL_H
+#ifdef WITH_LIBINTL_H
 # include <libintl.h>
-#endif /* HAVE_LIBINTL_H */
+#endif /* WITH_LIBINTL_H */
 #include <getopt.h>
 
 #include "internal.h"
+#include "virerror.h"
 #include "virgettext.h"
 
 #include "virt-host-validate-common.h"
@@ -83,8 +84,11 @@ main(int argc, char **argv)
     bool quiet = false;
     bool usedHvname = false;
 
-    if (virGettextInitialize() < 0)
+    if (virGettextInitialize() < 0 ||
+        virErrorInitialize() < 0) {
+        fprintf(stderr, _("%s: initialization failed\n"), argv[0]);
         return EXIT_FAILURE;
+    }
 
     while ((c = getopt_long(argc, argv, "hvq", argOptions, NULL)) != -1) {
         switch (c) {

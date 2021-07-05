@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2014 Roman Bogorodskiy
  * Copyright (C) 2014 Semihalf
- * Copyright (C) 2016 Fabian Freyer
+ * Copyright (C) 2020 Fabian Freyer
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -40,11 +40,11 @@
 VIR_LOG_INIT("bhyve.bhyve_capabilities");
 
 
-virCapsPtr
+virCaps *
 virBhyveCapsBuild(void)
 {
-    virCapsPtr caps;
-    virCapsGuestPtr guest;
+    virCaps *caps;
+    virCapsGuest *guest;
 
     if ((caps = virCapabilitiesNew(virArchFromHost(),
                                    false, false)) == NULL)
@@ -71,9 +71,9 @@ virBhyveCapsBuild(void)
 }
 
 int
-virBhyveDomainCapsFill(virDomainCapsPtr caps,
+virBhyveDomainCapsFill(virDomainCaps *caps,
                        unsigned int bhyvecaps,
-                       virDomainCapsStringValuesPtr firmwares)
+                       virDomainCapsStringValues *firmwares)
 {
     caps->disk.supported = VIR_TRISTATE_BOOL_YES;
     caps->disk.diskDevice.report = true;
@@ -116,30 +116,30 @@ virBhyveDomainCapsFill(virDomainCapsPtr caps,
     }
 
     caps->hostdev.supported = VIR_TRISTATE_BOOL_NO;
-    caps->iothreads = VIR_TRISTATE_BOOL_NO;
-    caps->vmcoreinfo = VIR_TRISTATE_BOOL_NO;
-    caps->genid = VIR_TRISTATE_BOOL_NO;
+    caps->features[VIR_DOMAIN_CAPS_FEATURE_IOTHREADS] = VIR_TRISTATE_BOOL_NO;
+    caps->features[VIR_DOMAIN_CAPS_FEATURE_VMCOREINFO] = VIR_TRISTATE_BOOL_NO;
+    caps->features[VIR_DOMAIN_CAPS_FEATURE_GENID] = VIR_TRISTATE_BOOL_NO;
     caps->gic.supported = VIR_TRISTATE_BOOL_NO;
 
     return 0;
 }
 
 
-virDomainCapsPtr
-virBhyveDomainCapsBuild(bhyveConnPtr conn,
+virDomainCaps *
+virBhyveDomainCapsBuild(struct _bhyveConn *conn,
                         const char *emulatorbin,
                         const char *machine,
                         virArch arch,
                         virDomainVirtType virttype)
 {
-    virDomainCapsPtr caps = NULL;
+    virDomainCaps *caps = NULL;
     unsigned int bhyve_caps = 0;
-    DIR *dir;
+    g_autoptr(DIR) dir = NULL;
     struct dirent *entry;
     size_t firmwares_alloc = 0;
-    virBhyveDriverConfigPtr cfg = virBhyveDriverGetConfig(conn);
+    struct _virBhyveDriverConfig *cfg = virBhyveDriverGetConfig(conn);
     const char *firmware_dir = cfg->firmwareDir;
-    virDomainCapsStringValuesPtr firmwares = NULL;
+    virDomainCapsStringValues *firmwares = NULL;
 
     if (!(caps = virDomainCapsNew(emulatorbin, machine, arch, virttype)))
         goto cleanup;
@@ -150,20 +150,13 @@ virBhyveDomainCapsBuild(bhyveConnPtr conn,
         goto cleanup;
     }
 
-    if (VIR_ALLOC(firmwares) < 0)
-        goto cleanup;
+    firmwares = g_new0(virDomainCapsStringValues, 1);
 
     if (virDirOpenIfExists(&dir, firmware_dir) > 0) {
         while ((virDirRead(dir, &entry, firmware_dir)) > 0) {
-            if (VIR_RESIZE_N(firmwares->values,
-                firmwares_alloc, firmwares->nvalues, 1) < 0)
-                goto cleanup;
-
-            if (virAsprintf(
-                    &firmwares->values[firmwares->nvalues],
-                    "%s/%s", firmware_dir, entry->d_name) < 0)
-                goto cleanup;
-
+            VIR_RESIZE_N(firmwares->values, firmwares_alloc, firmwares->nvalues, 1);
+            firmwares->values[firmwares->nvalues] = g_strdup_printf("%s/%s",
+                                                    firmware_dir, entry->d_name);
             firmwares->nvalues++;
         }
     } else {
@@ -175,7 +168,6 @@ virBhyveDomainCapsBuild(bhyveConnPtr conn,
 
  cleanup:
     VIR_FREE(firmwares);
-    VIR_DIR_CLOSE(dir);
     virObjectUnref(cfg);
     return caps;
 }
@@ -184,7 +176,7 @@ int
 virBhyveProbeGrubCaps(virBhyveGrubCapsFlags *caps)
 {
     char *binary, *help;
-    virCommandPtr cmd;
+    virCommand *cmd;
     int ret, exit;
 
     ret = 0;
@@ -223,7 +215,7 @@ bhyveProbeCapsDeviceHelper(unsigned int *caps,
                            unsigned int flag)
 {
     char *error;
-    virCommandPtr cmd = NULL;
+    virCommand *cmd = NULL;
     int ret = -1, exit;
 
     cmd = virCommandNew(binary);
@@ -246,7 +238,7 @@ static int
 bhyveProbeCapsFromHelp(unsigned int *caps, char *binary)
 {
     char *help;
-    virCommandPtr cmd = NULL;
+    virCommand *cmd = NULL;
     int ret = 0, exit;
 
     cmd = virCommandNew(binary);
@@ -326,6 +318,39 @@ bhyveProbeCapsXHCIController(unsigned int *caps, char *binary)
 }
 
 
+static int
+bhyveProbeCapsSoundHda(unsigned int *caps, char *binary)
+{
+    return bhyveProbeCapsDeviceHelper(caps, binary,
+                                      "-s",
+                                      "0,hda",
+                                      "pci slot 0:0: unknown device \"hda\"",
+                                      BHYVE_CAP_SOUND_HDA);
+}
+
+
+static int
+bhyveProbeCapsVNCPassword(unsigned int *caps, char *binary)
+{
+    return bhyveProbeCapsDeviceHelper(caps, binary,
+                                      "-s",
+                                      "0,fbuf,password=",
+                                      "Invalid fbuf emulation \"password\"",
+                                      BHYVE_CAP_VNC_PASSWORD);
+}
+
+
+static int
+bhyveProbeCapsVirtio9p(unsigned int *caps, char *binary)
+{
+    return bhyveProbeCapsDeviceHelper(caps, binary,
+                                      "-s",
+                                      "0,virtio-9p",
+                                      "pci slot 0:0: unknown device \"hda\"",
+                                      BHYVE_CAP_VIRTIO_9P);
+}
+
+
 int
 virBhyveProbeCaps(unsigned int *caps)
 {
@@ -352,6 +377,15 @@ virBhyveProbeCaps(unsigned int *caps)
         goto out;
 
     if ((ret = bhyveProbeCapsXHCIController(caps, binary)))
+        goto out;
+
+    if ((ret = bhyveProbeCapsSoundHda(caps, binary)))
+        goto out;
+
+    if ((ret = bhyveProbeCapsVNCPassword(caps, binary)))
+        goto out;
+
+    if ((ret = bhyveProbeCapsVirtio9p(caps, binary)))
         goto out;
 
  out:

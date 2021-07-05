@@ -20,143 +20,262 @@
 
 #include <config.h>
 
-#ifdef MAJOR_IN_MKDEV
-# include <sys/mkdev.h>
-#elif MAJOR_IN_SYSMACROS
-# include <sys/sysmacros.h>
-#endif
-
-#ifdef WITH_DEVMAPPER
-# include <libdevmapper.h>
-#endif
-
 #include "virdevmapper.h"
 #include "internal.h"
-#include "virthread.h"
-#include "viralloc.h"
-#include "virstring.h"
 
-#ifdef WITH_DEVMAPPER
-static void
-virDevMapperDummyLogger(int level ATTRIBUTE_UNUSED,
-                        const char *file ATTRIBUTE_UNUSED,
-                        int line ATTRIBUTE_UNUSED,
-                        int dm_errno ATTRIBUTE_UNUSED,
-                        const char *fmt ATTRIBUTE_UNUSED,
-                        ...)
-{
-    return;
-}
+#ifdef __linux__
+# include <sys/sysmacros.h>
+# include <linux/dm-ioctl.h>
+# include <sys/ioctl.h>
+# include <sys/types.h>
+# include <sys/stat.h>
+# include <fcntl.h>
+
+# include "virthread.h"
+# include "viralloc.h"
+# include "virstring.h"
+# include "virfile.h"
+# include "virlog.h"
+
+# define VIR_FROM_THIS VIR_FROM_STORAGE
+
+VIR_LOG_INIT("util.virdevmapper");
+
+# define PROC_DEVICES "/proc/devices"
+# define DM_NAME "device-mapper"
+# define DEV_DM_DIR "/dev/" DM_DIR
+# define CONTROL_PATH DEV_DM_DIR "/" DM_CONTROL_NODE
+# define BUF_SIZE (16 * 1024)
+
+G_STATIC_ASSERT(BUF_SIZE > sizeof(struct dm_ioctl));
+
 
 static int
-virDevMapperOnceInit(void)
+virDevMapperGetMajor(unsigned int *major)
 {
-    /* Ideally, we would not need this. But libdevmapper prints
-     * error messages to stderr by default. Sad but true. */
-    dm_log_with_errno_init(virDevMapperDummyLogger);
+    g_autofree char *buf = NULL;
+    g_auto(GStrv) lines = NULL;
+    size_t i;
+
+    if (!virFileExists(CONTROL_PATH))
+        return -2;
+
+    if (virFileReadAll(PROC_DEVICES, BUF_SIZE, &buf) < 0)
+        return -1;
+
+    lines = g_strsplit(buf, "\n", 0);
+    if (!lines)
+        return -1;
+
+    for (i = 0; lines[i]; i++) {
+        g_autofree char *dev = NULL;
+        unsigned int maj;
+
+        if (sscanf(lines[i], "%u %ms\n", &maj, &dev) == 2 &&
+            STREQ(dev, DM_NAME)) {
+            *major = maj;
+            break;
+        }
+    }
+
+    if (!lines[i]) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Unable to find major for %s"),
+                       DM_NAME);
+        return -1;
+    }
+
     return 0;
 }
 
 
-VIR_ONCE_GLOBAL_INIT(virDevMapper);
+static void *
+virDMIoctl(int controlFD, int cmd, struct dm_ioctl *dm, char **buf)
+{
+    size_t bufsize = BUF_SIZE;
+
+ reread:
+    *buf = g_new0(char, bufsize);
+
+    dm->version[0] = DM_VERSION_MAJOR;
+    dm->version[1] = 0;
+    dm->version[2] = 0;
+    dm->data_size = bufsize;
+    dm->data_start = sizeof(struct dm_ioctl);
+
+    memcpy(*buf, dm, sizeof(struct dm_ioctl));
+
+    if (ioctl(controlFD, cmd, *buf) < 0) {
+        VIR_FREE(*buf);
+        return NULL;
+    }
+
+    memcpy(dm, *buf, sizeof(struct dm_ioctl));
+
+    if (dm->flags & DM_BUFFER_FULL_FLAG) {
+        bufsize += BUF_SIZE;
+        VIR_FREE(*buf);
+        goto reread;
+    }
+
+    return *buf + dm->data_start;
+}
 
 
 static int
-virDevMapperGetTargetsImpl(const char *path,
+virDMOpen(void)
+{
+    VIR_AUTOCLOSE controlFD = -1;
+    struct dm_ioctl dm;
+    g_autofree char *tmp = NULL;
+    int ret;
+
+    memset(&dm, 0, sizeof(dm));
+
+    if ((controlFD = open(CONTROL_PATH, O_RDWR)) < 0) {
+        /* We can't talk to devmapper. Produce a warning and let
+         * the caller decide what to do next. */
+        if (errno == ENOENT) {
+            VIR_DEBUG("device mapper not available");
+        } else {
+            VIR_WARN("unable to open %s: %s",
+                     CONTROL_PATH, g_strerror(errno));
+        }
+        return -2;
+    }
+
+    if (!virDMIoctl(controlFD, DM_VERSION, &dm, &tmp)) {
+        virReportSystemError(errno, "%s",
+                             _("Unable to get device-mapper version"));
+        return -1;
+    }
+
+    if (dm.version[0] != DM_VERSION_MAJOR) {
+        virReportError(VIR_ERR_OPERATION_UNSUPPORTED,
+                       _("Unsupported device-mapper version. Expected %d got %d"),
+                       DM_VERSION_MAJOR, dm.version[0]);
+        return -1;
+    }
+
+    ret = controlFD;
+    controlFD = -1;
+    return ret;
+}
+
+
+static char *
+virDMSanitizepath(const char *path)
+{
+    g_autofree char *dmDirPath = NULL;
+    struct dirent *ent = NULL;
+    struct stat sb[2];
+    g_autoptr(DIR) dh = NULL;
+    const char *p;
+
+    /* If a path is NOT provided then assume it's DM name */
+    p = strrchr(path, '/');
+
+    if (!p)
+        return g_strdup(path);
+    else
+        p++;
+
+    /* It's a path. Check if the last component is DM name */
+    if (stat(path, &sb[0]) < 0) {
+        virReportError(errno,
+                       _("Unable to stat %p"),
+                       path);
+        return NULL;
+    }
+
+    dmDirPath = g_strdup_printf(DEV_DM_DIR "/%s", p);
+
+    if (stat(dmDirPath, &sb[1]) == 0 &&
+        sb[0].st_rdev == sb[1].st_rdev) {
+        return g_strdup(p);
+    }
+
+    /* The last component of @path wasn't DM name. Let's check if
+     * there's a device under /dev/mapper/ with the same rdev. */
+    if (virDirOpen(&dh, DEV_DM_DIR) < 0)
+        return NULL;
+
+    while (virDirRead(dh, &ent, DEV_DM_DIR) > 0) {
+        g_autofree char *tmp = g_strdup_printf(DEV_DM_DIR "/%s", ent->d_name);
+
+        if (stat(tmp, &sb[1]) == 0 &&
+            sb[0].st_rdev == sb[1].st_rdev) {
+            return g_steal_pointer(&tmp);
+        }
+    }
+
+    return NULL;
+}
+
+
+static int
+virDevMapperGetTargetsImpl(int controlFD,
+                           const char *path,
                            char ***devPaths_ret,
                            unsigned int ttl)
 {
-    struct dm_task *dmt = NULL;
-    struct dm_deps *deps;
-    struct dm_info info;
-    char **devPaths = NULL;
-    char **recursiveDevPaths = NULL;
+    g_autofree char *sanitizedPath = NULL;
+    g_autofree char *buf = NULL;
+    struct dm_ioctl dm;
+    struct dm_target_deps *deps = NULL;
+    g_auto(GStrv) devPaths = NULL;
     size_t i;
-    int ret = -1;
 
+    memset(&dm, 0, sizeof(dm));
     *devPaths_ret = NULL;
-
-    if (virDevMapperInitialize() < 0)
-        return ret;
 
     if (ttl == 0) {
         errno = ELOOP;
-        return ret;
+        return -1;
     }
 
-    if (!(dmt = dm_task_create(DM_DEVICE_DEPS))) {
-        if (errno == ENOENT || errno == ENODEV) {
-            /* It's okay. Kernel is probably built without
-             * devmapper support. */
-            ret = 0;
-        }
-        return ret;
+    if (!virIsDevMapperDevice(path))
+        return 0;
+
+    if (!(sanitizedPath = virDMSanitizepath(path)))
+        return 0;
+
+    if (virStrcpy(dm.name, sanitizedPath, DM_NAME_LEN) < 0) {
+        virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
+                       _("Resolved device mapper name too long"));
+        return -1;
     }
 
-    if (!dm_task_set_name(dmt, path)) {
-        if (errno == ENOENT) {
-            /* It's okay, @path is not managed by devmapper =>
-             * not a devmapper device. */
-            ret = 0;
-        }
-        goto cleanup;
+    deps = virDMIoctl(controlFD, DM_TABLE_DEPS, &dm, &buf);
+    if (!deps) {
+        if (errno == ENXIO)
+            return 0;
+
+        virReportSystemError(errno,
+                             _("Unable to query dependencies for %s"),
+                             path);
+        return -1;
     }
 
-    dm_task_no_open_count(dmt);
-
-    if (!dm_task_run(dmt)) {
-        if (errno == ENXIO) {
-            /* If @path = "/dev/mapper/control" ENXIO is returned. */
-            ret = 0;
-        }
-        goto cleanup;
+    devPaths = g_new0(char *, deps->count + 1);
+    for (i = 0; i < deps->count; i++) {
+        devPaths[i] = g_strdup_printf("/dev/block/%u:%u",
+                                      major(deps->dev[i]),
+                                      minor(deps->dev[i]));
     }
-
-    if (!dm_task_get_info(dmt, &info))
-        goto cleanup;
-
-    if (!info.exists) {
-        ret = 0;
-        goto cleanup;
-    }
-
-    if (!(deps = dm_task_get_deps(dmt)))
-        goto cleanup;
-
-    if (VIR_ALLOC_N_QUIET(devPaths, deps->count + 1) < 0)
-        goto cleanup;
 
     for (i = 0; i < deps->count; i++) {
-        if (virAsprintfQuiet(&devPaths[i], "/dev/block/%u:%u",
-                             major(deps->device[i]),
-                             minor(deps->device[i])) < 0)
-            goto cleanup;
+        g_auto(GStrv) tmpPaths = NULL;
+
+        if (virDevMapperGetTargetsImpl(controlFD, devPaths[i], &tmpPaths, ttl - 1) < 0)
+            return -1;
+
+        if (virStringListMerge(&devPaths, &tmpPaths) < 0)
+            return -1;
     }
 
-    recursiveDevPaths = NULL;
-    for (i = 0; i < deps->count; i++) {
-        char **tmpPaths;
-
-        if (virDevMapperGetTargetsImpl(devPaths[i], &tmpPaths, ttl - 1) < 0)
-            goto cleanup;
-
-        if (tmpPaths &&
-            virStringListMerge(&recursiveDevPaths, &tmpPaths) < 0) {
-            virStringListFree(tmpPaths);
-            goto cleanup;
-        }
-    }
-
-    if (virStringListMerge(&devPaths, &recursiveDevPaths) < 0)
-        goto cleanup;
-
-    VIR_STEAL_PTR(*devPaths_ret, devPaths);
-    ret = 0;
- cleanup:
-    virStringListFree(recursiveDevPaths);
-    virStringListFree(devPaths);
-    dm_task_destroy(dmt);
-    return ret;
+    *devPaths_ret = g_steal_pointer(&devPaths);
+    return 0;
 }
 
 
@@ -175,9 +294,6 @@ virDevMapperGetTargetsImpl(const char *path,
  * If @path consists of yet another devmapper targets these are
  * consulted recursively.
  *
- * If we don't have permissions to talk to kernel, -1 is returned
- * and errno is set to EBADF.
- *
  * Returns 0 on success,
  *        -1 otherwise (with errno set, no libvirt error is
  *        reported)
@@ -186,22 +302,59 @@ int
 virDevMapperGetTargets(const char *path,
                        char ***devPaths)
 {
+    VIR_AUTOCLOSE controlFD = -1;
     const unsigned int ttl = 32;
 
     /* Arbitrary limit on recursion level. A devmapper target can
      * consist of devices or yet another targets. If that's the
      * case, we have to stop recursion somewhere. */
 
-    return virDevMapperGetTargetsImpl(path, devPaths, ttl);
+    if ((controlFD = virDMOpen()) < 0) {
+        if (controlFD == -2) {
+            /* The CONTROL_PATH doesn't exist or is unusable.
+             * Probably the module isn't loaded, yet. Don't error
+             * out, just exit. */
+            return 0;
+        }
+
+        return -1;
+    }
+
+    return virDevMapperGetTargetsImpl(controlFD, path, devPaths, ttl);
 }
 
-#else /* ! WITH_DEVMAPPER */
+
+bool
+virIsDevMapperDevice(const char *dev_name)
+{
+    struct stat buf;
+    unsigned int major;
+
+    if (virDevMapperGetMajor(&major) < 0)
+        return false;
+
+    if (!stat(dev_name, &buf) &&
+        S_ISBLK(buf.st_mode) &&
+        major(buf.st_rdev) == major)
+        return true;
+
+    return false;
+}
+
+#else /* !defined(__linux__)  */
 
 int
-virDevMapperGetTargets(const char *path ATTRIBUTE_UNUSED,
-                       char ***devPaths ATTRIBUTE_UNUSED)
+virDevMapperGetTargets(const char *path G_GNUC_UNUSED,
+                       char ***devPaths G_GNUC_UNUSED)
 {
     errno = ENOSYS;
     return -1;
 }
-#endif /* ! WITH_DEVMAPPER */
+
+
+bool
+virIsDevMapperDevice(const char *dev_name G_GNUC_UNUSED)
+{
+    return false;
+}
+#endif /* ! defined(__linux__) */

@@ -16,14 +16,11 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRMDEV_H
-# define LIBVIRT_VIRMDEV_H
+#pragma once
 
-# include "internal.h"
-# include "virobject.h"
-# include "virutil.h"
-# include "virautoclean.h"
-# include "virenum.h"
+#include "internal.h"
+#include "virobject.h"
+#include "virenum.h"
 
 typedef enum {
     VIR_MDEV_MODEL_TYPE_VFIO_PCI = 0,
@@ -37,12 +34,21 @@ VIR_ENUM_DECL(virMediatedDeviceModel);
 
 
 typedef struct _virMediatedDevice virMediatedDevice;
-typedef virMediatedDevice *virMediatedDevicePtr;
 typedef struct _virMediatedDeviceList virMediatedDeviceList;
-typedef virMediatedDeviceList *virMediatedDeviceListPtr;
+typedef struct _virMediatedDeviceAttr virMediatedDeviceAttr;
+struct _virMediatedDeviceAttr {
+    char *name;
+    char *value;
+};
+
+virMediatedDeviceAttr *virMediatedDeviceAttrNew(void);
+void virMediatedDeviceAttrFree(virMediatedDeviceAttr *attr);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virMediatedDeviceAttr, virMediatedDeviceAttrFree);
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virMediatedDeviceList, virObjectUnref);
+
 
 typedef struct _virMediatedDeviceType virMediatedDeviceType;
-typedef virMediatedDeviceType *virMediatedDeviceTypePtr;
 struct _virMediatedDeviceType {
     char *id;
     char *name;
@@ -50,27 +56,27 @@ struct _virMediatedDeviceType {
     unsigned int available_instances;
 };
 
-typedef int (*virMediatedDeviceCallback)(virMediatedDevicePtr dev,
+typedef int (*virMediatedDeviceCallback)(virMediatedDevice *dev,
                                          const char *path, void *opaque);
 
-virMediatedDevicePtr
+virMediatedDevice *
 virMediatedDeviceNew(const char *uuidstr, virMediatedDeviceModelType model);
 
-virMediatedDevicePtr
-virMediatedDeviceCopy(virMediatedDevicePtr dev);
+virMediatedDevice *
+virMediatedDeviceCopy(virMediatedDevice *dev);
 
 void
-virMediatedDeviceFree(virMediatedDevicePtr dev);
+virMediatedDeviceFree(virMediatedDevice *dev);
 
 const char *
-virMediatedDeviceGetPath(virMediatedDevicePtr dev);
+virMediatedDeviceGetPath(virMediatedDevice *dev);
 
 void
-virMediatedDeviceGetUsedBy(virMediatedDevicePtr dev,
+virMediatedDeviceGetUsedBy(virMediatedDevice *dev,
                            const char **drvname, const char **domname);
 
 int
-virMediatedDeviceSetUsedBy(virMediatedDevicePtr dev,
+virMediatedDeviceSetUsedBy(virMediatedDevice *dev,
                            const char *drvname,
                            const char *domname);
 
@@ -84,61 +90,64 @@ char *
 virMediatedDeviceGetSysfsPath(const char *uuidstr);
 
 bool
-virMediatedDeviceIsUsed(virMediatedDevicePtr dev,
-                        virMediatedDeviceListPtr list);
+virMediatedDeviceIsUsed(virMediatedDevice *dev,
+                        virMediatedDeviceList *list);
 
 bool
-virMediatedDeviceIsUsed(virMediatedDevicePtr dev,
-                        virMediatedDeviceListPtr list);
+virMediatedDeviceIsUsed(virMediatedDevice *dev,
+                        virMediatedDeviceList *list);
 
-virMediatedDeviceListPtr
+virMediatedDeviceList *
 virMediatedDeviceListNew(void);
 
 int
-virMediatedDeviceListAdd(virMediatedDeviceListPtr list,
-                         virMediatedDevicePtr *dev);
+virMediatedDeviceListAdd(virMediatedDeviceList *list,
+                         virMediatedDevice **dev);
 
-virMediatedDevicePtr
-virMediatedDeviceListGet(virMediatedDeviceListPtr list,
+virMediatedDevice *
+virMediatedDeviceListGet(virMediatedDeviceList *list,
                          ssize_t idx);
 
 size_t
-virMediatedDeviceListCount(virMediatedDeviceListPtr list);
+virMediatedDeviceListCount(virMediatedDeviceList *list);
 
-virMediatedDevicePtr
-virMediatedDeviceListSteal(virMediatedDeviceListPtr list,
-                           virMediatedDevicePtr dev);
+virMediatedDevice *
+virMediatedDeviceListSteal(virMediatedDeviceList *list,
+                           virMediatedDevice *dev);
 
-virMediatedDevicePtr
-virMediatedDeviceListStealIndex(virMediatedDeviceListPtr list,
+virMediatedDevice *
+virMediatedDeviceListStealIndex(virMediatedDeviceList *list,
                                 ssize_t idx);
 
 void
-virMediatedDeviceListDel(virMediatedDeviceListPtr list,
-                         virMediatedDevicePtr dev);
+virMediatedDeviceListDel(virMediatedDeviceList *list,
+                         virMediatedDevice *dev);
 
-virMediatedDevicePtr
-virMediatedDeviceListFind(virMediatedDeviceListPtr list,
-                          virMediatedDevicePtr dev);
-
-int
-virMediatedDeviceListFindIndex(virMediatedDeviceListPtr list,
-                               virMediatedDevicePtr dev);
+virMediatedDevice *
+virMediatedDeviceListFind(virMediatedDeviceList *list,
+                          const char *sysfspath);
 
 int
-virMediatedDeviceListMarkDevices(virMediatedDeviceListPtr dst,
-                                 virMediatedDeviceListPtr src,
+virMediatedDeviceListFindIndex(virMediatedDeviceList *list,
+                               const char *sysfspath);
+
+int
+virMediatedDeviceListMarkDevices(virMediatedDeviceList *dst,
+                                 virMediatedDeviceList *src,
                                  const char *drvname,
                                  const char *domname);
 
 void
-virMediatedDeviceTypeFree(virMediatedDeviceTypePtr type);
+virMediatedDeviceTypeFree(virMediatedDeviceType *type);
 
 int
 virMediatedDeviceTypeReadAttrs(const char *sysfspath,
-                               virMediatedDeviceTypePtr *type);
+                               virMediatedDeviceType **type);
 
-VIR_DEFINE_AUTOPTR_FUNC(virMediatedDevice, virMediatedDeviceFree);
-VIR_DEFINE_AUTOPTR_FUNC(virMediatedDeviceType, virMediatedDeviceTypeFree);
+ssize_t
+virMediatedDeviceGetMdevTypes(const char *sysfspath,
+                              virMediatedDeviceType ***types,
+                              size_t *ntypes);
 
-#endif /* LIBVIRT_VIRMDEV_H */
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virMediatedDevice, virMediatedDeviceFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virMediatedDeviceType, virMediatedDeviceTypeFree);

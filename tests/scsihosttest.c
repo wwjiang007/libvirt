@@ -25,6 +25,7 @@
 
 # include <fcntl.h>
 # include <sys/stat.h>
+# include <unistd.h>
 # include "virstring.h"
 # include "virerror.h"
 # include "virlog.h"
@@ -72,13 +73,10 @@ create_scsihost(const char *fakesysfsdir, const char *devicepath,
     int ret = -1;
     int fd = -1;
 
-    if (virAsprintfQuiet(&unique_id_path, "%s/devices/pci0000:00/%s/unique_id",
-                         fakesysfsdir, devicepath) < 0 ||
-        virAsprintfQuiet(&link_path, "%s/class/scsi_host/%s",
-                         fakesysfsdir, hostname) < 0) {
-        fprintf(stderr, "Out of memory\n");
-        goto cleanup;
-    }
+    unique_id_path = g_strdup_printf("%s/devices/pci0000:00/%s/unique_id",
+                                     fakesysfsdir, devicepath);
+    link_path = g_strdup_printf("%s/class/scsi_host/%s",
+                                fakesysfsdir, hostname);
 
     /* Rather than create path & file, temporarily snip off the file to
      * create the path
@@ -89,7 +87,7 @@ create_scsihost(const char *fakesysfsdir, const char *devicepath,
     }
     spot--;
     *spot = '\0';
-    if (virFileMakePathWithMode(unique_id_path, 0755) < 0) {
+    if (g_mkdir_with_parents(unique_id_path, 0755) < 0) {
         fprintf(stderr, "Unable to make path to '%s'\n", unique_id_path);
         goto cleanup;
     }
@@ -104,7 +102,7 @@ create_scsihost(const char *fakesysfsdir, const char *devicepath,
     }
     spot--;
     *spot = '\0';
-    if (virFileMakePathWithMode(link_path, 0755) < 0) {
+    if (g_mkdir_with_parents(link_path, 0755) < 0) {
         fprintf(stderr, "Unable to make path to '%s'\n", link_path);
         goto cleanup;
     }
@@ -168,7 +166,7 @@ init_scsihost_sysfs(const char *fakesysfsdir)
 
 /* Test virReadSCSIUniqueId */
 static int
-testVirReadSCSIUniqueId(const void *data ATTRIBUTE_UNUSED)
+testVirReadSCSIUniqueId(const void *data G_GNUC_UNUSED)
 {
     int hostnum, unique_id;
 
@@ -198,19 +196,14 @@ testVirReadSCSIUniqueId(const void *data ATTRIBUTE_UNUSED)
 
 /* Test virSCSIHostFindByPCI */
 static int
-testVirFindSCSIHostByPCI(const void *data ATTRIBUTE_UNUSED)
+testVirFindSCSIHostByPCI(const void *data G_GNUC_UNUSED)
 {
     unsigned int unique_id1 = 1;
     unsigned int unique_id2 = 2;
     const char *pci_addr1 = "0000:00:1f.1";
     const char *pci_addr2 = "0000:00:1f.2";
-    char *path_addr = NULL;
     char *ret_host = NULL;
     int ret = -1;
-
-    if (virAsprintf(&path_addr, "%s/%s", abs_srcdir,
-                    "sysfs/class/scsi_host") < 0)
-        goto cleanup;
 
     if (!(ret_host = virSCSIHostFindByPCI(TEST_SCSIHOST_CLASS_PATH,
                                           pci_addr1, unique_id1)) ||
@@ -240,7 +233,6 @@ testVirFindSCSIHostByPCI(const void *data ATTRIBUTE_UNUSED)
 
  cleanup:
     VIR_FREE(ret_host);
-    VIR_FREE(path_addr);
     return ret;
 }
 
@@ -253,31 +245,21 @@ mymain(void)
     char *fakerootdir = NULL;
     char *fakesysfsdir = NULL;
 
-    if (VIR_STRDUP_QUIET(fakerootdir, FAKEROOTDIRTEMPLATE) < 0) {
-        fprintf(stderr, "Out of memory\n");
-        goto cleanup;
-    }
+    fakerootdir = g_strdup(FAKEROOTDIRTEMPLATE);
 
-    if (!mkdtemp(fakerootdir)) {
+    if (!g_mkdtemp(fakerootdir)) {
         fprintf(stderr, "Cannot create fakerootdir");
         goto cleanup;
     }
 
-    if (virAsprintfQuiet(&fakesysfsdir, "%s/sys", fakerootdir) < 0) {
-        fprintf(stderr, "Out of memory\n");
-        goto cleanup;
-    }
+    fakesysfsdir = g_strdup_printf("%s/sys", fakerootdir);
 
     if (init_scsihost_sysfs(fakesysfsdir) < 0) {
         fprintf(stderr, "Failed to create fakesysfs='%s'\n", fakesysfsdir);
         goto cleanup;
     }
 
-    if (virAsprintfQuiet(&scsihost_class_path, "%s/class/scsi_host",
-                         fakesysfsdir) < 0) {
-        fprintf(stderr, "Out of memory\n");
-        goto cleanup;
-    }
+    scsihost_class_path = g_strdup_printf("%s/class/scsi_host", fakesysfsdir);
     VIR_DEBUG("Reading from '%s'", scsihost_class_path);
 
     if (virTestRun("testVirReadSCSIUniqueId",
@@ -300,7 +282,7 @@ mymain(void)
     VIR_FREE(fakerootdir);
     VIR_FREE(fakesysfsdir);
     VIR_FREE(scsihost_class_path);
-    return ret;
+    return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 VIR_TEST_MAIN(mymain)

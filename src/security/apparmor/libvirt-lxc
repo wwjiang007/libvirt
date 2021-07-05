@@ -1,6 +1,8 @@
-# Last Modified: Fri Feb  7 13:01:36 2014
-
   #include <abstractions/base>
+
+ # Allow receiving signals from libvirtd
+  signal (receive) peer=libvirtd,
+  signal (receive) peer=/usr/sbin/libvirtd,
 
   umount,
 

@@ -19,26 +19,23 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRNETSOCKET_H
-# define LIBVIRT_VIRNETSOCKET_H
+#pragma once
 
-# include "virsocketaddr.h"
-# include "vircommand.h"
-# ifdef WITH_GNUTLS
-#  include "virnettlscontext.h"
-# endif
-# include "virobject.h"
-# ifdef WITH_SASL
-#  include "virnetsaslcontext.h"
-# endif
-# include "virjson.h"
-# include "viruri.h"
+#include "virsocketaddr.h"
+#include "vircommand.h"
+#include "virnettlscontext.h"
+#include "virobject.h"
+#ifdef WITH_SASL
+# include "virnetsaslcontext.h"
+#endif
+#include "virjson.h"
+#include "viruri.h"
 
 typedef struct _virNetSocket virNetSocket;
-typedef virNetSocket *virNetSocketPtr;
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNetSocket, virObjectUnref);
 
-typedef void (*virNetSocketIOFunc)(virNetSocketPtr sock,
+typedef void (*virNetSocketIOFunc)(virNetSocket *sock,
                                    int events,
                                    void *opaque);
 
@@ -49,30 +46,30 @@ int virNetSocketCheckProtocols(bool *hasIPv4,
 int virNetSocketNewListenTCP(const char *nodename,
                              const char *service,
                              int family,
-                             virNetSocketPtr **addrs,
+                             virNetSocket ***addrs,
                              size_t *naddrs);
 
 int virNetSocketNewListenUNIX(const char *path,
                               mode_t mask,
                               uid_t user,
                               gid_t grp,
-                              virNetSocketPtr *addr);
+                              virNetSocket **addr);
 
 int virNetSocketNewListenFD(int fd,
-                            virNetSocketPtr *addr);
+                            bool unlinkUNIX,
+                            virNetSocket **addr);
 
 int virNetSocketNewConnectTCP(const char *nodename,
                               const char *service,
                               int family,
-                              virNetSocketPtr *addr);
+                              virNetSocket **addr);
 
 int virNetSocketNewConnectUNIX(const char *path,
-                               bool spawnDaemon,
-                               const char *binary,
-                               virNetSocketPtr *addr);
+                               const char *spawnDaemonPath,
+                               virNetSocket **addr);
 
-int virNetSocketNewConnectCommand(virCommandPtr cmd,
-                                  virNetSocketPtr *retsock);
+int virNetSocketNewConnectCommand(virCommand *cmd,
+                                  virNetSocket **retsock);
 
 int virNetSocketNewConnectSSH(const char *nodename,
                               const char *service,
@@ -80,10 +77,9 @@ int virNetSocketNewConnectSSH(const char *nodename,
                               const char *username,
                               bool noTTY,
                               bool noVerify,
-                              const char *netcat,
                               const char *keyfile,
-                              const char *path,
-                              virNetSocketPtr *addr);
+                              const char *command,
+                              virNetSocket **addr);
 
 int virNetSocketNewConnectLibSSH2(const char *host,
                                   const char *port,
@@ -95,8 +91,8 @@ int virNetSocketNewConnectLibSSH2(const char *host,
                                   const char *authMethods,
                                   const char *command,
                                   virConnectAuthPtr auth,
-                                  virURIPtr uri,
-                                  virNetSocketPtr *retsock);
+                                  virURI *uri,
+                                  virNetSocket **retsock);
 
 int virNetSocketNewConnectLibssh(const char *host,
                                  const char *port,
@@ -108,81 +104,77 @@ int virNetSocketNewConnectLibssh(const char *host,
                                  const char *authMethods,
                                  const char *command,
                                  virConnectAuthPtr auth,
-                                 virURIPtr uri,
-                                 virNetSocketPtr *retsock);
+                                 virURI *uri,
+                                 virNetSocket **retsock);
 
 int virNetSocketNewConnectExternal(const char **cmdargv,
-                                   virNetSocketPtr *addr);
+                                   virNetSocket **addr);
 
 int virNetSocketNewConnectSockFD(int sockfd,
-                                 virNetSocketPtr *retsock);
+                                 virNetSocket **retsock);
 
-virNetSocketPtr virNetSocketNewPostExecRestart(virJSONValuePtr object);
+virNetSocket *virNetSocketNewPostExecRestart(virJSONValue *object);
 
-virJSONValuePtr virNetSocketPreExecRestart(virNetSocketPtr sock);
+virJSONValue *virNetSocketPreExecRestart(virNetSocket *sock);
 
-int virNetSocketGetFD(virNetSocketPtr sock);
-int virNetSocketDupFD(virNetSocketPtr sock, bool cloexec);
+int virNetSocketGetFD(virNetSocket *sock);
+int virNetSocketDupFD(virNetSocket *sock, bool cloexec);
 
-bool virNetSocketIsLocal(virNetSocketPtr sock);
+bool virNetSocketIsLocal(virNetSocket *sock);
 
-bool virNetSocketHasPassFD(virNetSocketPtr sock);
+bool virNetSocketHasPassFD(virNetSocket *sock);
 
-int virNetSocketGetPort(virNetSocketPtr sock);
+char *virNetSocketGetPath(virNetSocket *sock);
+int virNetSocketGetPort(virNetSocket *sock);
 
-int virNetSocketGetUNIXIdentity(virNetSocketPtr sock,
+int virNetSocketGetUNIXIdentity(virNetSocket *sock,
                                 uid_t *uid,
                                 gid_t *gid,
                                 pid_t *pid,
                                 unsigned long long *timestamp)
-    ATTRIBUTE_NOINLINE;
-int virNetSocketGetSELinuxContext(virNetSocketPtr sock,
+    G_GNUC_NO_INLINE;
+int virNetSocketGetSELinuxContext(virNetSocket *sock,
                                   char **context)
-    ATTRIBUTE_NOINLINE;
+    G_GNUC_NO_INLINE;
 
-int virNetSocketSetBlocking(virNetSocketPtr sock,
+int virNetSocketSetBlocking(virNetSocket *sock,
                             bool blocking);
 
-void virNetSocketSetQuietEOF(virNetSocketPtr sock);
+void virNetSocketSetQuietEOF(virNetSocket *sock);
 
-ssize_t virNetSocketRead(virNetSocketPtr sock, char *buf, size_t len);
-ssize_t virNetSocketWrite(virNetSocketPtr sock, const char *buf, size_t len);
+ssize_t virNetSocketRead(virNetSocket *sock, char *buf, size_t len);
+ssize_t virNetSocketWrite(virNetSocket *sock, const char *buf, size_t len);
 
-int virNetSocketSendFD(virNetSocketPtr sock, int fd);
-int virNetSocketRecvFD(virNetSocketPtr sock, int *fd);
+int virNetSocketSendFD(virNetSocket *sock, int fd);
+int virNetSocketRecvFD(virNetSocket *sock, int *fd);
 
-# ifdef WITH_GNUTLS
-void virNetSocketSetTLSSession(virNetSocketPtr sock,
-                               virNetTLSSessionPtr sess);
-# endif
+void virNetSocketSetTLSSession(virNetSocket *sock,
+                               virNetTLSSession *sess);
 
-# ifdef WITH_SASL
-void virNetSocketSetSASLSession(virNetSocketPtr sock,
-                                virNetSASLSessionPtr sess);
-# endif
-bool virNetSocketHasCachedData(virNetSocketPtr sock);
-bool virNetSocketHasPendingData(virNetSocketPtr sock);
+#ifdef WITH_SASL
+void virNetSocketSetSASLSession(virNetSocket *sock,
+                                virNetSASLSession *sess);
+#endif
+bool virNetSocketHasCachedData(virNetSocket *sock);
+bool virNetSocketHasPendingData(virNetSocket *sock);
 
-const char *virNetSocketLocalAddrStringSASL(virNetSocketPtr sock);
-const char *virNetSocketRemoteAddrStringSASL(virNetSocketPtr sock);
-const char *virNetSocketRemoteAddrStringURI(virNetSocketPtr sock);
+const char *virNetSocketLocalAddrStringSASL(virNetSocket *sock);
+const char *virNetSocketRemoteAddrStringSASL(virNetSocket *sock);
+const char *virNetSocketRemoteAddrStringURI(virNetSocket *sock);
 
-int virNetSocketListen(virNetSocketPtr sock, int backlog);
-int virNetSocketAccept(virNetSocketPtr sock,
-                       virNetSocketPtr *clientsock);
+int virNetSocketListen(virNetSocket *sock, int backlog);
+int virNetSocketAccept(virNetSocket *sock,
+                       virNetSocket **clientsock);
 
-int virNetSocketAddIOCallback(virNetSocketPtr sock,
+int virNetSocketAddIOCallback(virNetSocket *sock,
                               int events,
                               virNetSocketIOFunc func,
                               void *opaque,
                               virFreeCallback ff);
 
-void virNetSocketUpdateIOCallback(virNetSocketPtr sock,
+void virNetSocketUpdateIOCallback(virNetSocket *sock,
                                   int events);
 
-void virNetSocketRemoveIOCallback(virNetSocketPtr sock);
+void virNetSocketRemoveIOCallback(virNetSocket *sock);
 
-void virNetSocketClose(virNetSocketPtr sock);
-
-
-#endif /* LIBVIRT_VIRNETSOCKET_H */
+void virNetSocketClose(virNetSocket *sock);

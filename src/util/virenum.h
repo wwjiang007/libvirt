@@ -16,10 +16,9 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRENUM_H
-# define LIBVIRT_VIRENUM_H
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
 int
 virEnumFromString(const char * const *types,
@@ -31,21 +30,21 @@ virEnumToString(const char * const *types,
                 unsigned int ntypes,
                 int type);
 
-# define VIR_ENUM_IMPL(name, lastVal, ...) \
+#define VIR_ENUM_IMPL(name, lastVal, ...) \
     static const char *const name ## TypeList[] = { __VA_ARGS__ }; \
     const char *name ## TypeToString(int type) { \
         return virEnumToString(name ## TypeList, \
-                               ARRAY_CARDINALITY(name ## TypeList), \
+                               G_N_ELEMENTS(name ## TypeList), \
                                type); \
     } \
     int name ## TypeFromString(const char *type) { \
         return virEnumFromString(name ## TypeList, \
-                                 ARRAY_CARDINALITY(name ## TypeList), \
+                                 G_N_ELEMENTS(name ## TypeList), \
                                  type); \
     } \
-    verify(ARRAY_CARDINALITY(name ## TypeList) == lastVal)
+    G_STATIC_ASSERT(G_N_ELEMENTS(name ## TypeList) == lastVal)
 
-# define VIR_ENUM_DECL(name) \
+#define VIR_ENUM_DECL(name) \
     const char *name ## TypeToString(int type); \
     int name ## TypeFromString(const char*type)
 
@@ -73,8 +72,6 @@ virTristateSwitch virTristateSwitchFromBool(bool val);
 
 /* the two enums must be in sync to be able to use helpers interchangeably in
  * some special cases */
-verify((int)VIR_TRISTATE_BOOL_YES == (int)VIR_TRISTATE_SWITCH_ON);
-verify((int)VIR_TRISTATE_BOOL_NO == (int)VIR_TRISTATE_SWITCH_OFF);
-verify((int)VIR_TRISTATE_BOOL_ABSENT == (int)VIR_TRISTATE_SWITCH_ABSENT);
-
-#endif /* LIBVIRT_VIRENUM_H */
+G_STATIC_ASSERT((int)VIR_TRISTATE_BOOL_YES == (int)VIR_TRISTATE_SWITCH_ON);
+G_STATIC_ASSERT((int)VIR_TRISTATE_BOOL_NO == (int)VIR_TRISTATE_SWITCH_OFF);
+G_STATIC_ASSERT((int)VIR_TRISTATE_BOOL_ABSENT == (int)VIR_TRISTATE_SWITCH_ABSENT);

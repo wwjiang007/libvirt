@@ -48,7 +48,7 @@
       <dt><code>name</code></dt>
       <dd>The content of the <code>name</code> element provides
         a short name for the virtual network. This name should
-        consist only of alpha-numeric characters and is required
+        consist only of alphanumeric characters and is required
         to be unique within the scope of a single host. It is
         used to form the filename for storing the persistent
         configuration file. <span class="since">Since 0.3.0</span></dd>
@@ -274,6 +274,20 @@
     &lt;nat&gt;
       &lt;port start='500' end='1000'/&gt;
     &lt;/nat&gt;
+  &lt;/forward&gt;
+...</pre>
+
+            <p>
+              <span class="since">Since 6.5.0</span> it is possible to
+              enable NAT with IPv6 networking. As noted above, IPv6
+              has historically done plain forwarding and thus to avoid
+              breaking historical compatibility, IPv6 NAT must be
+              explicitly requested.
+            </p>
+            <pre>
+...
+  &lt;forward mode='nat'&gt;
+    &lt;nat ipv6='yes'/&gt;
   &lt;/forward&gt;
 ...</pre>
           </dd>
@@ -548,10 +562,10 @@
         (<span class="since">since 0.9.4</span>). Setting
         <code>bandwidth</code> for a network is supported only
         for networks with a <code>&lt;forward&gt;</code> mode
-        of <code>route</code>, <code>nat</code>, or no mode at all
-        (i.e. an "isolated" network). Setting <code>bandwidth</code>
-        is <b>not</b> supported for forward modes
-        of <code>bridge</code>, <code>passthrough</code>, <code>private</code>,
+        of <code>route</code>, <code>nat</code>, <code>bridge</code>,
+        or no mode at all (i.e. an "isolated" network). Setting
+        <code>bandwidth</code> is <b>not</b> supported for forward modes
+        <code>passthrough</code>, <code>private</code>,
         or <code>hostdev</code>. Attempts to do this will lead to
         a failure to define the network or to create a transient network.
       </p>
@@ -631,7 +645,7 @@
           goes through one point where QoS decisions can take place, hence
           why this attribute works only for virtual networks for now
           (that is <code>&lt;interface type='network'/&gt;</code> with a
-          forward type of route, nat, or no forward at all). Moreover, the
+          forward type of route, nat, open or no forward at all). Moreover, the
           virtual network the interface is connected to is required to have
           at least inbound QoS set (<code>average</code> at least). If
           using the <code>floor</code> attribute users don't need to specify
@@ -727,6 +741,31 @@
       in <code>&lt;network&gt;</code> will be selected only if none is
       given in <code>&lt;portgroup&gt;</code>
       or <code>&lt;interface&gt;</code>.
+    </p>
+
+    <h5><a id="elementPort">Isolating ports from one another</a></h5>
+
+<pre>
+&lt;network&gt;
+  &lt;name&gt;isolated-ports&lt;/name&gt;
+  &lt;forward mode='bridge'/&gt;
+  &lt;bridge name='br0'/&gt;
+  &lt;port isolated='yes'/&gt;
+&lt;/network&gt;
+</pre>
+
+    <p>
+      <span class="since">Since 6.1.0.</span> The <code>port</code>
+      element property <code>isolated</code>, when set
+      to <code>yes</code> (default setting is <code>no</code>) is used
+      to isolate the network traffic of each guest on the network from
+      all other guests connected to the network; it does not have an
+      effect on communication between the guests and the host, or
+      between the guests and destinations beyond this network. This
+      setting is only supported for networks that use a Linux host
+      bridge to connect guest interfaces via a standard tap device
+      (i.e. those with a forward mode of nat, route, open, bridge, or
+      no forward mode).
     </p>
 
     <h5><a id="elementsPortgroup">Portgroups</a></h5>
@@ -891,8 +930,12 @@
 &lt;/dns&gt;
 &lt;ip address="192.168.122.1" netmask="255.255.255.0" localPtr="yes"&gt;
   &lt;dhcp&gt;
-    &lt;range start="192.168.122.100" end="192.168.122.254"/&gt;
-    &lt;host mac="00:16:3e:77:e2:ed" name="foo.example.com" ip="192.168.122.10"/&gt;
+    &lt;range start="192.168.122.100" end="192.168.122.254"&gt;
+      &lt;lease expiry='1' unit='hours'/&gt;
+    &lt;/range&gt;
+    &lt;host mac="00:16:3e:77:e2:ed" name="foo.example.com" ip="192.168.122.10"&gt;
+      &lt;lease expiry='30' unit='minutes'/&gt;
+    &lt;/host&gt;
     &lt;host mac="00:16:3e:3e:a9:1a" name="bar.example.com" ip="192.168.122.11"/&gt;
   &lt;/dhcp&gt;
 &lt;/ip&gt;
@@ -992,7 +1035,7 @@
           <dd>The <code>dns</code> element can have also 0 or more <code>srv</code>
             record elements. Each <code>srv</code> record element defines a DNS SRV record
             and has 2 mandatory and 5 optional attributes. The mandatory attributes
-            are service <code>name</code> and <code>protocol</code> (tcp, udp)
+            are <code>service</code> and <code>protocol</code> (tcp, udp)
             and the optional attributes are <code>target</code>,
             <code>port</code>, <code>priority</code>, <code>weight</code> and
             <code>domain</code> as defined in DNS server SRV RFC (RFC 2782).
@@ -1091,10 +1134,47 @@
                 <span class="since">since 0.7.3</span>)
               </dd>
             </dl>
+
+            <p>
+              Optionally, <code>range</code> and <code>host</code> elements can
+              have <code>lease</code> child element which specifies the lease
+              time through it's attributes <code>expiry</code> and
+              <code>unit</code> (which accepts <code>seconds</code>,
+              <code>minutes</code> and <code>hours</code> and defaults to
+              <code>minutes</code> if omitted). The minimal lease time is 2
+              minutes, except when setting an infinite lease time
+              (<code>expiry='0'</code>).
+              <span class="since">Since 6.3.0</span>
+            </p>
+
           </dd>
         </dl>
       </dd>
     </dl>
+
+    <h3><a id="elementsNamespaces">Network namespaces</a></h3>
+
+    <p>
+      A special XML namespace is available for passing options
+      directly to the underlying dnsmasq configuration
+      file <span class="since">since 5.6.0</span>. Usage of XML
+      namespaces comes with no support guarantees, so use at your own
+      risk.
+    </p>
+
+    <p>
+      This example XML will pass the option strings <code>foo=bar</code> and
+      <code>cname=*.foo.example.com,master.example.com</code> directly to the
+      underlying dnsmasq instance.
+      <pre>
+&lt;network xmlns:dnsmasq='http://libvirt.org/schemas/network/dnsmasq/1.0'&gt;
+  ...
+  &lt;dnsmasq:options&gt;
+    &lt;dnsmasq:option value="foo=bar"/&gt;
+    &lt;dnsmasq:option value="cname=*.foo.example.com,master.example.com"/&gt;
+  &lt;/dnsmasq:options&gt;
+&lt;/network&gt;</pre>
+    </p>
 
     <h2><a id="examples">Example configuration</a></h2>
 
@@ -1145,6 +1225,53 @@
     &lt;/dhcp&gt;
   &lt;/ip&gt;
 &lt;/network&gt;</pre>
+
+    <h3><a id="examplesNATv6">IPv6 NAT based network</a></h3>
+
+    <p>
+      Below is a variation for also providing IPv6 NAT.  This can be
+      especially useful when using multiple interfaces where some,
+      such as WiFi cards, can not be bridged (usually on a laptop),
+      making it difficult to provide end-to-end IPv6 routing.
+    </p>
+
+    <pre>
+&lt;network&gt;
+  &lt;name&gt;default6&lt;/name&gt;
+  &lt;bridge name="virbr0"/&gt;
+  &lt;forward mode="nat"&gt;
+    &lt;nat ipv6='yes'&gt;
+      &lt;port start='1024' end='65535'/&gt;
+    &lt;/nat&gt;
+
+  &lt;ip address="192.168.122.1" netmask="255.255.255.0"&gt;
+    &lt;dhcp&gt;
+      &lt;range start="192.168.122.2" end="192.168.122.254"/&gt;
+    &lt;/dhcp&gt;
+  &lt;/ip&gt;
+  &lt;ip family="ipv6" address="fdXX:XXXX:XXXX:NNNN:: prefix="64"/&gt;
+  &lt;/ip&gt;
+&lt;/network&gt;</pre>
+
+    <p>IPv6 NAT addressing has some caveats over the more straight
+    forward IPv4 case.
+    <a href="https://tools.ietf.org/html/rfc4193">RFC 4193</a>
+    defines the address range <tt>fd00::/8</tt> for <tt>/48</tt> IPv6
+    private networks.  It should be concatenated with a random 40-bit
+    string (i.e. 10 random hexadecimal digits replacing the <tt>X</tt>
+    values above, RFC 4193 provides
+    an <a href="https://tools.ietf.org/html/rfc4193#section-3.2.2">algorithm</a>
+    if you do not have a source of sufficient randomness).  This
+    leaves <tt>0</tt> through <tt>ffff</tt> for subnets (<tt>N</tt>
+    above) which you can use at will.</p>
+
+    <p>Many operating systems will not consider these addresses as
+    preferential to IPv4, due to some practical history of these
+    addresses being present but unroutable and causing networking
+    issues.  On many Linux distributions, you may need to
+    override <tt>/etc/gai.conf</tt> with values
+    from <a href="https://www.ietf.org/rfc/rfc3484.txt">RFC 3484</a>
+    to have your IPv6 NAT network correctly preferenced over IPv4.</p>
 
     <h3><a id="examplesRoute">Routed network config</a></h3>
 

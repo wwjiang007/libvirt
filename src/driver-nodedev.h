@@ -18,12 +18,11 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_DRIVER_NODEDEV_H
-# define LIBVIRT_DRIVER_NODEDEV_H
+#pragma once
 
-# ifndef __VIR_DRIVER_H_INCLUDES___
-#  error "Don't include this file directly, only use driver.h"
-# endif
+#ifndef __VIR_DRIVER_H_INCLUDES___
+# error "Don't include this file directly, only use driver.h"
+#endif
 
 typedef int
 (*virDrvNodeNumOfDevices)(virConnectPtr conn,
@@ -75,6 +74,19 @@ typedef virNodeDevicePtr
 typedef int
 (*virDrvNodeDeviceDestroy)(virNodeDevicePtr dev);
 
+typedef virNodeDevicePtr
+(*virDrvNodeDeviceDefineXML)(virConnectPtr conn,
+                             const char *xmlDesc,
+                             unsigned int flags);
+
+typedef int
+(*virDrvNodeDeviceUndefine)(virNodeDevicePtr dev,
+                            unsigned int flags);
+
+typedef int
+(*virDrvNodeDeviceCreate)(virNodeDevicePtr dev,
+                          unsigned int flags);
+
 typedef int
 (*virDrvConnectNodeDeviceEventRegisterAny)(virConnectPtr conn,
                                            virNodeDevicePtr dev,
@@ -90,7 +102,6 @@ typedef int
 
 
 typedef struct _virNodeDeviceDriver virNodeDeviceDriver;
-typedef virNodeDeviceDriver *virNodeDeviceDriverPtr;
 
 /**
  * _virNodeDeviceDriver:
@@ -114,7 +125,7 @@ struct _virNodeDeviceDriver {
     virDrvNodeDeviceListCaps nodeDeviceListCaps;
     virDrvNodeDeviceCreateXML nodeDeviceCreateXML;
     virDrvNodeDeviceDestroy nodeDeviceDestroy;
+    virDrvNodeDeviceDefineXML nodeDeviceDefineXML;
+    virDrvNodeDeviceUndefine nodeDeviceUndefine;
+    virDrvNodeDeviceCreate nodeDeviceCreate;
 };
-
-
-#endif /* LIBVIRT_DRIVER_NODEDEV_H */

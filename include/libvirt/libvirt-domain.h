@@ -637,10 +637,22 @@ typedef enum {
     VIR_DOMAIN_MEMORY_STAT_DISK_CACHES     = 10,
 
     /*
+     * The number of successful huge page allocations from inside the domain via
+     * virtio balloon.
+     */
+    VIR_DOMAIN_MEMORY_STAT_HUGETLB_PGALLOC    = 11,
+
+    /*
+     * The number of failed huge page allocations from inside the domain via
+     * virtio balloon.
+     */
+    VIR_DOMAIN_MEMORY_STAT_HUGETLB_PGFAIL    = 12,
+
+    /*
      * The number of statistics supported by this version of the interface.
      * To add new statistics, add them to the enum and increase this value.
      */
-    VIR_DOMAIN_MEMORY_STAT_NR              = 11,
+    VIR_DOMAIN_MEMORY_STAT_NR              = 13,
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_DOMAIN_MEMORY_STAT_LAST = VIR_DOMAIN_MEMORY_STAT_NR
@@ -679,10 +691,11 @@ typedef enum {
                                                * lzo compression */
     VIR_DOMAIN_CORE_DUMP_FORMAT_KDUMP_SNAPPY, /* kdump-compressed format, with
                                                * snappy compression */
+    VIR_DOMAIN_CORE_DUMP_FORMAT_WIN_DMP,      /* Windows full crashdump format */
 # ifdef VIR_ENUM_SENTINELS
     VIR_DOMAIN_CORE_DUMP_FORMAT_LAST
     /*
-     * NB: this enum value will increase over time as new events are
+     * NB: this enum value will increase over time as new formats are
      * added to the libvirt API. It reflects the last state supported
      * by this version of the libvirt API.
      */
@@ -970,6 +983,19 @@ typedef enum {
 # define VIR_MIGRATE_PARAM_DISKS_PORT    "disks_port"
 
 /**
+ * VIR_MIGRATE_PARAM_DISKS_URI:
+ *
+ * virDomainMigrate* params field: URI used for incoming disks migration. Type
+ * is VIR_TYPED_PARAM_STRING. Only schemes "tcp" and "unix" are accepted. TCP
+ * URI can currently only provide a server and port to listen on (and connect
+ * to), UNIX URI may only provide a path component for a UNIX socket. This is
+ * currently only supported by the QEMU driver.  UNIX URI is only usable if the
+ * management application makes sure that socket created with this name on the
+ * destination will be reachable from the source under the same exact path.
+ */
+# define VIR_MIGRATE_PARAM_DISKS_URI    "disks_uri"
+
+/**
  * VIR_MIGRATE_PARAM_COMPRESSION:
  *
  * virDomainMigrate* params multiple field: name of the method used to
@@ -1038,6 +1064,20 @@ typedef enum {
  * migration. As VIR_TYPED_PARAM_INT.
  */
 # define VIR_MIGRATE_PARAM_PARALLEL_CONNECTIONS     "parallel.connections"
+
+/**
+ * VIR_MIGRATE_PARAM_TLS_DESTINATION:
+ *
+ * virDomainMigrate* params field: override the destination host name used for
+ * TLS verification. As VIR_TYPED_PARAM_STRING.
+ *
+ * Normally the TLS certificate from the destination host must match the host's
+ * name for TLS verification to succeed. When the certificate does not match
+ * the destination hostname and the expected certificate's hostname is known,
+ * this parameter can be used to pass this expected hostname when starting
+ * the migration.
+ */
+# define VIR_MIGRATE_PARAM_TLS_DESTINATION          "tls.destination"
 
 /* Domain migration. */
 virDomainPtr virDomainMigrate (virDomainPtr domain, virConnectPtr dconn,
@@ -1402,7 +1442,7 @@ char *                  virDomainGetSchedulerType(virDomainPtr domain,
 # define VIR_DOMAIN_BLKIO_DEVICE_WRITE_BPS "device_write_bytes_sec"
 
 
-/* Set Blkio tunables for the domain*/
+/* Set Blkio tunables for the domain */
 int     virDomainSetBlkioParameters(virDomainPtr domain,
                                     virTypedParameterPtr params,
                                     int nparams, unsigned int flags);
@@ -1410,7 +1450,7 @@ int     virDomainGetBlkioParameters(virDomainPtr domain,
                                     virTypedParameterPtr params,
                                     int *nparams, unsigned int flags);
 
-/* Manage memory parameters.  */
+/* Manage memory parameters. */
 
 /**
  * VIR_DOMAIN_MEMORY_PARAM_UNLIMITED:
@@ -1457,7 +1497,7 @@ int     virDomainGetBlkioParameters(virDomainPtr domain,
 
 # define VIR_DOMAIN_MEMORY_SWAP_HARD_LIMIT "swap_hard_limit"
 
-/* Set memory tunables for the domain*/
+/* Set memory tunables for the domain */
 int     virDomainSetMemoryParameters(virDomainPtr domain,
                                      virTypedParameterPtr params,
                                      int nparams, unsigned int flags);
@@ -1488,6 +1528,7 @@ typedef enum {
     VIR_DOMAIN_NUMATUNE_MEM_STRICT      = 0,
     VIR_DOMAIN_NUMATUNE_MEM_PREFERRED   = 1,
     VIR_DOMAIN_NUMATUNE_MEM_INTERLEAVE  = 2,
+    VIR_DOMAIN_NUMATUNE_MEM_RESTRICTIVE = 3,
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_DOMAIN_NUMATUNE_MEM_LAST /* This constant is subject to change */
@@ -1541,6 +1582,12 @@ int                     virDomainSetMemoryStatsPeriod (virDomainPtr domain,
 int                     virDomainGetMaxVcpus    (virDomainPtr domain);
 int                     virDomainGetSecurityLabel (virDomainPtr domain,
                                                    virSecurityLabelPtr seclabel);
+
+typedef enum {
+    VIR_DOMAIN_GET_HOSTNAME_LEASE = (1 << 0), /* Parse DHCP lease file */
+    VIR_DOMAIN_GET_HOSTNAME_AGENT = (1 << 1), /* Query qemu guest agent */
+} virDomainGetHostnameFlags;
+
 char *                  virDomainGetHostname    (virDomainPtr domain,
                                                  unsigned int flags);
 int                     virDomainGetSecurityLabelList (virDomainPtr domain,
@@ -1736,7 +1783,7 @@ struct _virDomainBlockInfo {
                                     * holes, similar to 'du') */
     unsigned long long physical;   /* host physical size in bytes of
                                     * the image container (last
-                                    * offset, similar to 'ls')*/
+                                    * offset, similar to 'ls') */
 };
 
 int                     virDomainGetBlockInfo(virDomainPtr dom,
@@ -1788,6 +1835,9 @@ typedef enum {
     VIR_DOMAIN_UNDEFINE_NVRAM              = (1 << 2), /* Also remove any
                                                           nvram file */
     VIR_DOMAIN_UNDEFINE_KEEP_NVRAM         = (1 << 3), /* Keep nvram file */
+    VIR_DOMAIN_UNDEFINE_CHECKPOINTS_METADATA = (1 << 4), /* If last use of domain,
+                                                            then also remove any
+                                                            checkpoint metadata */
 
     /* Future undefine control flags should come here. */
 } virDomainUndefineFlagsValues;
@@ -1826,6 +1876,9 @@ typedef enum {
 
     VIR_CONNECT_LIST_DOMAINS_HAS_SNAPSHOT   = 1 << 12,
     VIR_CONNECT_LIST_DOMAINS_NO_SNAPSHOT    = 1 << 13,
+
+    VIR_CONNECT_LIST_DOMAINS_HAS_CHECKPOINT = 1 << 14,
+    VIR_CONNECT_LIST_DOMAINS_NO_CHECKPOINT  = 1 << 15,
 } virConnectListAllDomainsFlags;
 
 int                     virConnectListAllDomains (virConnectPtr conn,
@@ -1859,12 +1912,17 @@ typedef enum {
 # endif
 } virVcpuState;
 
+typedef enum {
+    VIR_VCPU_INFO_CPU_OFFLINE     = -1, /* the vCPU is offline */
+    VIR_VCPU_INFO_CPU_UNAVAILABLE = -2, /* the hypervisor does not expose real CPU information */
+} virVcpuHostCpuState;
+
 typedef struct _virVcpuInfo virVcpuInfo;
 struct _virVcpuInfo {
     unsigned int number;        /* virtual CPU number */
     int state;                  /* value from virVcpuState */
     unsigned long long cpuTime; /* CPU time used, in nanoseconds */
-    int cpu;                    /* real CPU number, or -1 if offline */
+    int cpu;                    /* real CPU number, or one of the values from virVcpuHostCpuState */
 };
 typedef virVcpuInfo *virVcpuInfoPtr;
 
@@ -2128,6 +2186,8 @@ typedef enum {
     VIR_DOMAIN_STATS_BLOCK = (1 << 5), /* return domain block info */
     VIR_DOMAIN_STATS_PERF = (1 << 6), /* return domain perf event info */
     VIR_DOMAIN_STATS_IOTHREAD = (1 << 7), /* return iothread poll info */
+    VIR_DOMAIN_STATS_MEMORY = (1 << 8), /* return domain memory info */
+    VIR_DOMAIN_STATS_DIRTYRATE = (1 << 9), /* return domain dirty rate info */
 } virDomainStatsTypes;
 
 typedef enum {
@@ -2427,6 +2487,9 @@ typedef enum {
     /* Active Block Commit (virDomainBlockCommit with flags), job
      * exists as long as sync is active */
     VIR_DOMAIN_BLOCK_JOB_TYPE_ACTIVE_COMMIT = 4,
+
+    /* Backup (virDomainBackupBegin) */
+    VIR_DOMAIN_BLOCK_JOB_TYPE_BACKUP = 5,
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_DOMAIN_BLOCK_JOB_TYPE_LAST
@@ -3133,11 +3196,70 @@ typedef enum {
  */
 typedef enum {
     VIR_DOMAIN_EVENT_CRASHED_PANICKED = 0, /* Guest was panicked */
+    VIR_DOMAIN_EVENT_CRASHED_CRASHLOADED = 1, /* Guest was crashloaded */
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_DOMAIN_EVENT_CRASHED_LAST
 # endif
 } virDomainEventCrashedDetailType;
+
+/**
+ * virDomainMemoryFailureRecipientType:
+ *
+ * Recipient of a memory failure event.
+ */
+typedef enum {
+    /* memory failure at hypersivor memory address space */
+    VIR_DOMAIN_EVENT_MEMORY_FAILURE_RECIPIENT_HYPERVISOR = 0,
+
+    /* memory failure at guest memory address space */
+    VIR_DOMAIN_EVENT_MEMORY_FAILURE_RECIPIENT_GUEST = 1,
+
+# ifdef VIR_ENUM_SENTINELS
+    VIR_DOMAIN_EVENT_MEMORY_FAILURE_RECIPIENT_LAST
+# endif
+} virDomainMemoryFailureRecipientType;
+
+
+/**
+ * virDomainMemoryFailureActionType:
+ *
+ * Action of a memory failure event.
+ */
+typedef enum {
+    /* the memory failure could be ignored. This will only be the case for
+     * action-optional failures. */
+    VIR_DOMAIN_EVENT_MEMORY_FAILURE_ACTION_IGNORE = 0,
+
+    /* memory failure occurred in guest memory, the guest enabled MCE handling
+     * mechanism, and hypervisor could inject the MCE into the guest
+     * successfully. */
+    VIR_DOMAIN_EVENT_MEMORY_FAILURE_ACTION_INJECT = 1,
+
+    /* the failure is unrecoverable.  This occurs for action-required failures
+     * if the recipient is the hypervisor; hypervisor will exit. */
+    VIR_DOMAIN_EVENT_MEMORY_FAILURE_ACTION_FATAL = 2,
+
+    /* the failure is unrecoverable but confined to the guest. This occurs if
+     * the recipient is a guest which is not ready to handle memory failures. */
+    VIR_DOMAIN_EVENT_MEMORY_FAILURE_ACTION_RESET = 3,
+
+# ifdef VIR_ENUM_SENTINELS
+    VIR_DOMAIN_EVENT_MEMORY_FAILURE_ACTION_LAST
+# endif
+} virDomainMemoryFailureActionType;
+
+
+typedef enum {
+    /* whether a memory failure event is action-required or action-optional
+     * (e.g. a failure during memory scrub). */
+    VIR_DOMAIN_MEMORY_FAILURE_ACTION_REQUIRED = (1 << 0),
+
+    /* whether the failure occurred while the previous failure was still in
+     * progress. */
+    VIR_DOMAIN_MEMORY_FAILURE_RECURSIVE = (1 << 1),
+} virDomainMemoryFailureFlags;
+
 
 /**
  * virConnectDomainEventCallback:
@@ -3228,6 +3350,8 @@ struct _virDomainJobInfo {
 typedef enum {
     VIR_DOMAIN_JOB_STATS_COMPLETED = 1 << 0, /* return stats of a recently
                                               * completed job */
+    VIR_DOMAIN_JOB_STATS_KEEP_COMPLETED = 1 << 1, /* don't remove completed
+                                                     stats when reading them */
 } virDomainGetJobStatsFlags;
 
 int virDomainGetJobInfo(virDomainPtr dom,
@@ -3249,6 +3373,7 @@ typedef enum {
     VIR_DOMAIN_JOB_OPERATION_SNAPSHOT = 6,
     VIR_DOMAIN_JOB_OPERATION_SNAPSHOT_REVERT = 7,
     VIR_DOMAIN_JOB_OPERATION_DUMP = 8,
+    VIR_DOMAIN_JOB_OPERATION_BACKUP = 9,
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_DOMAIN_JOB_OPERATION_LAST
@@ -3558,6 +3683,36 @@ typedef enum {
  */
 # define VIR_DOMAIN_JOB_AUTO_CONVERGE_THROTTLE  "auto_converge_throttle"
 
+/**
+ * VIR_DOMAIN_JOB_SUCCESS:
+ *
+ * virDomainGetJobStats field: Present only in statistics for a completed job.
+ * Successful completion of the job as VIR_TYPED_PARAM_BOOLEAN.
+ */
+# define VIR_DOMAIN_JOB_SUCCESS "success"
+
+/**
+ * VIR_DOMAIN_JOB_ERRMSG:
+ *
+ * virDomainGetJobStats field: Present only in statistics for a completed job.
+ * Optional error message for a failed job.
+ */
+# define VIR_DOMAIN_JOB_ERRMSG "errmsg"
+
+
+/**
+ * VIR_DOMAIN_JOB_DISK_TEMP_USED:
+ * virDomainGetJobStats field: current usage of temporary disk space for the
+ * job in bytes as VIR_TYPED_PARAM_ULLONG.
+ */
+# define VIR_DOMAIN_JOB_DISK_TEMP_USED "disk_temp_used"
+
+/**
+ * VIR_DOMAIN_JOB_DISK_TEMP_TOTAL:
+ * virDomainGetJobStats field: possible total temporary disk space for the
+ * job in bytes as VIR_TYPED_PARAM_ULLONG.
+ */
+# define VIR_DOMAIN_JOB_DISK_TEMP_TOTAL "disk_temp_total"
 
 /**
  * virConnectDomainEventGenericCallback:
@@ -4088,8 +4243,10 @@ typedef void (*virConnectDomainEventMigrationIterationCallback)(virConnectPtr co
  * @nparams: size of the params array
  * @opaque: application specific data
  *
- * This callback occurs when a job (such as migration) running on the domain
- * is completed. The params array will contain statistics of the just completed
+ * This callback occurs when a job (such as migration or backup) running on
+ * the domain is completed.
+ *
+ * The params array will contain statistics of the just completed
  * job as virDomainGetJobStats would return. The callback must not free @params
  * (the array will be freed once the callback finishes).
  *
@@ -4474,6 +4631,31 @@ typedef void (*virConnectDomainEventBlockThresholdCallback)(virConnectPtr conn,
                                                             void *opaque);
 
 /**
+ * virConnectDomainEventMemoryFailureCallback:
+ * @conn: connection object
+ * @dom: domain on which the event occurred
+ * @recipient: the recipient of hardware memory failure
+ *             (virDomainMemoryFailureRecipientType)
+ * @action: the action of hardware memory failure
+ *          (virDomainMemoryFailureActionType)
+ * @flags: the flags of hardware memory failure
+ * @opaque: application specified data
+ *
+ * The callback occurs when the hypervisor handles the hardware memory
+ * corrupted event.
+ *
+ * The callback signature to use when registering for an event of type
+ * VIR_DOMAIN_EVENT_ID_MEMORY_FAILURE with virConnectDomainEventRegisterAny()
+ */
+typedef void (*virConnectDomainEventMemoryFailureCallback)(virConnectPtr conn,
+                                                           virDomainPtr dom,
+                                                           int recipient,
+                                                           int action,
+                                                           unsigned int flags,
+                                                           void *opaque);
+
+
+/**
  * VIR_DOMAIN_EVENT_CALLBACK:
  *
  * Used to cast the event specific callback into the generic one
@@ -4515,6 +4697,7 @@ typedef enum {
     VIR_DOMAIN_EVENT_ID_DEVICE_REMOVAL_FAILED = 22, /* virConnectDomainEventDeviceRemovalFailedCallback */
     VIR_DOMAIN_EVENT_ID_METADATA_CHANGE = 23, /* virConnectDomainEventMetadataChangeCallback */
     VIR_DOMAIN_EVENT_ID_BLOCK_THRESHOLD = 24, /* virConnectDomainEventBlockThresholdCallback */
+    VIR_DOMAIN_EVENT_ID_MEMORY_FAILURE = 25,  /* virConnectDomainEventMemoryFailureCallback */
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_DOMAIN_EVENT_ID_LAST
@@ -4883,5 +5066,91 @@ int virDomainGetLaunchSecurityInfo(virDomainPtr domain,
                                    virTypedParameterPtr *params,
                                    int *nparams,
                                    unsigned int flags);
+
+typedef enum {
+    VIR_DOMAIN_GUEST_INFO_USERS = (1 << 0), /* return active users */
+    VIR_DOMAIN_GUEST_INFO_OS = (1 << 1), /* return OS information */
+    VIR_DOMAIN_GUEST_INFO_TIMEZONE = (1 << 2), /* return timezone information */
+    VIR_DOMAIN_GUEST_INFO_HOSTNAME = (1 << 3), /* return hostname information */
+    VIR_DOMAIN_GUEST_INFO_FILESYSTEM = (1 << 4), /* return filesystem information */
+    VIR_DOMAIN_GUEST_INFO_DISKS = (1 << 5), /* return disks information */
+} virDomainGuestInfoTypes;
+
+int virDomainGetGuestInfo(virDomainPtr domain,
+                          unsigned int types,
+                          virTypedParameterPtr *params,
+                          int *nparams,
+                          unsigned int flags);
+
+typedef enum {
+    VIR_DOMAIN_AGENT_RESPONSE_TIMEOUT_BLOCK = -2,
+    VIR_DOMAIN_AGENT_RESPONSE_TIMEOUT_DEFAULT = -1,
+    VIR_DOMAIN_AGENT_RESPONSE_TIMEOUT_NOWAIT = 0,
+} virDomainAgentResponseTimeoutValues;
+
+int virDomainAgentSetResponseTimeout(virDomainPtr domain,
+                                     int timeout,
+                                     unsigned int flags);
+
+typedef enum {
+    VIR_DOMAIN_BACKUP_BEGIN_REUSE_EXTERNAL = (1 << 0), /* reuse separately
+                                                          provided images */
+} virDomainBackupBeginFlags;
+
+int virDomainBackupBegin(virDomainPtr domain,
+                         const char *backupXML,
+                         const char *checkpointXML,
+                         unsigned int flags);
+
+char *virDomainBackupGetXMLDesc(virDomainPtr domain,
+                                unsigned int flags);
+
+int virDomainAuthorizedSSHKeysGet(virDomainPtr domain,
+                                  const char *user,
+                                  char ***keys,
+                                  unsigned int flags);
+
+typedef enum {
+    VIR_DOMAIN_AUTHORIZED_SSH_KEYS_SET_APPEND = (1 << 0), /* don't truncate file, just append */
+    VIR_DOMAIN_AUTHORIZED_SSH_KEYS_SET_REMOVE = (1 << 1), /* remove keys, instead of adding them */
+
+} virDomainAuthorizedSSHKeysSetFlags;
+
+int virDomainAuthorizedSSHKeysSet(virDomainPtr domain,
+                                  const char *user,
+                                  const char **keys,
+                                  unsigned int nkeys,
+                                  unsigned int flags);
+
+typedef enum {
+    VIR_DOMAIN_MESSAGE_DEPRECATION = (1 << 0),
+    VIR_DOMAIN_MESSAGE_TAINTING = (1 << 1),
+} virDomainMessageType;
+
+int virDomainGetMessages(virDomainPtr domain,
+                         char ***msgs,
+                         unsigned int flags);
+
+/**
+ * virDomainDirtyRateStatus:
+ *
+ * Details on the cause of a dirty rate calculation status.
+ */
+typedef enum {
+    VIR_DOMAIN_DIRTYRATE_UNSTARTED = 0, /* the dirtyrate calculation has
+                                           not been started */
+    VIR_DOMAIN_DIRTYRATE_MEASURING = 1, /* the dirtyrate calculation is
+                                           measuring */
+    VIR_DOMAIN_DIRTYRATE_MEASURED  = 2, /* the dirtyrate calculation is
+                                           completed */
+
+# ifdef VIR_ENUM_SENTINELS
+    VIR_DOMAIN_DIRTYRATE_LAST
+# endif
+} virDomainDirtyRateStatus;
+
+int virDomainStartDirtyRateCalc(virDomainPtr domain,
+                                int seconds,
+                                unsigned int flags);
 
 #endif /* LIBVIRT_DOMAIN_H */

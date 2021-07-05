@@ -19,22 +19,20 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRSYSINFO_H
-# define LIBVIRT_VIRSYSINFO_H
+#pragma once
 
-# include "internal.h"
-# include "virutil.h"
-# include "virbuffer.h"
-# include "virenum.h"
+#include "internal.h"
+#include "virbuffer.h"
+#include "virenum.h"
 
 typedef enum {
     VIR_SYSINFO_SMBIOS,
+    VIR_SYSINFO_FWCFG,
 
     VIR_SYSINFO_LAST
 } virSysinfoType;
 
 typedef struct _virSysinfoProcessorDef virSysinfoProcessorDef;
-typedef virSysinfoProcessorDef *virSysinfoProcessorDefPtr;
 struct _virSysinfoProcessorDef {
     char *processor_socket_destination;
     char *processor_type;
@@ -50,7 +48,6 @@ struct _virSysinfoProcessorDef {
 };
 
 typedef struct _virSysinfoMemoryDef virSysinfoMemoryDef;
-typedef virSysinfoMemoryDef *virSysinfoMemoryDefPtr;
 struct _virSysinfoMemoryDef {
     char *memory_size;
     char *memory_form_factor;
@@ -65,7 +62,6 @@ struct _virSysinfoMemoryDef {
 };
 
 typedef struct _virSysinfoBIOSDef virSysinfoBIOSDef;
-typedef virSysinfoBIOSDef *virSysinfoBIOSDefPtr;
 struct _virSysinfoBIOSDef {
     char *vendor;
     char *version;
@@ -74,7 +70,6 @@ struct _virSysinfoBIOSDef {
 };
 
 typedef struct _virSysinfoSystemDef virSysinfoSystemDef;
-typedef virSysinfoSystemDef *virSysinfoSystemDefPtr;
 struct _virSysinfoSystemDef {
     char *manufacturer;
     char *product;
@@ -86,7 +81,6 @@ struct _virSysinfoSystemDef {
 };
 
 typedef struct _virSysinfoBaseBoardDef virSysinfoBaseBoardDef;
-typedef virSysinfoBaseBoardDef *virSysinfoBaseBoardDefPtr;
 struct _virSysinfoBaseBoardDef {
     char *manufacturer;
     char *product;
@@ -98,7 +92,6 @@ struct _virSysinfoBaseBoardDef {
 };
 
 typedef struct _virSysinfoChassisDef virSysinfoChassisDef;
-typedef virSysinfoChassisDef *virSysinfoChassisDefPtr;
 struct _virSysinfoChassisDef {
     char *manufacturer;
     char *version;
@@ -108,49 +101,59 @@ struct _virSysinfoChassisDef {
 };
 
 typedef struct _virSysinfoOEMStringsDef virSysinfoOEMStringsDef;
-typedef virSysinfoOEMStringsDef *virSysinfoOEMStringsDefPtr;
 struct _virSysinfoOEMStringsDef {
     size_t nvalues;
     char **values;
 };
 
-typedef struct _virSysinfoDef virSysinfoDef;
-typedef virSysinfoDef *virSysinfoDefPtr;
-struct _virSysinfoDef {
-    int type;
-
-    virSysinfoBIOSDefPtr bios;
-    virSysinfoSystemDefPtr system;
-
-    size_t nbaseBoard;
-    virSysinfoBaseBoardDefPtr baseBoard;
-
-    virSysinfoChassisDefPtr chassis;
-
-    size_t nprocessor;
-    virSysinfoProcessorDefPtr processor;
-
-    size_t nmemory;
-    virSysinfoMemoryDefPtr memory;
-
-    virSysinfoOEMStringsDefPtr oemStrings;
+typedef struct _virSysinfoFWCfgDef virSysinfoFWCfgDef;
+struct _virSysinfoFWCfgDef {
+    char *name;
+    char *value;
+    char *file;
 };
 
-virSysinfoDefPtr virSysinfoRead(void);
+typedef struct _virSysinfoDef virSysinfoDef;
+struct _virSysinfoDef {
+    virSysinfoType type;
 
-void virSysinfoBIOSDefFree(virSysinfoBIOSDefPtr def);
-void virSysinfoSystemDefFree(virSysinfoSystemDefPtr def);
-void virSysinfoBaseBoardDefClear(virSysinfoBaseBoardDefPtr def);
-void virSysinfoChassisDefFree(virSysinfoChassisDefPtr def);
-void virSysinfoOEMStringsDefFree(virSysinfoOEMStringsDefPtr def);
-void virSysinfoDefFree(virSysinfoDefPtr def);
+    /* The following members are valid for type == VIR_SYSINFO_SMBIOS */
+    virSysinfoBIOSDef *bios;
+    virSysinfoSystemDef *system;
 
-int virSysinfoFormat(virBufferPtr buf, virSysinfoDefPtr def)
+    size_t nbaseBoard;
+    virSysinfoBaseBoardDef *baseBoard;
+
+    virSysinfoChassisDef *chassis;
+
+    size_t nprocessor;
+    virSysinfoProcessorDef *processor;
+
+    size_t nmemory;
+    virSysinfoMemoryDef *memory;
+
+    virSysinfoOEMStringsDef *oemStrings;
+
+    /* The following members are valid for type == VIR_SYSINFO_FWCFG */
+    size_t nfw_cfgs;
+    virSysinfoFWCfgDef *fw_cfgs;
+};
+
+virSysinfoDef *virSysinfoRead(void);
+
+void virSysinfoBIOSDefFree(virSysinfoBIOSDef *def);
+void virSysinfoSystemDefFree(virSysinfoSystemDef *def);
+void virSysinfoBaseBoardDefClear(virSysinfoBaseBoardDef *def);
+void virSysinfoChassisDefFree(virSysinfoChassisDef *def);
+void virSysinfoOEMStringsDefFree(virSysinfoOEMStringsDef *def);
+void virSysinfoDefFree(virSysinfoDef *def);
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virSysinfoDef, virSysinfoDefFree);
+
+int virSysinfoFormat(virBuffer *buf, virSysinfoDef *def)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
-bool virSysinfoIsEqual(virSysinfoDefPtr src,
-                       virSysinfoDefPtr dst);
+bool virSysinfoIsEqual(virSysinfoDef *src,
+                       virSysinfoDef *dst);
 
 VIR_ENUM_DECL(virSysinfo);
-
-#endif /* LIBVIRT_VIRSYSINFO_H */

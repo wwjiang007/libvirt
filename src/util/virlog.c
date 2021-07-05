@@ -24,21 +24,12 @@
 #include <stdarg.h>
 #include <time.h>
 #include <sys/time.h>
-#include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <execinfo.h>
-#include <regex.h>
-#include <sys/uio.h>
-#if HAVE_SYSLOG_H
+#if WITH_SYSLOG_H
 # include <syslog.h>
 #endif
-#include <sys/socket.h>
-#if HAVE_SYS_UN_H
-# include <sys/un.h>
-#endif
-#include <fnmatch.h>
 
 #include "virerror.h"
 #include "virlog.h"
@@ -48,22 +39,22 @@
 #include "virthread.h"
 #include "virfile.h"
 #include "virtime.h"
-#include "intprops.h"
 #include "virstring.h"
 #include "configmake.h"
+#include "virsocket.h"
 
 /* Journald output is only supported on Linux new enough to expose
  * htole64.  */
-#if HAVE_SYSLOG_H && defined(__linux__) && HAVE_DECL_HTOLE64
+#if WITH_SYSLOG_H && defined(__linux__) && WITH_DECL_HTOLE64
 # define USE_JOURNALD 1
+# include <sys/uio.h>
 #endif
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 VIR_LOG_INIT("util.log");
 
-static regex_t *virLogRegex;
-static char virLogHostname[HOST_NAME_MAX+1];
+static GRegex *virLogRegex;
 
 
 #define VIR_LOG_DATE_REGEX "[0-9]{4}-[0-9]{2}-[0-9]{2}"
@@ -88,11 +79,10 @@ VIR_ENUM_IMPL(virLogDestination,
 struct _virLogFilter {
     char *match;
     virLogPriority priority;
-    unsigned int flags; /* bitwise OR of virLogFilterFlags */
 };
 
 static int virLogFiltersSerial = 1;
-static virLogFilterPtr *virLogFilters;
+static virLogFilter **virLogFilters;
 static size_t virLogNbFilters;
 
 /*
@@ -110,7 +100,7 @@ struct _virLogOutput {
 };
 
 static char *virLogDefaultOutput;
-static virLogOutputPtr *virLogOutputs;
+static virLogOutput **virLogOutputs;
 static size_t virLogNbOutputs;
 
 /*
@@ -120,14 +110,13 @@ static virLogPriority virLogDefaultPriority = VIR_LOG_DEFAULT;
 
 static void virLogResetFilters(void);
 static void virLogResetOutputs(void);
-static void virLogOutputToFd(virLogSourcePtr src,
+static void virLogOutputToFd(virLogSource *src,
                              virLogPriority priority,
                              const char *filename,
                              int linenr,
                              const char *funcname,
                              const char *timestamp,
-                             virLogMetadataPtr metadata,
-                             unsigned int flags,
+                             struct _virLogMetadata *metadata,
                              const char *rawstr,
                              const char *str,
                              void *data);
@@ -152,15 +141,15 @@ virLogUnlock(void)
 }
 
 
-static int
+static void
 virLogSetDefaultOutputToStderr(void)
 {
-    return virAsprintf(&virLogDefaultOutput, "%d:stderr",
-                       virLogDefaultPriority);
+    virLogDefaultOutput = g_strdup_printf("%d:stderr",
+                                          virLogDefaultPriority);
 }
 
 
-static int
+static void
 virLogSetDefaultOutputToJournald(void)
 {
     virLogPriority priority = virLogDefaultPriority;
@@ -170,74 +159,64 @@ virLogSetDefaultOutputToJournald(void)
     if (priority == VIR_LOG_DEBUG)
         priority = VIR_LOG_INFO;
 
-    return virAsprintf(&virLogDefaultOutput, "%d:journald", priority);
+    virLogDefaultOutput = g_strdup_printf("%d:journald", priority);
 }
 
 
 static int
-virLogSetDefaultOutputToFile(const char *filename, bool privileged)
+virLogSetDefaultOutputToFile(const char *binary, bool privileged)
 {
-    int ret = -1;
-    char *logdir = NULL;
+    g_autofree char *logdir = NULL;
     mode_t old_umask;
 
     if (privileged) {
-        if (virAsprintf(&virLogDefaultOutput,
-                        "%d:file:%s/log/libvirt/%s", virLogDefaultPriority,
-                        LOCALSTATEDIR, filename) < 0)
-            goto cleanup;
+        virLogDefaultOutput = g_strdup_printf("%d:file:%s/log/libvirt/%s.log",
+                                              virLogDefaultPriority, LOCALSTATEDIR, binary);
     } else {
-        if (!(logdir = virGetUserCacheDirectory()))
-            goto cleanup;
+        logdir = virGetUserCacheDirectory();
 
         old_umask = umask(077);
-        if (virFileMakePath(logdir) < 0) {
+        if (g_mkdir_with_parents(logdir, 0777) < 0) {
             umask(old_umask);
-            goto cleanup;
+            return -1;
         }
         umask(old_umask);
 
-        if (virAsprintf(&virLogDefaultOutput, "%d:file:%s/%s",
-                        virLogDefaultPriority, logdir, filename) < 0)
-            goto cleanup;
+        virLogDefaultOutput = g_strdup_printf("%d:file:%s/%s.log",
+                                              virLogDefaultPriority, logdir, binary);
     }
 
-    ret = 0;
- cleanup:
-    VIR_FREE(logdir);
-    return ret;
+    return 0;
 }
 
 
 /*
  * virLogSetDefaultOutput:
- * @filename: the file that the output should be redirected to (only needed
- *            when @godaemon equals true
+ * @binary: the binary for which logging is performed. The log file name
+ *          will be derived from the binary name, with ".log" appended.
  * @godaemon: whether we're running daemonized
  * @privileged: whether we're running with root privileges or not (session)
  *
  * Decides on what the default output (journald, file, stderr) should be
- * according to @filename, @godaemon, @privileged. This function should be run
+ * according to @binary, @godaemon, @privileged. This function should be run
  * exactly once at daemon startup, so no locks are used.
- *
- * Returns 0 on success, -1 in case of a failure.
  */
-int
-virLogSetDefaultOutput(const char *filename, bool godaemon, bool privileged)
+void
+virLogSetDefaultOutput(const char *binary, bool godaemon, bool privileged)
 {
     bool have_journald = access("/run/systemd/journal/socket", W_OK) >= 0;
 
     if (godaemon) {
         if (have_journald)
-            return virLogSetDefaultOutputToJournald();
+            virLogSetDefaultOutputToJournald();
+        else
+            virLogSetDefaultOutputToFile(binary, privileged);
     } else {
         if (!isatty(STDIN_FILENO) && have_journald)
-            return virLogSetDefaultOutputToJournald();
-
-        return virLogSetDefaultOutputToStderr();
+            virLogSetDefaultOutputToJournald();
+        else
+            virLogSetDefaultOutputToStderr();
     }
-
-    return virLogSetDefaultOutputToFile(filename, privileged);
 }
 
 
@@ -268,32 +247,21 @@ virLogPriorityString(virLogPriority lvl)
 static int
 virLogOnceInit(void)
 {
-    int r;
-
     if (virMutexInit(&virLogMutex) < 0)
         return -1;
 
     virLogLock();
     virLogDefaultPriority = VIR_LOG_DEFAULT;
 
-    if (VIR_ALLOC_QUIET(virLogRegex) >= 0) {
-        if (regcomp(virLogRegex, VIR_LOG_REGEX, REG_EXTENDED) != 0)
-            VIR_FREE(virLogRegex);
-    }
+    virLogRegex = g_regex_new(VIR_LOG_REGEX, G_REGEX_OPTIMIZE, 0, NULL);
 
-    /* We get and remember the hostname early, because at later time
+    /* GLib caches the hostname using a one time thread initializer.
+     * We want to prime this cache early though, because at later time
      * it might not be possible to load NSS modules via getaddrinfo()
      * (e.g. at container startup the host filesystem will not be
      * accessible anymore.
-     * Must not use virGetHostname though as that causes re-entrancy
-     * problems if it triggers logging codepaths
      */
-    r = gethostname(virLogHostname, sizeof(virLogHostname));
-    if (r == -1) {
-        ignore_value(virStrcpyStatic(virLogHostname, "(unknown)"));
-    } else {
-        NUL_TERMINATE(virLogHostname);
-    }
+    ignore_value(g_get_host_name());
 
     virLogUnlock();
     return 0;
@@ -366,13 +334,13 @@ virLogResetFilters(void)
 
 
 void
-virLogFilterFree(virLogFilterPtr filter)
+virLogFilterFree(virLogFilter *filter)
 {
     if (!filter)
         return;
 
-    VIR_FREE(filter->match);
-    VIR_FREE(filter);
+    g_free(filter->match);
+    g_free(filter);
 }
 
 
@@ -384,7 +352,7 @@ virLogFilterFree(virLogFilterPtr filter)
  * Frees a list of filters.
  */
 void
-virLogFilterListFree(virLogFilterPtr *list, int count)
+virLogFilterListFree(virLogFilter **list, int count)
 {
     size_t i;
 
@@ -393,7 +361,7 @@ virLogFilterListFree(virLogFilterPtr *list, int count)
 
     for (i = 0; i < count; i++)
         virLogFilterFree(list[i]);
-    VIR_FREE(list);
+    g_free(list);
 }
 
 
@@ -412,15 +380,15 @@ virLogResetOutputs(void)
 
 
 void
-virLogOutputFree(virLogOutputPtr output)
+virLogOutputFree(virLogOutput *output)
 {
     if (!output)
         return;
 
     if (output->c)
         output->c(output->data);
-    VIR_FREE(output->name);
-    VIR_FREE(output);
+    g_free(output->name);
+    g_free(output);
 
 }
 
@@ -433,7 +401,7 @@ virLogOutputFree(virLogOutputPtr output)
  * Frees a list of outputs.
  */
 void
-virLogOutputListFree(virLogOutputPtr *list, int count)
+virLogOutputListFree(virLogOutput **list, int count)
 {
     size_t i;
 
@@ -442,121 +410,72 @@ virLogOutputListFree(virLogOutputPtr *list, int count)
 
     for (i = 0; i < count; i++)
         virLogOutputFree(list[i]);
-    VIR_FREE(list);
+    g_free(list);
 }
 
 
-static int
+static void
 virLogFormatString(char **msg,
                    int linenr,
                    const char *funcname,
                    virLogPriority priority,
                    const char *str)
 {
-    int ret;
-
-    /*
-     * Be careful when changing the following log message formatting, we rely
-     * on it when stripping libvirt debug messages from qemu log files. So when
-     * changing this, you might also need to change the code there.
-     * virLogFormatString() function name is mentioned there so it's sufficient
-     * to just grep for it to find the right place.
-     */
     if ((funcname != NULL)) {
-        ret = virAsprintfQuiet(msg, "%llu: %s : %s:%d : %s\n",
+        *msg = g_strdup_printf("%llu: %s : %s:%d : %s\n",
                                virThreadSelfID(), virLogPriorityString(priority),
                                funcname, linenr, str);
     } else {
-        ret = virAsprintfQuiet(msg, "%llu: %s : %s\n",
+        *msg = g_strdup_printf("%llu: %s : %s\n",
                                virThreadSelfID(), virLogPriorityString(priority),
                                str);
     }
-    return ret;
 }
 
 
-static int
+static void
 virLogVersionString(const char **rawmsg,
                     char **msg)
 {
     *rawmsg = VIR_LOG_VERSION_STRING;
-    return virLogFormatString(msg, 0, NULL, VIR_LOG_INFO, VIR_LOG_VERSION_STRING);
+    virLogFormatString(msg, 0, NULL, VIR_LOG_INFO, VIR_LOG_VERSION_STRING);
 }
 
 /* Similar to virGetHostname() but avoids use of error
  * reporting APIs or logging APIs, to prevent recursion
  */
-static int
+static void
 virLogHostnameString(char **rawmsg,
                      char **msg)
 {
     char *hoststr;
 
-    if (virAsprintfQuiet(&hoststr, "hostname: %s", virLogHostname) < 0)
-        return -1;
+    hoststr = g_strdup_printf("hostname: %s", g_get_host_name());
 
-    if (virLogFormatString(msg, 0, NULL, VIR_LOG_INFO, hoststr) < 0) {
-        VIR_FREE(hoststr);
-        return -1;
-    }
+    virLogFormatString(msg, 0, NULL, VIR_LOG_INFO, hoststr);
     *rawmsg = hoststr;
-    return 0;
 }
 
 
 static void
-virLogSourceUpdate(virLogSourcePtr source)
+virLogSourceUpdate(virLogSource *source)
 {
     virLogLock();
     if (source->serial < virLogFiltersSerial) {
         unsigned int priority = virLogDefaultPriority;
-        unsigned int flags = 0;
         size_t i;
 
         for (i = 0; i < virLogNbFilters; i++) {
-            if (fnmatch(virLogFilters[i]->match, source->name, 0) == 0) {
+            if (g_pattern_match_simple(virLogFilters[i]->match, source->name)) {
                 priority = virLogFilters[i]->priority;
-                flags = virLogFilters[i]->flags;
                 break;
             }
         }
 
         source->priority = priority;
-        source->flags = flags;
         source->serial = virLogFiltersSerial;
     }
     virLogUnlock();
-}
-
-/**
- * virLogMessage:
- * @source: where is that message coming from
- * @priority: the priority level
- * @filename: file where the message was emitted
- * @linenr: line where the message was emitted
- * @funcname: the function emitting the (debug) message
- * @metadata: NULL or metadata array, terminated by an item with NULL key
- * @fmt: the string format
- * @...: the arguments
- *
- * Call the libvirt logger with some information. Based on the configuration
- * the message may be stored, sent to output or just discarded
- */
-void
-virLogMessage(virLogSourcePtr source,
-              virLogPriority priority,
-              const char *filename,
-              int linenr,
-              const char *funcname,
-              virLogMetadataPtr metadata,
-              const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    virLogVMessage(source, priority,
-                   filename, linenr, funcname,
-                   metadata, fmt, ap);
-    va_end(ap);
 }
 
 
@@ -574,24 +493,23 @@ virLogMessage(virLogSourcePtr source,
  * Call the libvirt logger with some information. Based on the configuration
  * the message may be stored, sent to output or just discarded
  */
-void
-virLogVMessage(virLogSourcePtr source,
+static void
+G_GNUC_PRINTF(7, 0)
+virLogVMessage(virLogSource *source,
                virLogPriority priority,
                const char *filename,
                int linenr,
                const char *funcname,
-               virLogMetadataPtr metadata,
+               struct _virLogMetadata *metadata,
                const char *fmt,
                va_list vargs)
 {
     static bool logInitMessageStderr = true;
-    char *str = NULL;
-    char *msg = NULL;
+    g_autofree char *str = NULL;
+    g_autofree char *msg = NULL;
     char timestamp[VIR_TIME_STRING_BUFLEN];
-    int ret;
     size_t i;
     int saved_errno = errno;
-    unsigned int filterflags = 0;
 
     if (virLogInitialize() < 0)
         return;
@@ -611,17 +529,13 @@ virLogVMessage(virLogSourcePtr source,
         virLogSourceUpdate(source);
     if (priority < source->priority)
         goto cleanup;
-    filterflags = source->flags;
 
     /*
      * serialize the error message, add level and timestamp
      */
-    if (virVasprintfQuiet(&str, fmt, vargs) < 0)
-        goto cleanup;
+    str = g_strdup_vprintf(fmt, vargs);
 
-    ret = virLogFormatString(&msg, linenr, funcname, priority, str);
-    if (ret < 0)
-        goto cleanup;
+    virLogFormatString(&msg, linenr, funcname, priority, str);
 
     if (virTimeStringNowRaw(timestamp) < 0)
         timestamp[0] = '\0';
@@ -638,24 +552,25 @@ virLogVMessage(virLogSourcePtr source,
                 const char *rawinitmsg;
                 char *hoststr = NULL;
                 char *initmsg = NULL;
-                if (virLogVersionString(&rawinitmsg, &initmsg) >= 0)
-                    virLogOutputs[i]->f(&virLogSelf, VIR_LOG_INFO,
-                                        __FILE__, __LINE__, __func__,
-                                        timestamp, NULL, 0, rawinitmsg, initmsg,
-                                        virLogOutputs[i]->data);
+                virLogVersionString(&rawinitmsg, &initmsg);
+                virLogOutputs[i]->f(&virLogSelf, VIR_LOG_INFO,
+                                    __FILE__, __LINE__, __func__,
+                                    timestamp, NULL, rawinitmsg, initmsg,
+                                    virLogOutputs[i]->data);
                 VIR_FREE(initmsg);
-                if (virLogHostnameString(&hoststr, &initmsg) >= 0)
-                    virLogOutputs[i]->f(&virLogSelf, VIR_LOG_INFO,
-                                        __FILE__, __LINE__, __func__,
-                                        timestamp, NULL, 0, hoststr, initmsg,
-                                        virLogOutputs[i]->data);
+
+                virLogHostnameString(&hoststr, &initmsg);
+                virLogOutputs[i]->f(&virLogSelf, VIR_LOG_INFO,
+                                    __FILE__, __LINE__, __func__,
+                                    timestamp, NULL, hoststr, initmsg,
+                                    virLogOutputs[i]->data);
                 VIR_FREE(hoststr);
                 VIR_FREE(initmsg);
                 virLogOutputs[i]->logInitMessage = false;
             }
             virLogOutputs[i]->f(source, priority,
                                 filename, linenr, funcname,
-                                timestamp, metadata, filterflags,
+                                timestamp, metadata,
                                 str, msg, virLogOutputs[i]->data);
         }
     }
@@ -664,65 +579,75 @@ virLogVMessage(virLogSourcePtr source,
             const char *rawinitmsg;
             char *hoststr = NULL;
             char *initmsg = NULL;
-            if (virLogVersionString(&rawinitmsg, &initmsg) >= 0)
-                virLogOutputToFd(&virLogSelf, VIR_LOG_INFO,
-                                 __FILE__, __LINE__, __func__,
-                                 timestamp, NULL, 0, rawinitmsg, initmsg,
-                                 (void *) STDERR_FILENO);
+            virLogVersionString(&rawinitmsg, &initmsg);
+            virLogOutputToFd(&virLogSelf, VIR_LOG_INFO,
+                             __FILE__, __LINE__, __func__,
+                             timestamp, NULL, rawinitmsg, initmsg,
+                             (void *) STDERR_FILENO);
             VIR_FREE(initmsg);
-            if (virLogHostnameString(&hoststr, &initmsg) >= 0)
-                virLogOutputToFd(&virLogSelf, VIR_LOG_INFO,
-                                 __FILE__, __LINE__, __func__,
-                                 timestamp, NULL, 0, hoststr, initmsg,
-                                 (void *) STDERR_FILENO);
+
+            virLogHostnameString(&hoststr, &initmsg);
+            virLogOutputToFd(&virLogSelf, VIR_LOG_INFO,
+                             __FILE__, __LINE__, __func__,
+                             timestamp, NULL, hoststr, initmsg,
+                             (void *) STDERR_FILENO);
             VIR_FREE(hoststr);
             VIR_FREE(initmsg);
             logInitMessageStderr = false;
         }
         virLogOutputToFd(source, priority,
                          filename, linenr, funcname,
-                         timestamp, metadata, filterflags,
+                         timestamp, metadata,
                          str, msg, (void *) STDERR_FILENO);
     }
     virLogUnlock();
 
  cleanup:
-    VIR_FREE(str);
-    VIR_FREE(msg);
     errno = saved_errno;
 }
 
 
-static void
-virLogStackTraceToFd(int fd)
+/**
+ * virLogMessage:
+ * @source: where is that message coming from
+ * @priority: the priority level
+ * @filename: file where the message was emitted
+ * @linenr: line where the message was emitted
+ * @funcname: the function emitting the (debug) message
+ * @metadata: NULL or metadata array, terminated by an item with NULL key
+ * @fmt: the string format
+ * @...: the arguments
+ *
+ * Call the libvirt logger with some information. Based on the configuration
+ * the message may be stored, sent to output or just discarded
+ */
+void
+virLogMessage(virLogSource *source,
+              virLogPriority priority,
+              const char *filename,
+              int linenr,
+              const char *funcname,
+              struct _virLogMetadata *metadata,
+              const char *fmt, ...)
 {
-    void *array[100];
-    int size;
-    static bool doneWarning;
-    const char *msg = "Stack trace not available on this platform\n";
-
-#define STRIP_DEPTH 3
-    size = backtrace(array, ARRAY_CARDINALITY(array));
-    if (size) {
-        backtrace_symbols_fd(array +  STRIP_DEPTH, size - STRIP_DEPTH, fd);
-        ignore_value(safewrite(fd, "\n", 1));
-    } else if (!doneWarning) {
-        ignore_value(safewrite(fd, msg, strlen(msg)));
-        doneWarning = true;
-    }
-#undef STRIP_DEPTH
+    va_list ap;
+    va_start(ap, fmt);
+    virLogVMessage(source, priority,
+                   filename, linenr, funcname,
+                   metadata, fmt, ap);
+    va_end(ap);
 }
 
+
 static void
-virLogOutputToFd(virLogSourcePtr source ATTRIBUTE_UNUSED,
-                 virLogPriority priority ATTRIBUTE_UNUSED,
-                 const char *filename ATTRIBUTE_UNUSED,
-                 int linenr ATTRIBUTE_UNUSED,
-                 const char *funcname ATTRIBUTE_UNUSED,
+virLogOutputToFd(virLogSource *source G_GNUC_UNUSED,
+                 virLogPriority priority G_GNUC_UNUSED,
+                 const char *filename G_GNUC_UNUSED,
+                 int linenr G_GNUC_UNUSED,
+                 const char *funcname G_GNUC_UNUSED,
                  const char *timestamp,
-                 virLogMetadataPtr metadata ATTRIBUTE_UNUSED,
-                 unsigned int flags,
-                 const char *rawstr ATTRIBUTE_UNUSED,
+                 struct _virLogMetadata *metadata G_GNUC_UNUSED,
+                 const char *rawstr G_GNUC_UNUSED,
                  const char *str,
                  void *data)
 {
@@ -732,14 +657,9 @@ virLogOutputToFd(virLogSourcePtr source ATTRIBUTE_UNUSED,
     if (fd < 0)
         return;
 
-    if (virAsprintfQuiet(&msg, "%s: %s", timestamp, str) < 0)
-        return;
-
+    msg = g_strdup_printf("%s: %s", timestamp, str);
     ignore_value(safewrite(fd, msg, strlen(msg)));
     VIR_FREE(msg);
-
-    if (flags & VIR_LOG_STACK_TRACE)
-        virLogStackTraceToFd(fd);
 }
 
 
@@ -752,7 +672,7 @@ virLogCloseFd(void *data)
 }
 
 
-static virLogOutputPtr
+static virLogOutput *
 virLogNewOutputToStderr(virLogPriority priority)
 {
     return virLogOutputNew(virLogOutputToFd, NULL, (void *)STDERR_FILENO,
@@ -760,12 +680,12 @@ virLogNewOutputToStderr(virLogPriority priority)
 }
 
 
-static virLogOutputPtr
+static virLogOutput *
 virLogNewOutputToFile(virLogPriority priority,
                       const char *file)
 {
     int fd;
-    virLogOutputPtr ret = NULL;
+    virLogOutput *ret = NULL;
 
     fd = open(file, O_CREAT | O_APPEND | O_WRONLY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
@@ -783,7 +703,7 @@ virLogNewOutputToFile(virLogPriority priority,
 }
 
 
-#if HAVE_SYSLOG_H || USE_JOURNALD
+#if WITH_SYSLOG_H || USE_JOURNALD
 
 /* Compat in case we build with journald, but no syslog */
 # ifndef LOG_DEBUG
@@ -815,25 +735,22 @@ virLogPrioritySyslog(virLogPriority priority)
         return LOG_ERR;
     }
 }
-#endif /* HAVE_SYSLOG_H || USE_JOURNALD */
+#endif /* WITH_SYSLOG_H || USE_JOURNALD */
 
 
-#if HAVE_SYSLOG_H
+#if WITH_SYSLOG_H
 static void
-virLogOutputToSyslog(virLogSourcePtr source ATTRIBUTE_UNUSED,
+virLogOutputToSyslog(virLogSource *source G_GNUC_UNUSED,
                      virLogPriority priority,
-                     const char *filename ATTRIBUTE_UNUSED,
-                     int linenr ATTRIBUTE_UNUSED,
-                     const char *funcname ATTRIBUTE_UNUSED,
-                     const char *timestamp ATTRIBUTE_UNUSED,
-                     virLogMetadataPtr metadata ATTRIBUTE_UNUSED,
-                     unsigned int flags,
-                     const char *rawstr ATTRIBUTE_UNUSED,
+                     const char *filename G_GNUC_UNUSED,
+                     int linenr G_GNUC_UNUSED,
+                     const char *funcname G_GNUC_UNUSED,
+                     const char *timestamp G_GNUC_UNUSED,
+                     struct _virLogMetadata *metadata G_GNUC_UNUSED,
+                     const char *rawstr G_GNUC_UNUSED,
                      const char *str,
-                     void *data ATTRIBUTE_UNUSED)
+                     void *data G_GNUC_UNUSED)
 {
-    virCheckFlags(VIR_LOG_STACK_TRACE,);
-
     syslog(virLogPrioritySyslog(priority), "%s", str);
 }
 
@@ -841,18 +758,18 @@ static char *current_ident;
 
 
 static void
-virLogCloseSyslog(void *data ATTRIBUTE_UNUSED)
+virLogCloseSyslog(void *data G_GNUC_UNUSED)
 {
     closelog();
     VIR_FREE(current_ident);
 }
 
 
-static virLogOutputPtr
+static virLogOutput *
 virLogNewOutputToSyslog(virLogPriority priority,
                         const char *ident)
 {
-    virLogOutputPtr ret = NULL;
+    virLogOutput *ret = NULL;
     int at = -1;
 
     /* There are a couple of issues with syslog:
@@ -875,8 +792,7 @@ virLogNewOutputToSyslog(virLogPriority priority,
          * rather than copying @ident, syslog uses caller's reference instead
          */
         VIR_FREE(current_ident);
-        if (VIR_STRDUP(current_ident, ident) < 0)
-            return NULL;
+        current_ident = g_strdup(ident);
 
         openlog(current_ident, 0, 0);
     }
@@ -904,7 +820,7 @@ virLogNewOutputToSyslog(virLogPriority priority,
 #  define IOVEC_SET_STRING(iov, str) IOVEC_SET(iov, str, strlen(str))
 
 /* Used for conversion of numbers to strings, and for length of binary data */
-#  define JOURNAL_BUF_SIZE (MAX(INT_BUFSIZE_BOUND(int), sizeof(uint64_t)))
+#  define JOURNAL_BUF_SIZE (MAX(VIR_INT64_STR_BUFLEN, sizeof(uint64_t)))
 
 struct journalState
 {
@@ -968,19 +884,17 @@ journalAddInt(struct journalState *state, const char *field, int value)
 }
 
 static void
-virLogOutputToJournald(virLogSourcePtr source,
+virLogOutputToJournald(virLogSource *source,
                        virLogPriority priority,
                        const char *filename,
                        int linenr,
                        const char *funcname,
-                       const char *timestamp ATTRIBUTE_UNUSED,
-                       virLogMetadataPtr metadata,
-                       unsigned int flags,
+                       const char *timestamp G_GNUC_UNUSED,
+                       struct _virLogMetadata *metadata,
                        const char *rawstr,
-                       const char *str ATTRIBUTE_UNUSED,
+                       const char *str G_GNUC_UNUSED,
                        void *data)
 {
-    virCheckFlags(VIR_LOG_STACK_TRACE,);
     int buffd = -1;
     int journalfd = (intptr_t) data;
     struct msghdr mh;
@@ -1004,9 +918,9 @@ virLogOutputToJournald(virLogSourcePtr source,
     struct journalState state;
 
     state.iov = iov;
-    state.iov_end = iov + ARRAY_CARDINALITY(iov);
+    state.iov_end = iov + G_N_ELEMENTS(iov);
     state.bufs = iov_bufs;
-    state.bufs_end = iov_bufs + ARRAY_CARDINALITY(iov_bufs);
+    state.bufs_end = iov_bufs + G_N_ELEMENTS(iov_bufs);
 
     journalAddString(&state, "MESSAGE", rawstr);
     journalAddInt(&state, "PRIORITY",
@@ -1051,13 +965,7 @@ virLogOutputToJournald(virLogSourcePtr source,
      * and pass an FD to the journal
      */
 
-    /* NB: mkostemp is not declared async signal safe by
-     * POSIX, but this is Linux only code and the GLibc
-     * impl is safe enough, only using open() and inline
-     * asm to read a timestamp (falling back to gettimeofday
-     * on some arches
-     */
-    if ((buffd = mkostemp(path, O_CLOEXEC|O_RDWR)) < 0)
+    if ((buffd = g_mkstemp_full(path, O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR)) < 0)
         return;
 
     if (unlink(path) < 0)
@@ -1088,11 +996,11 @@ virLogOutputToJournald(virLogSourcePtr source,
 }
 
 
-static virLogOutputPtr
+static virLogOutput *
 virLogNewOutputToJournald(int priority)
 {
     int journalfd;
-    virLogOutputPtr ret = NULL;
+    virLogOutput *ret = NULL;
 
     if ((journalfd = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0)
         return NULL;
@@ -1132,12 +1040,12 @@ int virLogPriorityFromSyslog(int priority)
     return VIR_LOG_ERROR;
 }
 
-#else /* HAVE_SYSLOG_H */
-int virLogPriorityFromSyslog(int priority ATTRIBUTE_UNUSED)
+#else /* WITH_SYSLOG_H */
+int virLogPriorityFromSyslog(int priority G_GNUC_UNUSED)
 {
     return VIR_LOG_ERROR;
 }
-#endif /* HAVE_SYSLOG_H */
+#endif /* WITH_SYSLOG_H */
 
 
 /**
@@ -1163,24 +1071,17 @@ char *
 virLogGetFilters(void)
 {
     size_t i;
-    virBuffer filterbuf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) filterbuf = VIR_BUFFER_INITIALIZER;
 
     virLogLock();
     for (i = 0; i < virLogNbFilters; i++) {
         const char *sep = ":";
-        if (virLogFilters[i]->flags & VIR_LOG_STACK_TRACE)
-            sep = ":+";
         virBufferAsprintf(&filterbuf, "%d%s%s ",
                           virLogFilters[i]->priority,
                           sep,
                           virLogFilters[i]->match);
     }
     virLogUnlock();
-
-    if (virBufferError(&filterbuf)) {
-        virBufferFreeAndReset(&filterbuf);
-        return NULL;
-    }
 
     return virBufferContentAndReset(&filterbuf);
 }
@@ -1197,7 +1098,7 @@ char *
 virLogGetOutputs(void)
 {
     size_t i;
-    virBuffer outputbuf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) outputbuf = VIR_BUFFER_INITIALIZER;
 
     virLogLock();
     for (i = 0; i < virLogNbOutputs; i++) {
@@ -1225,15 +1126,11 @@ virLogGetOutputs(void)
         }
     }
 
-    if (virBufferError(&outputbuf))
-        goto error;
-
     virLogUnlock();
     return virBufferContentAndReset(&outputbuf);
 
  error:
     virLogUnlock();
-    virBufferFreeAndReset(&outputbuf);
     return NULL;
 }
 
@@ -1308,13 +1205,13 @@ virLogSetFromEnv(void)
     if (virLogInitialize() < 0)
         return;
 
-    debugEnv = virGetEnvAllowSUID("LIBVIRT_DEBUG");
+    debugEnv = getenv("LIBVIRT_DEBUG");
     if (debugEnv && *debugEnv)
         virLogSetDefaultPriority(virLogParseDefaultPriority(debugEnv));
-    debugEnv = virGetEnvAllowSUID("LIBVIRT_LOG_FILTERS");
+    debugEnv = getenv("LIBVIRT_LOG_FILTERS");
     if (debugEnv && *debugEnv)
         virLogSetFilters(debugEnv);
-    debugEnv = virGetEnvAllowSUID("LIBVIRT_LOG_OUTPUTS");
+    debugEnv = getenv("LIBVIRT_LOG_OUTPUTS");
     if (debugEnv && *debugEnv)
         virLogSetOutputs(debugEnv);
 }
@@ -1327,12 +1224,11 @@ virLogSetFromEnv(void)
  */
 bool virLogProbablyLogMessage(const char *str)
 {
-    bool ret = false;
     if (!virLogRegex)
         return false;
-    if (regexec(virLogRegex, str, 0, NULL, 0) == 0)
-        ret = true;
-    return ret;
+    if (g_regex_match(virLogRegex, str, 0, NULL))
+        return true;
+    return false;
 }
 
 
@@ -1352,7 +1248,7 @@ bool virLogProbablyLogMessage(const char *str)
  *
  * Returns reference to a newly created object or NULL in case of failure.
  */
-virLogOutputPtr
+virLogOutput *
 virLogOutputNew(virLogOutputFunc f,
                 virLogCloseFunc c,
                 void *data,
@@ -1360,7 +1256,7 @@ virLogOutputNew(virLogOutputFunc f,
                 virLogDestination dest,
                 const char *name)
 {
-    virLogOutputPtr ret = NULL;
+    virLogOutput *ret = NULL;
     char *ndup = NULL;
 
     if (dest == VIR_LOG_TO_SYSLOG || dest == VIR_LOG_TO_FILE) {
@@ -1370,14 +1266,10 @@ virLogOutputNew(virLogOutputFunc f,
             return NULL;
         }
 
-        if (VIR_STRDUP(ndup, name) < 0)
-            return NULL;
+        ndup = g_strdup(name);
     }
 
-    if (VIR_ALLOC(ret) < 0) {
-        VIR_FREE(ndup);
-        return NULL;
-    }
+    ret = g_new0(virLogOutput, 1);
 
     ret->logInitMessage = true;
     ret->f = f;
@@ -1395,7 +1287,6 @@ virLogOutputNew(virLogOutputFunc f,
  * virLogFilterNew:
  * @match: the pattern to match
  * @priority: the priority to give to messages matching the pattern
- * @flags: extra flags, see virLogFilterFlags enum
  *
  * Allocates and returns a new log filter object. The object has to be later
  * defined, so that the pattern will be taken into account when executing the
@@ -1407,16 +1298,12 @@ virLogOutputNew(virLogOutputFunc f,
  * Returns a reference to a newly created filter that needs to be defined using
  * virLogDefineFilters, or NULL in case of an error.
  */
-virLogFilterPtr
+virLogFilter *
 virLogFilterNew(const char *match,
-                virLogPriority priority,
-                unsigned int flags)
+                virLogPriority priority)
 {
-    virLogFilterPtr ret = NULL;
-    char *mdup = NULL;
+    virLogFilter *ret = NULL;
     size_t mlen = strlen(match);
-
-    virCheckFlags(VIR_LOG_STACK_TRACE, NULL);
 
     if (priority < VIR_LOG_DEBUG || priority > VIR_LOG_ERROR) {
         virReportError(VIR_ERR_INVALID_ARG, _("Invalid log priority %d"),
@@ -1424,24 +1311,16 @@ virLogFilterNew(const char *match,
         return NULL;
     }
 
-    /* We must treat 'foo' as equiv to '*foo*' for fnmatch
-     * todo substring matches, so add 2 extra bytes
-     */
-    if (VIR_ALLOC_N_QUIET(mdup, mlen + 3) < 0)
-        return NULL;
-
-    mdup[0] = '*';
-    memcpy(mdup + 1, match, mlen);
-    mdup[mlen + 1] = '*';
-
-    if (VIR_ALLOC_QUIET(ret) < 0) {
-        VIR_FREE(mdup);
-        return NULL;
-    }
-
-    ret->match = mdup;
+    ret = g_new0(virLogFilter, 1);
     ret->priority = priority;
-    ret->flags = flags;
+
+    /* We must treat 'foo' as equiv to '*foo*' for g_pattern_match
+     * substring matches, so add 2 extra bytes
+     */
+    ret->match = g_new0(char, mlen + 3);
+    ret->match[0] = '*';
+    memcpy(ret->match + 1, match, mlen);
+    ret->match[mlen + 1] = '*';
 
     return ret;
 }
@@ -1463,7 +1342,7 @@ virLogFilterNew(const char *match,
  * specified @dest type and/or @opaque data one was found.
  */
 int
-virLogFindOutput(virLogOutputPtr *outputs, size_t noutputs,
+virLogFindOutput(virLogOutput **outputs, size_t noutputs,
                  virLogDestination dest, const void *opaque)
 {
     size_t i;
@@ -1489,12 +1368,12 @@ virLogFindOutput(virLogOutputPtr *outputs, size_t noutputs,
  * Returns number of outputs successfully defined or -1 in case of error;
  */
 int
-virLogDefineOutputs(virLogOutputPtr *outputs, size_t noutputs)
+virLogDefineOutputs(virLogOutput **outputs, size_t noutputs)
 {
-#if HAVE_SYSLOG_H
+#if WITH_SYSLOG_H
     int id;
     char *tmp = NULL;
-#endif /* HAVE_SYSLOG_H */
+#endif /* WITH_SYSLOG_H */
 
     if (virLogInitialize() < 0)
         return -1;
@@ -1502,7 +1381,7 @@ virLogDefineOutputs(virLogOutputPtr *outputs, size_t noutputs)
     virLogLock();
     virLogResetOutputs();
 
-#if HAVE_SYSLOG_H
+#if WITH_SYSLOG_H
     /* syslog needs to be special-cased, since it keeps the fd in private */
     if ((id = virLogFindOutput(outputs, noutputs, VIR_LOG_TO_SYSLOG,
                                current_ident)) != -1) {
@@ -1510,15 +1389,12 @@ virLogDefineOutputs(virLogOutputPtr *outputs, size_t noutputs)
          * holding the lock so it's safe to call openlog and change the message
          * tag
          */
-        if (VIR_STRDUP_QUIET(tmp, outputs[id]->name) < 0) {
-            virLogUnlock();
-            return -1;
-        }
+        tmp = g_strdup(outputs[id]->name);
         VIR_FREE(current_ident);
         current_ident = tmp;
         openlog(current_ident, 0, 0);
     }
-#endif /* HAVE_SYSLOG_H */
+#endif /* WITH_SYSLOG_H */
 
     virLogOutputs = outputs;
     virLogNbOutputs = noutputs;
@@ -1540,7 +1416,7 @@ virLogDefineOutputs(virLogOutputPtr *outputs, size_t noutputs)
  * Returns 0 on success or -1 in case of error.
  */
 int
-virLogDefineFilters(virLogFilterPtr *filters, size_t nfilters)
+virLogDefineFilters(virLogFilter **filters, size_t nfilters)
 {
     if (virLogInitialize() < 0)
         return -1;
@@ -1579,26 +1455,26 @@ virLogDefineFilters(virLogFilterPtr *filters, size_t nfilters)
  * Returns a newly created logging object from @src on success or NULL in case
  * of an error.
  */
-virLogOutputPtr
+virLogOutput *
 virLogParseOutput(const char *src)
 {
-    virLogOutputPtr ret = NULL;
-    char **tokens = NULL;
+    virLogOutput *ret = NULL;
+    g_auto(GStrv) tokens = NULL;
     char *abspath = NULL;
     size_t count = 0;
     virLogPriority prio;
     int dest;
-    bool isSUID = virIsSUID();
 
     VIR_DEBUG("output=%s", src);
 
     /* split our format prio:destination:additional_data to tokens and parse
      * them individually
      */
-    if (!(tokens = virStringSplitCount(src, ":", 0, &count)) || count < 2) {
+    if (!(tokens = g_strsplit(src, ":", 0)) ||
+        (count = g_strv_length(tokens)) < 2) {
         virReportError(VIR_ERR_INVALID_ARG,
                        _("Malformed format for output '%s'"), src);
-        goto cleanup;
+        return NULL;
     }
 
     if (virStrToLong_uip(tokens[0], NULL, 10, &prio) < 0 ||
@@ -1606,14 +1482,14 @@ virLogParseOutput(const char *src)
         virReportError(VIR_ERR_INVALID_ARG,
                        _("Invalid priority '%s' for output '%s'"),
                        tokens[0], src);
-        goto cleanup;
+        return NULL;
     }
 
     if ((dest = virLogDestinationTypeFromString(tokens[1])) < 0) {
         virReportError(VIR_ERR_INVALID_ARG,
                        _("Invalid destination '%s' for output '%s'"),
                        tokens[1], src);
-        goto cleanup;
+        return NULL;
     }
 
     if (((dest == VIR_LOG_TO_STDERR ||
@@ -1623,15 +1499,7 @@ virLogParseOutput(const char *src)
         virReportError(VIR_ERR_INVALID_ARG,
                        _("Output '%s' does not meet the format requirements "
                          "for destination type '%s'"), src, tokens[1]);
-        goto cleanup;
-    }
-
-    /* if running with setuid, only 'stderr' is allowed */
-    if (isSUID && dest != VIR_LOG_TO_STDERR) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Running with SUID permits only destination of type "
-                         "'stderr'"));
-        goto cleanup;
+        return NULL;
     }
 
     switch ((virLogDestination) dest) {
@@ -1639,13 +1507,13 @@ virLogParseOutput(const char *src)
         ret = virLogNewOutputToStderr(prio);
         break;
     case VIR_LOG_TO_SYSLOG:
-#if HAVE_SYSLOG_H
+#if WITH_SYSLOG_H
         ret = virLogNewOutputToSyslog(prio, tokens[2]);
 #endif
         break;
     case VIR_LOG_TO_FILE:
-        if (virFileAbsPath(tokens[2], &abspath) < 0)
-            goto cleanup;
+        if (!(abspath = g_canonicalize_filename(tokens[2], NULL)))
+            return NULL;
         ret = virLogNewOutputToFile(prio, abspath);
         VIR_FREE(abspath);
         break;
@@ -1658,8 +1526,6 @@ virLogParseOutput(const char *src)
         break;
     }
 
- cleanup:
-    virStringListFree(tokens);
     return ret;
 }
 
@@ -1668,11 +1534,8 @@ virLogParseOutput(const char *src)
  * virLogParseFilter:
  * @src: string defining a single filter
  *
- * The format of @src should be one of the following:
+ * The format of @src should be:
  *    x:name - filter affecting all modules which match 'name'
- *    x:+name
- *
- *      '+' - hints the logger to also include a stack trace for every message
  *      'name' - match string which either matches a name of a directory in
  *               libvirt's source tree which in turn affects all modules in
  *               that directory or it can matches a specific module within a
@@ -1691,23 +1554,21 @@ virLogParseOutput(const char *src)
  * Returns a newly created logging object from @src on success or NULL in case
  * of an error.
  */
-virLogFilterPtr
+virLogFilter *
 virLogParseFilter(const char *src)
 {
-    virLogFilterPtr ret = NULL;
-    size_t count = 0;
     virLogPriority prio;
-    char **tokens = NULL;
-    unsigned int flags = 0;
+    g_auto(GStrv) tokens = NULL;
     char *match = NULL;
 
     VIR_DEBUG("filter=%s", src);
 
     /* split our format prio:match_str to tokens and parse them individually */
-    if (!(tokens = virStringSplitCount(src, ":", 0, &count)) || count != 2) {
+    if (!(tokens = g_strsplit(src, ":", 0)) ||
+        !tokens[0] || !tokens[1]) {
         virReportError(VIR_ERR_INVALID_ARG,
                        _("Malformed format for filter '%s'"), src);
-        goto cleanup;
+        return NULL;
     }
 
     if (virStrToLong_uip(tokens[0], NULL, 10, &prio) < 0 ||
@@ -1715,12 +1576,14 @@ virLogParseFilter(const char *src)
         virReportError(VIR_ERR_INVALID_ARG,
                        _("Invalid priority '%s' for filter '%s'"),
                        tokens[0], src);
-        goto cleanup;
+        return NULL;
     }
 
     match = tokens[1];
     if (match[0] == '+') {
-        flags |= VIR_LOG_STACK_TRACE;
+        /* '+' used to indicate printing a stack trace,
+         * but we dropped that feature, so just chomp
+         * that leading '+' */
         match++;
     }
 
@@ -1728,16 +1591,10 @@ virLogParseFilter(const char *src)
     if (!*match) {
         virReportError(VIR_ERR_INVALID_ARG,
                        _("Invalid match string '%s'"), tokens[1]);
-
-        goto cleanup;
+        return NULL;
     }
 
-    if (!(ret = virLogFilterNew(match, prio, flags)))
-        goto cleanup;
-
- cleanup:
-    virStringListFree(tokens);
-    return ret;
+    return virLogFilterNew(match, prio);
 }
 
 /**
@@ -1752,28 +1609,27 @@ virLogParseFilter(const char *src)
  * Returns the number of outputs parsed or -1 in case of error.
  */
 int
-virLogParseOutputs(const char *src, virLogOutputPtr **outputs)
+virLogParseOutputs(const char *src, virLogOutput ***outputs)
 {
-    int ret = -1;
     int at = -1;
     size_t noutputs = 0;
-    size_t i, count;
-    char **strings = NULL;
-    virLogOutputPtr output = NULL;
-    virLogOutputPtr *list = NULL;
+    g_auto(GStrv) strings = NULL;
+    GStrv next;
+    virLogOutput *output = NULL;
+    virLogOutput **list = NULL;
 
     VIR_DEBUG("outputs=%s", src);
 
-    if (!(strings = virStringSplitCount(src, " ", 0, &count)))
-        goto cleanup;
+    if (!(strings = g_strsplit(src, " ", 0)))
+        return -1;
 
-    for (i = 0; i < count; i++) {
-        /* virStringSplit may return empty strings */
-        if (STREQ(strings[i], ""))
+    for (next = strings; *next; next++) {
+        /* g_strsplit may return empty strings */
+        if (STREQ(*next, ""))
             continue;
 
-        if (!(output = virLogParseOutput(strings[i])))
-            goto cleanup;
+        if (!(output = virLogParseOutput(*next)))
+            return -1;
 
         /* let's check if a duplicate output does not already exist in which
          * case we need to replace it with its last occurrence, however, rather
@@ -1784,7 +1640,7 @@ virLogParseOutputs(const char *src, virLogOutputPtr **outputs)
         at = virLogFindOutput(list, noutputs, output->dest, output->name);
         if (VIR_APPEND_ELEMENT(list, noutputs, output) < 0) {
             virLogOutputFree(output);
-            goto cleanup;
+            return -1;
         }
         if (at >= 0) {
             virLogOutputFree(list[at]);
@@ -1792,12 +1648,8 @@ virLogParseOutputs(const char *src, virLogOutputPtr **outputs)
         }
     }
 
-    ret = noutputs;
-    *outputs = list;
-    list = NULL;
- cleanup:
-    virStringListFree(strings);
-    return ret;
+    *outputs = g_steal_pointer(&list);
+    return noutputs;
 }
 
 /**
@@ -1814,40 +1666,35 @@ virLogParseOutputs(const char *src, virLogOutputPtr **outputs)
  * Returns the number of filter parsed or -1 in case of error.
  */
 int
-virLogParseFilters(const char *src, virLogFilterPtr **filters)
+virLogParseFilters(const char *src, virLogFilter ***filters)
 {
-    int ret = -1;
     size_t nfilters = 0;
-    size_t i, count;
-    char **strings = NULL;
-    virLogFilterPtr filter = NULL;
-    virLogFilterPtr *list = NULL;
+    g_auto(GStrv) strings = NULL;
+    GStrv next;
+    virLogFilter *filter = NULL;
+    virLogFilter **list = NULL;
 
     VIR_DEBUG("filters=%s", src);
 
-    if (!(strings = virStringSplitCount(src, " ", 0, &count)))
-        goto cleanup;
+    if (!(strings = g_strsplit(src, " ", 0)))
+        return -1;
 
-    for (i = 0; i < count; i++) {
-        /* virStringSplit may return empty strings */
-        if (STREQ(strings[i], ""))
+    for (next = strings; *next; next++) {
+        /* g_strsplit may return empty strings */
+        if (STREQ(*next, ""))
             continue;
 
-        if (!(filter = virLogParseFilter(strings[i])))
-            goto cleanup;
+        if (!(filter = virLogParseFilter(*next)))
+            return -1;
 
         if (VIR_APPEND_ELEMENT(list, nfilters, filter)) {
             virLogFilterFree(filter);
-            goto cleanup;
+            return -1;
         }
     }
 
-    ret = nfilters;
-    *filters = list;
-    list = NULL;
- cleanup:
-    virStringListFree(strings);
-    return ret;
+    *filters = g_steal_pointer(&list);
+    return nfilters;
 }
 
 /**
@@ -1866,7 +1713,7 @@ virLogSetOutputs(const char *src)
     int ret = -1;
     int noutputs = 0;
     const char *outputstr = virLogDefaultOutput;
-    virLogOutputPtr *outputs = NULL;
+    virLogOutput **outputs = NULL;
 
     if (virLogInitialize() < 0)
         return -1;
@@ -1908,7 +1755,7 @@ virLogSetFilters(const char *src)
 {
     int ret = -1;
     int nfilters = 0;
-    virLogFilterPtr *filters = NULL;
+    virLogFilter **filters = NULL;
 
     if (virLogInitialize() < 0)
         return -1;

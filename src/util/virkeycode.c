@@ -54,19 +54,19 @@ static const unsigned short *virKeymapValues[VIR_KEYCODE_SET_LAST] = {
     [VIR_KEYCODE_SET_QNUM] = virKeyCodeTable_qnum,
 };
 
-#define VIR_KEYMAP_ENTRY_MAX ARRAY_CARDINALITY(virKeyCodeTable_linux)
+#define VIR_KEYMAP_ENTRY_MAX G_N_ELEMENTS(virKeyCodeTable_linux)
 
-verify(VIR_KEYMAP_ENTRY_MAX == ARRAY_CARDINALITY(virKeyCodeTable_atset1));
-verify(VIR_KEYMAP_ENTRY_MAX == ARRAY_CARDINALITY(virKeyCodeTable_atset2));
-verify(VIR_KEYMAP_ENTRY_MAX == ARRAY_CARDINALITY(virKeyCodeTable_atset3));
-verify(VIR_KEYMAP_ENTRY_MAX == ARRAY_CARDINALITY(virKeyCodeTable_osx));
-verify(VIR_KEYMAP_ENTRY_MAX == ARRAY_CARDINALITY(virKeyCodeTable_xtkbd));
-verify(VIR_KEYMAP_ENTRY_MAX == ARRAY_CARDINALITY(virKeyCodeTable_usb));
-verify(VIR_KEYMAP_ENTRY_MAX == ARRAY_CARDINALITY(virKeyCodeTable_win32));
-verify(VIR_KEYMAP_ENTRY_MAX == ARRAY_CARDINALITY(virKeyCodeTable_qnum));
-verify(VIR_KEYMAP_ENTRY_MAX == ARRAY_CARDINALITY(virKeyNameTable_linux));
-verify(VIR_KEYMAP_ENTRY_MAX == ARRAY_CARDINALITY(virKeyNameTable_osx));
-verify(VIR_KEYMAP_ENTRY_MAX == ARRAY_CARDINALITY(virKeyNameTable_win32));
+G_STATIC_ASSERT(VIR_KEYMAP_ENTRY_MAX == G_N_ELEMENTS(virKeyCodeTable_atset1));
+G_STATIC_ASSERT(VIR_KEYMAP_ENTRY_MAX == G_N_ELEMENTS(virKeyCodeTable_atset2));
+G_STATIC_ASSERT(VIR_KEYMAP_ENTRY_MAX == G_N_ELEMENTS(virKeyCodeTable_atset3));
+G_STATIC_ASSERT(VIR_KEYMAP_ENTRY_MAX == G_N_ELEMENTS(virKeyCodeTable_osx));
+G_STATIC_ASSERT(VIR_KEYMAP_ENTRY_MAX == G_N_ELEMENTS(virKeyCodeTable_xtkbd));
+G_STATIC_ASSERT(VIR_KEYMAP_ENTRY_MAX == G_N_ELEMENTS(virKeyCodeTable_usb));
+G_STATIC_ASSERT(VIR_KEYMAP_ENTRY_MAX == G_N_ELEMENTS(virKeyCodeTable_win32));
+G_STATIC_ASSERT(VIR_KEYMAP_ENTRY_MAX == G_N_ELEMENTS(virKeyCodeTable_qnum));
+G_STATIC_ASSERT(VIR_KEYMAP_ENTRY_MAX == G_N_ELEMENTS(virKeyNameTable_linux));
+G_STATIC_ASSERT(VIR_KEYMAP_ENTRY_MAX == G_N_ELEMENTS(virKeyNameTable_osx));
+G_STATIC_ASSERT(VIR_KEYMAP_ENTRY_MAX == G_N_ELEMENTS(virKeyNameTable_win32));
 
 VIR_ENUM_IMPL(virKeycodeSet,
               VIR_KEYCODE_SET_LAST,
@@ -88,11 +88,13 @@ int virKeycodeValueFromString(virKeycodeSet codeset,
     size_t i;
 
     for (i = 0; i < VIR_KEYMAP_ENTRY_MAX; i++) {
+        const char *name;
+
         if (!virKeymapNames[codeset] ||
             !virKeymapValues[codeset])
             continue;
 
-        const char *name = virKeymapNames[codeset][i];
+        name = virKeymapNames[codeset][i];
 
         if (name && STREQ_NULLABLE(name, keyname))
             return virKeymapValues[codeset][i];

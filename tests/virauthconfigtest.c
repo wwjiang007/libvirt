@@ -32,7 +32,7 @@
 VIR_LOG_INIT("tests.authconfigtest");
 
 struct ConfigLookupData {
-    virAuthConfigPtr config;
+    virAuthConfig *config;
     const char *hostname;
     const char *service;
     const char *credname;
@@ -41,9 +41,8 @@ struct ConfigLookupData {
 
 static int testAuthLookup(const void *args)
 {
-    int ret = -1;
     const struct ConfigLookupData *data = args;
-    const char *actual = NULL;
+    g_autofree char *actual = NULL;
     int rv;
 
     rv = virAuthConfigLookup(data->config,
@@ -53,7 +52,7 @@ static int testAuthLookup(const void *args)
                              &actual);
 
     if (rv < 0)
-        goto cleanup;
+        return -1;
 
     if (data->expect) {
         if (!actual ||
@@ -62,7 +61,7 @@ static int testAuthLookup(const void *args)
                      data->expect, data->hostname,
                      data->service, data->credname,
                      NULLSTR(actual));
-            goto cleanup;
+            return -1;
         }
     } else {
         if (actual) {
@@ -70,13 +69,11 @@ static int testAuthLookup(const void *args)
                      data->hostname,
                      data->service, data->credname,
                      actual);
-            goto cleanup;
+            return -1;
         }
     }
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -85,19 +82,7 @@ mymain(void)
 {
     int ret = 0;
 
-    virAuthConfigPtr config;
-
-    signal(SIGPIPE, SIG_IGN);
-
-#define TEST_LOOKUP(config, hostname, service, credname, expect) \
-    do  { \
-        const struct ConfigLookupData data = { \
-            config, hostname, service, credname, expect \
-        }; \
-        if (virTestRun("Test Lookup " hostname "-" service "-" credname, \
-                        testAuthLookup, &data) < 0) \
-            ret = -1; \
-    } while (0)
+    virAuthConfig *config;
 
     const char *confdata =
         "[credentials-test]\n"
@@ -119,6 +104,20 @@ mymain(void)
         "\n"
         "[auth-libvirt-prod1.example.com]\n"
         "credentials=prod\n";
+
+#define TEST_LOOKUP(config, hostname, service, credname, expect) \
+    do  { \
+        const struct ConfigLookupData data = { \
+            config, hostname, service, credname, expect \
+        }; \
+        if (virTestRun("Test Lookup " hostname "-" service "-" credname, \
+                        testAuthLookup, &data) < 0) \
+            ret = -1; \
+    } while (0)
+
+#ifndef WIN32
+    signal(SIGPIPE, SIG_IGN);
+#endif /* WIN32 */
 
     if (!(config = virAuthConfigNewData("auth.conf", confdata, strlen(confdata))))
         return EXIT_FAILURE;

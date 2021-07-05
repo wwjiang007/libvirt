@@ -28,27 +28,30 @@
 #include "viralloc.h"
 #include "virerror.h"
 #include "virthread.h"
+#include "virlog.h"
 
 #define VIR_FROM_THIS VIR_FROM_RPC
+
+VIR_LOG_INIT("rpc.netserverservice");
 
 struct _virNetServerService {
     virObject parent;
 
     size_t nsocks;
-    virNetSocketPtr *socks;
+    virNetSocket **socks;
 
     int auth;
     bool readonly;
     size_t nrequests_client_max;
 
-    virNetTLSContextPtr tls;
+    virNetTLSContext *tls;
 
     virNetServerServiceDispatchFunc dispatchFunc;
     void *dispatchOpaque;
 };
 
 
-static virClassPtr virNetServerServiceClass;
+static virClass *virNetServerServiceClass;
 static void virNetServerServiceDispose(void *obj);
 
 static int virNetServerServiceOnceInit(void)
@@ -62,12 +65,12 @@ static int virNetServerServiceOnceInit(void)
 VIR_ONCE_GLOBAL_INIT(virNetServerService);
 
 
-static void virNetServerServiceAccept(virNetSocketPtr sock,
-                                      int events ATTRIBUTE_UNUSED,
+static void virNetServerServiceAccept(virNetSocket *sock,
+                                      int events G_GNUC_UNUSED,
                                       void *opaque)
 {
-    virNetServerServicePtr svc = opaque;
-    virNetSocketPtr clientsock = NULL;
+    virNetServerService *svc = opaque;
+    virNetSocket *clientsock = NULL;
 
     if (virNetSocketAccept(sock, &clientsock) < 0)
         goto cleanup;
@@ -85,223 +88,176 @@ static void virNetServerServiceAccept(virNetSocketPtr sock,
 }
 
 
-virNetServerServicePtr
-virNetServerServiceNewFDOrUNIX(const char *path,
-                               mode_t mask,
-                               gid_t grp,
-                               int auth,
-                               virNetTLSContextPtr tls,
-                               bool readonly,
-                               size_t max_queued_clients,
-                               size_t nrequests_client_max,
-                               unsigned int nfds,
-                               unsigned int *cur_fd)
+static virNetServerService *
+virNetServerServiceNewSocket(virNetSocket **socks,
+                             size_t nsocks,
+                             int auth,
+                             virNetTLSContext *tls,
+                             bool readonly,
+                             size_t max_queued_clients,
+                             size_t nrequests_client_max)
 {
-    if (*cur_fd - STDERR_FILENO > nfds) {
-        /*
-         * There are no more file descriptors to use, so we have to
-         * fallback to UNIX socket.
-         */
-        return virNetServerServiceNewUNIX(path,
-                                          mask,
-                                          grp,
-                                          auth,
-                                          tls,
-                                          readonly,
-                                          max_queued_clients,
-                                          nrequests_client_max);
+    virNetServerService *svc;
+    size_t i;
 
-    } else {
-        /*
-         * There's still enough file descriptors.  In this case we'll
-         * use the current one and increment it afterwards. Take care
-         * with order of operation for pointer arithmetic and auto
-         * increment on cur_fd - the parentheses are necessary.
-         */
-        return virNetServerServiceNewFD((*cur_fd)++,
-                                        auth,
-                                        tls,
-                                        readonly,
-                                        max_queued_clients,
-                                        nrequests_client_max);
+    if (virNetServerServiceInitialize() < 0)
+        return NULL;
+
+    if (!(svc = virObjectNew(virNetServerServiceClass)))
+        return NULL;
+
+    svc->socks = g_new0(virNetSocket *, nsocks);
+    svc->nsocks = nsocks;
+    for (i = 0; i < svc->nsocks; i++) {
+        svc->socks[i] = socks[i];
+        virObjectRef(svc->socks[i]);
     }
+    svc->auth = auth;
+    svc->readonly = readonly;
+    svc->nrequests_client_max = nrequests_client_max;
+    svc->tls = virObjectRef(tls);
+
+    for (i = 0; i < svc->nsocks; i++) {
+        if (virNetSocketListen(svc->socks[i], max_queued_clients) < 0)
+            goto error;
+
+        /* IO callback is initially disabled, until we're ready
+         * to deal with incoming clients */
+        virObjectRef(svc);
+        if (virNetSocketAddIOCallback(svc->socks[i],
+                                      0,
+                                      virNetServerServiceAccept,
+                                      svc,
+                                      virObjectFreeCallback) < 0) {
+            virObjectUnref(svc);
+            goto error;
+        }
+    }
+
+
+    return svc;
+
+ error:
+    virObjectUnref(svc);
+    return NULL;
 }
 
 
-virNetServerServicePtr virNetServerServiceNewTCP(const char *nodename,
+virNetServerService *virNetServerServiceNewTCP(const char *nodename,
                                                  const char *service,
                                                  int family,
                                                  int auth,
-                                                 virNetTLSContextPtr tls,
+                                                 virNetTLSContext *tls,
                                                  bool readonly,
                                                  size_t max_queued_clients,
                                                  size_t nrequests_client_max)
 {
-    virNetServerServicePtr svc;
+    virNetServerService *svc;
     size_t i;
+    virNetSocket **socks;
+    size_t nsocks;
 
-    if (virNetServerServiceInitialize() < 0)
-        return NULL;
-
-    if (!(svc = virObjectNew(virNetServerServiceClass)))
-        return NULL;
-
-    svc->auth = auth;
-    svc->readonly = readonly;
-    svc->nrequests_client_max = nrequests_client_max;
-    svc->tls = virObjectRef(tls);
-
+    VIR_DEBUG("Creating new TCP server nodename='%s' service='%s'",
+              NULLSTR(nodename), NULLSTR(service));
     if (virNetSocketNewListenTCP(nodename,
                                  service,
                                  family,
-                                 &svc->socks,
-                                 &svc->nsocks) < 0)
-        goto error;
+                                 &socks,
+                                 &nsocks) < 0)
+        return NULL;
 
-    for (i = 0; i < svc->nsocks; i++) {
-        if (virNetSocketListen(svc->socks[i], max_queued_clients) < 0)
-            goto error;
+    svc = virNetServerServiceNewSocket(socks,
+                                       nsocks,
+                                       auth,
+                                       tls,
+                                       readonly,
+                                       max_queued_clients,
+                                       nrequests_client_max);
 
-        /* IO callback is initially disabled, until we're ready
-         * to deal with incoming clients */
-        virObjectRef(svc);
-        if (virNetSocketAddIOCallback(svc->socks[i],
-                                      0,
-                                      virNetServerServiceAccept,
-                                      svc,
-                                      virObjectFreeCallback) < 0) {
-            virObjectUnref(svc);
-            goto error;
-        }
-    }
-
+    for (i = 0; i < nsocks; i++)
+        virObjectUnref(socks[i]);
+    VIR_FREE(socks);
 
     return svc;
-
- error:
-    virObjectUnref(svc);
-    return NULL;
 }
 
 
-virNetServerServicePtr virNetServerServiceNewUNIX(const char *path,
+virNetServerService *virNetServerServiceNewUNIX(const char *path,
                                                   mode_t mask,
                                                   gid_t grp,
                                                   int auth,
-                                                  virNetTLSContextPtr tls,
+                                                  virNetTLSContext *tls,
                                                   bool readonly,
                                                   size_t max_queued_clients,
                                                   size_t nrequests_client_max)
 {
-    virNetServerServicePtr svc;
-    size_t i;
+    virNetServerService *svc;
+    virNetSocket *sock;
 
-    if (virNetServerServiceInitialize() < 0)
-        return NULL;
-
-    if (!(svc = virObjectNew(virNetServerServiceClass)))
-        return NULL;
-
-    svc->auth = auth;
-    svc->readonly = readonly;
-    svc->nrequests_client_max = nrequests_client_max;
-    svc->tls = virObjectRef(tls);
-
-    if (VIR_ALLOC_N(svc->socks, 1) < 0)
-        goto error;
-    svc->nsocks = 1;
-
+    VIR_DEBUG("Creating new UNIX server path='%s' mask=%o gid=%u",
+              path, mask, grp);
     if (virNetSocketNewListenUNIX(path,
                                   mask,
                                   -1,
                                   grp,
-                                  &svc->socks[0]) < 0)
-        goto error;
+                                  &sock) < 0)
+        return NULL;
 
-    for (i = 0; i < svc->nsocks; i++) {
-        if (virNetSocketListen(svc->socks[i], max_queued_clients) < 0)
-            goto error;
+    svc = virNetServerServiceNewSocket(&sock,
+                                       1,
+                                       auth,
+                                       tls,
+                                       readonly,
+                                       max_queued_clients,
+                                       nrequests_client_max);
 
-        /* IO callback is initially disabled, until we're ready
-         * to deal with incoming clients */
-        virObjectRef(svc);
-        if (virNetSocketAddIOCallback(svc->socks[i],
-                                      0,
-                                      virNetServerServiceAccept,
-                                      svc,
-                                      virObjectFreeCallback) < 0) {
-            virObjectUnref(svc);
-            goto error;
-        }
-    }
-
+    virObjectUnref(sock);
 
     return svc;
-
- error:
-    virObjectUnref(svc);
-    return NULL;
 }
 
-virNetServerServicePtr virNetServerServiceNewFD(int fd,
-                                                int auth,
-                                                virNetTLSContextPtr tls,
-                                                bool readonly,
-                                                size_t max_queued_clients,
-                                                size_t nrequests_client_max)
+virNetServerService *virNetServerServiceNewFDs(int *fds,
+                                                 size_t nfds,
+                                                 bool unlinkUNIX,
+                                                 int auth,
+                                                 virNetTLSContext *tls,
+                                                 bool readonly,
+                                                 size_t max_queued_clients,
+                                                 size_t nrequests_client_max)
 {
-    virNetServerServicePtr svc;
+    virNetServerService *svc = NULL;
+    virNetSocket **socks;
     size_t i;
 
-    if (virNetServerServiceInitialize() < 0)
-        return NULL;
+    socks = g_new0(virNetSocket *, nfds);
 
-    if (!(svc = virObjectNew(virNetServerServiceClass)))
-        return NULL;
-
-    svc->auth = auth;
-    svc->readonly = readonly;
-    svc->nrequests_client_max = nrequests_client_max;
-    svc->tls = virObjectRef(tls);
-
-    if (VIR_ALLOC_N(svc->socks, 1) < 0)
-        goto error;
-    svc->nsocks = 1;
-
-    if (virNetSocketNewListenFD(fd,
-                                &svc->socks[0]) < 0)
-        goto error;
-
-    for (i = 0; i < svc->nsocks; i++) {
-        if (virNetSocketListen(svc->socks[i], max_queued_clients) < 0)
-            goto error;
-
-        /* IO callback is initially disabled, until we're ready
-         * to deal with incoming clients */
-        virObjectRef(svc);
-        if (virNetSocketAddIOCallback(svc->socks[i],
-                                      0,
-                                      virNetServerServiceAccept,
-                                      svc,
-                                      virObjectFreeCallback) < 0) {
-            virObjectUnref(svc);
-            goto error;
-        }
+    for (i = 0; i < nfds; i++) {
+        if (virNetSocketNewListenFD(fds[i],
+                                    unlinkUNIX,
+                                    &socks[i]) < 0)
+            goto cleanup;
     }
 
+    svc = virNetServerServiceNewSocket(socks,
+                                       nfds,
+                                       auth,
+                                       tls,
+                                       readonly,
+                                       max_queued_clients,
+                                       nrequests_client_max);
 
+ cleanup:
+    for (i = 0; i < nfds && socks; i++)
+        virObjectUnref(socks[i]);
+    VIR_FREE(socks);
     return svc;
-
- error:
-    virObjectUnref(svc);
-    return NULL;
 }
 
 
-virNetServerServicePtr virNetServerServiceNewPostExecRestart(virJSONValuePtr object)
+virNetServerService *virNetServerServiceNewPostExecRestart(virJSONValue *object)
 {
-    virNetServerServicePtr svc;
-    virJSONValuePtr socks;
+    virNetServerService *svc;
+    virJSONValue *socks;
     size_t i;
     size_t n;
     unsigned int max;
@@ -343,13 +299,12 @@ virNetServerServicePtr virNetServerServiceNewPostExecRestart(virJSONValuePtr obj
     }
 
     n = virJSONValueArraySize(socks);
-    if (VIR_ALLOC_N(svc->socks, n) < 0)
-        goto error;
+    svc->socks = g_new0(virNetSocket *, n);
     svc->nsocks = n;
 
     for (i = 0; i < svc->nsocks; i++) {
-        virJSONValuePtr child = virJSONValueArrayGet(socks, i);
-        virNetSocketPtr sock;
+        virJSONValue *child = virJSONValueArrayGet(socks, i);
+        virNetSocket *sock;
 
         if (!(sock = virNetSocketNewPostExecRestart(child))) {
             virObjectUnref(sock);
@@ -379,50 +334,36 @@ virNetServerServicePtr virNetServerServiceNewPostExecRestart(virJSONValuePtr obj
 }
 
 
-virJSONValuePtr virNetServerServicePreExecRestart(virNetServerServicePtr svc)
+virJSONValue *virNetServerServicePreExecRestart(virNetServerService *svc)
 {
-    virJSONValuePtr object = virJSONValueNewObject();
-    virJSONValuePtr socks;
+    g_autoptr(virJSONValue) object = virJSONValueNewObject();
+    g_autoptr(virJSONValue) socks = virJSONValueNewArray();
     size_t i;
 
-    if (!object)
+    if (virJSONValueObjectAppendNumberInt(object, "auth", svc->auth) < 0)
+        return NULL;
+    if (virJSONValueObjectAppendBoolean(object, "readonly", svc->readonly) < 0)
+        return NULL;
+    if (virJSONValueObjectAppendNumberUint(object, "nrequests_client_max", svc->nrequests_client_max) < 0)
         return NULL;
 
-    if (virJSONValueObjectAppendNumberInt(object, "auth", svc->auth) < 0)
-        goto error;
-    if (virJSONValueObjectAppendBoolean(object, "readonly", svc->readonly) < 0)
-        goto error;
-    if (virJSONValueObjectAppendNumberUint(object, "nrequests_client_max", svc->nrequests_client_max) < 0)
-        goto error;
-
-    if (!(socks = virJSONValueNewArray()))
-        goto error;
-
-    if (virJSONValueObjectAppend(object, "socks", socks) < 0) {
-        virJSONValueFree(socks);
-        goto error;
-    }
-
     for (i = 0; i < svc->nsocks; i++) {
-        virJSONValuePtr child;
+        g_autoptr(virJSONValue) child = NULL;
         if (!(child = virNetSocketPreExecRestart(svc->socks[i])))
-            goto error;
+            return NULL;
 
-        if (virJSONValueArrayAppend(socks, child) < 0) {
-            virJSONValueFree(child);
-            goto error;
-        }
+        if (virJSONValueArrayAppend(socks, &child) < 0)
+            return NULL;
     }
 
-    return object;
+    if (virJSONValueObjectAppend(object, "socks", &socks) < 0)
+        return NULL;
 
- error:
-    virJSONValueFree(object);
-    return NULL;
+    return g_steal_pointer(&object);
 }
 
 
-int virNetServerServiceGetPort(virNetServerServicePtr svc)
+int virNetServerServiceGetPort(virNetServerService *svc)
 {
     /* We're assuming if there are multiple sockets
      * for IPv4 & 6, then they are all on same port */
@@ -430,29 +371,29 @@ int virNetServerServiceGetPort(virNetServerServicePtr svc)
 }
 
 
-int virNetServerServiceGetAuth(virNetServerServicePtr svc)
+int virNetServerServiceGetAuth(virNetServerService *svc)
 {
     return svc->auth;
 }
 
 
-bool virNetServerServiceIsReadonly(virNetServerServicePtr svc)
+bool virNetServerServiceIsReadonly(virNetServerService *svc)
 {
     return svc->readonly;
 }
 
 
-size_t virNetServerServiceGetMaxRequests(virNetServerServicePtr svc)
+size_t virNetServerServiceGetMaxRequests(virNetServerService *svc)
 {
     return svc->nrequests_client_max;
 }
 
-virNetTLSContextPtr virNetServerServiceGetTLSContext(virNetServerServicePtr svc)
+virNetTLSContext *virNetServerServiceGetTLSContext(virNetServerService *svc)
 {
     return svc->tls;
 }
 
-void virNetServerServiceSetDispatcher(virNetServerServicePtr svc,
+void virNetServerServiceSetDispatcher(virNetServerService *svc,
                                       virNetServerServiceDispatchFunc func,
                                       void *opaque)
 {
@@ -463,17 +404,17 @@ void virNetServerServiceSetDispatcher(virNetServerServicePtr svc,
 
 void virNetServerServiceDispose(void *obj)
 {
-    virNetServerServicePtr svc = obj;
+    virNetServerService *svc = obj;
     size_t i;
 
     for (i = 0; i < svc->nsocks; i++)
        virObjectUnref(svc->socks[i]);
-    VIR_FREE(svc->socks);
+    g_free(svc->socks);
 
     virObjectUnref(svc->tls);
 }
 
-void virNetServerServiceToggle(virNetServerServicePtr svc,
+void virNetServerServiceToggle(virNetServerService *svc,
                                bool enabled)
 {
     size_t i;
@@ -485,7 +426,7 @@ void virNetServerServiceToggle(virNetServerServicePtr svc,
                                      0);
 }
 
-void virNetServerServiceClose(virNetServerServicePtr svc)
+void virNetServerServiceClose(virNetServerService *svc)
 {
     size_t i;
 
@@ -495,6 +436,5 @@ void virNetServerServiceClose(virNetServerServicePtr svc)
     for (i = 0; i < svc->nsocks; i++) {
         virNetSocketRemoveIOCallback(svc->socks[i]);
         virNetSocketClose(svc->socks[i]);
-        virObjectUnref(svc);
     }
 }

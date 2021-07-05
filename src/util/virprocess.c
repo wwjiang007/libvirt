@@ -24,20 +24,22 @@
 
 #include <fcntl.h>
 #include <signal.h>
-#include <sys/wait.h>
+#ifndef WIN32
+# include <sys/wait.h>
+#endif
 #include <unistd.h>
-#if HAVE_SYS_MOUNT_H
+#if WITH_SYS_MOUNT_H
 # include <sys/mount.h>
 #endif
-#if HAVE_SETRLIMIT
+#if WITH_SETRLIMIT
 # include <sys/time.h>
 # include <sys/resource.h>
 #endif
-#if HAVE_SCHED_SETSCHEDULER
+#if WITH_SCHED_SETSCHEDULER
 # include <sched.h>
 #endif
 
-#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || HAVE_BSD_CPU_AFFINITY
+#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || WITH_BSD_CPU_AFFINITY
 # include <sys/param.h>
 #endif
 
@@ -46,11 +48,15 @@
 # include <sys/user.h>
 #endif
 
-#if HAVE_BSD_CPU_AFFINITY
+#if WITH_BSD_CPU_AFFINITY
 # include <sys/cpuset.h>
 #endif
 
-#include "viratomic.h"
+#ifdef WIN32
+# define WIN32_LEAN_AND_MEAN
+# include <windows.h>
+#endif
+
 #include "virprocess.h"
 #include "virerror.h"
 #include "viralloc.h"
@@ -86,7 +92,7 @@ VIR_LOG_INIT("util.process");
 #  endif
 # endif
 
-# ifndef HAVE_SETNS
+# ifndef WITH_SETNS
 #  if defined(__NR_setns)
 #   include <sys/syscall.h>
 
@@ -99,7 +105,7 @@ static inline int setns(int fd, int nstype)
 #  endif
 # endif
 #else /* !__linux__ */
-static inline int setns(int fd ATTRIBUTE_UNUSED, int nstype ATTRIBUTE_UNUSED)
+static inline int setns(int fd G_GNUC_UNUSED, int nstype G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Namespaces are not supported on this platform."));
@@ -116,12 +122,14 @@ VIR_ENUM_IMPL(virProcessSchedPolicy,
               "rr",
 );
 
+
+#ifndef WIN32
 /**
  * virProcessTranslateStatus:
  * @status: child exit status to translate
  *
  * Translate an exit status into a malloc'd string.  Generic helper
- * for virCommandRun(), virCommandWait(), virRun(), and virProcessWait()
+ * for virCommandRun(), virCommandWait() and virProcessWait()
  * status argument, as well as raw waitpid().
  */
 char *
@@ -129,19 +137,18 @@ virProcessTranslateStatus(int status)
 {
     char *buf;
     if (WIFEXITED(status)) {
-        ignore_value(virAsprintfQuiet(&buf, _("exit status %d"),
-                                      WEXITSTATUS(status)));
+        buf = g_strdup_printf(_("exit status %d"),
+                              WEXITSTATUS(status));
     } else if (WIFSIGNALED(status)) {
-        ignore_value(virAsprintfQuiet(&buf, _("fatal signal %d"),
-                                      WTERMSIG(status)));
+        buf = g_strdup_printf(_("fatal signal %d"),
+                              WTERMSIG(status));
     } else {
-        ignore_value(virAsprintfQuiet(&buf, _("invalid value %d"), status));
+        buf = g_strdup_printf(_("invalid value %d"), status);
     }
     return buf;
 }
 
 
-#ifndef WIN32
 /**
  * virProcessAbort:
  * @pid: child process to kill
@@ -158,7 +165,7 @@ virProcessAbort(pid_t pid)
     int saved_errno;
     int ret;
     int status;
-    VIR_AUTOFREE(char *) tmp = NULL;
+    g_autofree char *tmp = NULL;
 
     if (pid <= 0)
         return;
@@ -177,7 +184,7 @@ virProcessAbort(pid_t pid)
     } else if (ret == 0) {
         VIR_DEBUG("trying SIGTERM to child process %d", pid);
         kill(pid, SIGTERM);
-        usleep(10 * 1000);
+        g_usleep(10 * 1000);
         while ((ret = waitpid(pid, &status, WNOHANG)) == -1 &&
                errno == EINTR);
         if (ret == pid) {
@@ -201,14 +208,6 @@ virProcessAbort(pid_t pid)
  cleanup:
     errno = saved_errno;
 }
-#else
-void
-virProcessAbort(pid_t pid)
-{
-    /* Not yet ported to mingw.  Any volunteers?  */
-    VIR_DEBUG("failed to reap child %lld, abandoning it", (long long)pid);
-}
-#endif
 
 
 /**
@@ -237,7 +236,7 @@ virProcessWait(pid_t pid, int *exitstatus, bool raw)
 {
     int ret;
     int status;
-    VIR_AUTOFREE(char *) st = NULL;
+    g_autofree char *st = NULL;
 
     if (pid <= 0) {
         if (pid != -1)
@@ -276,6 +275,33 @@ virProcessWait(pid_t pid, int *exitstatus, bool raw)
                    (long long) pid, NULLSTR(st));
     return -1;
 }
+
+#else /* WIN32 */
+
+char *
+virProcessTranslateStatus(int status)
+{
+    return g_strdup_printf(_("invalid value %d"), status);
+}
+
+
+void
+virProcessAbort(pid_t pid)
+{
+    /* Not yet ported to mingw.  Any volunteers?  */
+    VIR_DEBUG("failed to reap child %lld, abandoning it", (long long)pid);
+}
+
+
+int
+virProcessWait(pid_t pid, int *exitstatus G_GNUC_UNUSED, bool raw G_GNUC_UNUSED)
+{
+    virReportSystemError(ENOSYS, _("unable to wait for process %lld"),
+                         (long long) pid);
+    return -1;
+}
+
+#endif /* WIN32 */
 
 
 /* send signal to a single process */
@@ -349,7 +375,6 @@ int
 virProcessKillPainfullyDelay(pid_t pid, bool force, unsigned int extradelay)
 {
     size_t i;
-    int ret = -1;
     /* This is in 1/5th seconds since polling is on a 0.2s interval */
     unsigned int polldelay = (force ? 200 : 75) + (extradelay*5);
     const char *signame = "TERM";
@@ -393,21 +418,19 @@ virProcessKillPainfullyDelay(pid_t pid, bool force, unsigned int extradelay)
                 virReportSystemError(errno,
                                      _("Failed to terminate process %lld with SIG%s"),
                                      (long long)pid, signame);
-                goto cleanup;
+                return -1;
             }
-            ret = signum == SIGTERM ? 0 : 1;
-            goto cleanup; /* process is dead */
+            return signum == SIGTERM ? 0 : 1;
         }
 
-        usleep(200 * 1000);
+        g_usleep(200 * 1000);
     }
 
     virReportSystemError(EBUSY,
                          _("Failed to terminate process %lld with SIG%s"),
                          (long long)pid, signame);
 
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -416,33 +439,31 @@ int virProcessKillPainfully(pid_t pid, bool force)
     return virProcessKillPainfullyDelay(pid, force, 0);
 }
 
-#if HAVE_SCHED_GETAFFINITY
+#if WITH_SCHED_GETAFFINITY
 
-int virProcessSetAffinity(pid_t pid, virBitmapPtr map)
+int virProcessSetAffinity(pid_t pid, virBitmap *map, bool quiet)
 {
     size_t i;
-    VIR_DEBUG("Set process affinity on %lld", (long long)pid);
-# ifdef CPU_ALLOC
-    /* New method dynamically allocates cpu mask, allowing unlimted cpus */
     int numcpus = 1024;
     size_t masklen;
     cpu_set_t *mask;
+    int rv = -1;
+
+    VIR_DEBUG("Set process affinity on %lld", (long long)pid);
 
     /* Not only may the statically allocated cpu_set_t be too small,
      * but there is no way to ask the kernel what size is large enough.
      * So you have no option but to pick a size, try, catch EINVAL,
      * enlarge, and re-try.
      *
-     * http://lkml.org/lkml/2009/7/28/620
+     * https://lkml.org/lkml/2009/7/28/620
      */
  realloc:
     masklen = CPU_ALLOC_SIZE(numcpus);
     mask = CPU_ALLOC(numcpus);
 
-    if (!mask) {
-        virReportOOMError();
-        return -1;
-    }
+    if (!mask)
+        abort();
 
     CPU_ZERO_S(masklen, mask);
     for (i = 0; i < virBitmapSize(map); i++) {
@@ -450,67 +471,46 @@ int virProcessSetAffinity(pid_t pid, virBitmapPtr map)
             CPU_SET_S(i, masklen, mask);
     }
 
-    if (sched_setaffinity(pid, masklen, mask) < 0) {
-        CPU_FREE(mask);
+    rv = sched_setaffinity(pid, masklen, mask);
+    CPU_FREE(mask);
+
+    if (rv < 0) {
         if (errno == EINVAL &&
             numcpus < (1024 << 8)) { /* 262144 cpus ought to be enough for anyone */
             numcpus = numcpus << 2;
             goto realloc;
         }
-        virReportSystemError(errno,
-                             _("cannot set CPU affinity on process %d"), pid);
-        return -1;
+        if (quiet) {
+            VIR_DEBUG("cannot set CPU affinity on process %d: %s",
+                      pid, g_strerror(errno));
+        } else {
+            virReportSystemError(errno,
+                                 _("cannot set CPU affinity on process %d"), pid);
+            return -1;
+        }
     }
-    CPU_FREE(mask);
-# else
-    /* Legacy method uses a fixed size cpu mask, only allows up to 1024 cpus */
-    cpu_set_t mask;
-
-    CPU_ZERO(&mask);
-    for (i = 0; i < virBitmapSize(map); i++) {
-        if (virBitmapIsBitSet(map, i))
-            CPU_SET(i, &mask);
-    }
-
-    if (sched_setaffinity(pid, sizeof(mask), &mask) < 0) {
-        virReportSystemError(errno,
-                             _("cannot set CPU affinity on process %d"), pid);
-        return -1;
-    }
-# endif
 
     return 0;
 }
 
-virBitmapPtr
+virBitmap *
 virProcessGetAffinity(pid_t pid)
 {
     size_t i;
     cpu_set_t *mask;
     size_t masklen;
     size_t ncpus;
-    virBitmapPtr ret = NULL;
+    virBitmap *ret = NULL;
 
-# ifdef CPU_ALLOC
     /* 262144 cpus ought to be enough for anyone */
     ncpus = 1024 << 8;
     masklen = CPU_ALLOC_SIZE(ncpus);
     mask = CPU_ALLOC(ncpus);
 
-    if (!mask) {
-        virReportOOMError();
-        return NULL;
-    }
+    if (!mask)
+        abort();
 
     CPU_ZERO_S(masklen, mask);
-# else
-    ncpus = 1024;
-    if (VIR_ALLOC(mask) < 0)
-        return NULL;
-
-    masklen = sizeof(*mask);
-    CPU_ZERO(mask);
-# endif
 
     if (sched_getaffinity(pid, masklen, mask) < 0) {
         virReportSystemError(errno,
@@ -518,34 +518,24 @@ virProcessGetAffinity(pid_t pid)
         goto cleanup;
     }
 
-    if (!(ret = virBitmapNew(ncpus)))
-          goto cleanup;
+    ret = virBitmapNew(ncpus);
 
     for (i = 0; i < ncpus; i++) {
-# ifdef CPU_ALLOC
-         /* coverity[overrun-local] */
         if (CPU_ISSET_S(i, masklen, mask))
             ignore_value(virBitmapSetBit(ret, i));
-# else
-        if (CPU_ISSET(i, mask))
-            ignore_value(virBitmapSetBit(ret, i));
-# endif
     }
 
  cleanup:
-# ifdef CPU_ALLOC
     CPU_FREE(mask);
-# else
-    VIR_FREE(mask);
-# endif
 
     return ret;
 }
 
-#elif defined(HAVE_BSD_CPU_AFFINITY)
+#elif defined(WITH_BSD_CPU_AFFINITY)
 
 int virProcessSetAffinity(pid_t pid,
-                          virBitmapPtr map)
+                          virBitmap *map,
+                          bool quiet)
 {
     size_t i;
     cpuset_t mask;
@@ -558,20 +548,25 @@ int virProcessSetAffinity(pid_t pid,
 
     if (cpuset_setaffinity(CPU_LEVEL_WHICH, CPU_WHICH_PID, pid,
                            sizeof(mask), &mask) != 0) {
-        virReportSystemError(errno,
-                             _("cannot set CPU affinity on process %d"), pid);
-        return -1;
+        if (quiet) {
+            VIR_DEBUG("cannot set CPU affinity on process %d: %s",
+                      pid, g_strerror(errno));
+        } else {
+            virReportSystemError(errno,
+                                 _("cannot set CPU affinity on process %d"), pid);
+            return -1;
+        }
     }
 
     return 0;
 }
 
-virBitmapPtr
+virBitmap *
 virProcessGetAffinity(pid_t pid)
 {
     size_t i;
     cpuset_t mask;
-    virBitmapPtr ret = NULL;
+    virBitmap *ret = NULL;
 
     CPU_ZERO(&mask);
     if (cpuset_getaffinity(CPU_LEVEL_WHICH, CPU_WHICH_PID, pid,
@@ -581,8 +576,7 @@ virProcessGetAffinity(pid_t pid)
         return NULL;
     }
 
-    if (!(ret = virBitmapNew(sizeof(mask) * 8)))
-        return NULL;
+    ret = virBitmapNew(sizeof(mask) * 8);
 
     for (i = 0; i < sizeof(mask) * 8; i++)
         if (CPU_ISSET(i, &mask))
@@ -591,39 +585,41 @@ virProcessGetAffinity(pid_t pid)
     return ret;
 }
 
-#else /* HAVE_SCHED_GETAFFINITY */
+#else /* WITH_SCHED_GETAFFINITY */
 
-int virProcessSetAffinity(pid_t pid ATTRIBUTE_UNUSED,
-                          virBitmapPtr map ATTRIBUTE_UNUSED)
+int virProcessSetAffinity(pid_t pid G_GNUC_UNUSED,
+                          virBitmap *map G_GNUC_UNUSED,
+                          bool quiet G_GNUC_UNUSED)
 {
+    /* The @quiet parameter is ignored here, it is used only for silencing
+     * actual failures. */
     virReportSystemError(ENOSYS, "%s",
                          _("Process CPU affinity is not supported on this platform"));
     return -1;
 }
 
-virBitmapPtr
-virProcessGetAffinity(pid_t pid ATTRIBUTE_UNUSED)
+virBitmap *
+virProcessGetAffinity(pid_t pid G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Process CPU affinity is not supported on this platform"));
     return NULL;
 }
-#endif /* HAVE_SCHED_GETAFFINITY */
+#endif /* WITH_SCHED_GETAFFINITY */
 
 
 int virProcessGetPids(pid_t pid, size_t *npids, pid_t **pids)
 {
     int ret = -1;
-    DIR *dir = NULL;
+    g_autoptr(DIR) dir = NULL;
     int value;
     struct dirent *ent;
-    VIR_AUTOFREE(char *) taskPath = NULL;
+    g_autofree char *taskPath = NULL;
 
     *npids = 0;
     *pids = NULL;
 
-    if (virAsprintf(&taskPath, "/proc/%llu/task", (long long) pid) < 0)
-        goto cleanup;
+    taskPath = g_strdup_printf("/proc/%llu/task", (long long)pid);
 
     if (virDirOpen(&dir, taskPath) < 0)
         goto cleanup;
@@ -646,7 +642,6 @@ int virProcessGetPids(pid_t pid, size_t *npids, pid_t **pids)
     ret = 0;
 
  cleanup:
-    VIR_DIR_CLOSE(dir);
     if (ret < 0)
         VIR_FREE(*pids);
     return ret;
@@ -657,41 +652,25 @@ int virProcessGetNamespaces(pid_t pid,
                             size_t *nfdlist,
                             int **fdlist)
 {
-    int ret = -1;
     size_t i = 0;
     const char *ns[] = { "user", "ipc", "uts", "net", "pid", "mnt" };
 
     *nfdlist = 0;
     *fdlist = NULL;
 
-    for (i = 0; i < ARRAY_CARDINALITY(ns); i++) {
+    for (i = 0; i < G_N_ELEMENTS(ns); i++) {
         int fd;
-        VIR_AUTOFREE(char *) nsfile = NULL;
+        g_autofree char *nsfile = NULL;
 
-        if (virAsprintf(&nsfile, "/proc/%llu/ns/%s",
-                        (long long) pid,
-                        ns[i]) < 0)
-            goto cleanup;
+        nsfile = g_strdup_printf("/proc/%llu/ns/%s", (long long)pid, ns[i]);
 
         if ((fd = open(nsfile, O_RDONLY)) >= 0) {
-            if (VIR_EXPAND_N(*fdlist, *nfdlist, 1) < 0) {
-                VIR_FORCE_CLOSE(fd);
-                goto cleanup;
-            }
-
+            VIR_EXPAND_N(*fdlist, *nfdlist, 1);
             (*fdlist)[(*nfdlist)-1] = fd;
         }
     }
 
-    ret = 0;
-
- cleanup:
-    if (ret < 0) {
-        for (i = 0; i < *nfdlist; i++)
-            VIR_FORCE_CLOSE((*fdlist)[i]);
-        VIR_FREE(*fdlist);
-    }
-    return ret;
+    return 0;
 }
 
 
@@ -724,7 +703,7 @@ int virProcessSetNamespaces(size_t nfdlist,
     return 0;
 }
 
-#if HAVE_PRLIMIT
+#if WITH_PRLIMIT
 static int
 virProcessPrLimit(pid_t pid,
                   int resource,
@@ -733,26 +712,198 @@ virProcessPrLimit(pid_t pid,
 {
     return prlimit(pid, resource, new_limit, old_limit);
 }
-#elif HAVE_SETRLIMIT
+#elif WITH_SETRLIMIT
 static int
-virProcessPrLimit(pid_t pid ATTRIBUTE_UNUSED,
-                  int resource ATTRIBUTE_UNUSED,
-                  const struct rlimit *new_limit ATTRIBUTE_UNUSED,
-                  struct rlimit *old_limit ATTRIBUTE_UNUSED)
+virProcessPrLimit(pid_t pid G_GNUC_UNUSED,
+                  int resource G_GNUC_UNUSED,
+                  const struct rlimit *new_limit G_GNUC_UNUSED,
+                  struct rlimit *old_limit G_GNUC_UNUSED)
 {
     errno = ENOSYS;
     return -1;
 }
 #endif
 
-#if HAVE_SETRLIMIT && defined(RLIMIT_MEMLOCK)
+#if WITH_GETRLIMIT
+static int
+virProcessGetRLimit(int resource,
+                    struct rlimit *old_limit)
+{
+    return getrlimit(resource, old_limit);
+}
+#endif /* WITH_GETRLIMIT */
+
+#if WITH_SETRLIMIT
+static int
+virProcessSetRLimit(int resource,
+                    const struct rlimit *new_limit)
+{
+    return setrlimit(resource, new_limit);
+}
+#endif /* WITH_SETRLIMIT */
+
+#if WITH_GETRLIMIT
+static const char*
+virProcessLimitResourceToLabel(int resource)
+{
+    switch (resource) {
+# if defined(RLIMIT_MEMLOCK)
+        case RLIMIT_MEMLOCK:
+            return "Max locked memory";
+# endif /* defined(RLIMIT_MEMLOCK) */
+
+# if defined(RLIMIT_NPROC)
+        case RLIMIT_NPROC:
+            return "Max processes";
+# endif /* defined(RLIMIT_NPROC) */
+
+# if defined(RLIMIT_NOFILE)
+        case RLIMIT_NOFILE:
+            return "Max open files";
+# endif /* defined(RLIMIT_NOFILE) */
+
+# if defined(RLIMIT_CORE)
+        case RLIMIT_CORE:
+            return "Max core file size";
+# endif /* defined(RLIMIT_CORE) */
+
+        default:
+            return NULL;
+    }
+}
+
+# if defined(__linux__)
+static int
+virProcessGetLimitFromProc(pid_t pid,
+                           int resource,
+                           struct rlimit *limit)
+{
+    g_autofree char *procfile = NULL;
+    g_autofree char *buf = NULL;
+    g_auto(GStrv) lines = NULL;
+    const char *label;
+    size_t i;
+
+    if (!(label = virProcessLimitResourceToLabel(resource))) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    procfile = g_strdup_printf("/proc/%lld/limits", (long long)pid);
+
+    if (virFileReadAllQuiet(procfile, 2048, &buf) < 0) {
+        /* virFileReadAllQuiet() already sets errno, so don't overwrite
+         * that and return immediately instead */
+        return -1;
+    }
+
+    lines = g_strsplit(buf, "\n", 0);
+
+    for (i = 0; lines[i]; i++) {
+        g_autofree char *softLimit = NULL;
+        g_autofree char *hardLimit = NULL;
+        char *line = lines[i];
+        unsigned long long tmp;
+
+        if (!(line = STRSKIP(line, label)))
+            continue;
+
+        if (sscanf(line, "%ms %ms %*s", &softLimit, &hardLimit) < 2)
+            goto error;
+
+        if (STREQ(softLimit, "unlimited")) {
+            limit->rlim_cur = RLIM_INFINITY;
+        } else {
+            if (virStrToLong_ull(softLimit, NULL, 10, &tmp) < 0)
+                goto error;
+            limit->rlim_cur = tmp;
+        }
+        if (STREQ(hardLimit, "unlimited")) {
+            limit->rlim_max = RLIM_INFINITY;
+        } else {
+            if (virStrToLong_ull(hardLimit, NULL, 10, &tmp) < 0)
+                goto error;
+            limit->rlim_max = tmp;
+        }
+    }
+
+    return 0;
+
+ error:
+    errno = EIO;
+    return -1;
+}
+# else /* !defined(__linux__) */
+static int
+virProcessGetLimitFromProc(pid_t pid G_GNUC_UNUSED,
+                           int resource G_GNUC_UNUSED,
+                           struct rlimit *limit G_GNUC_UNUSED)
+{
+    errno = ENOSYS;
+    return -1;
+}
+# endif /* !defined(__linux__) */
+
+static int
+virProcessGetLimit(pid_t pid,
+                   int resource,
+                   struct rlimit *old_limit)
+{
+    pid_t current_pid = getpid();
+    bool same_process = (pid == current_pid);
+
+    if (virProcessPrLimit(pid, resource, NULL, old_limit) == 0)
+        return 0;
+
+    /* For whatever reason, using prlimit() on another process - even
+     * when it's just to obtain the current limit rather than changing
+     * it - requires CAP_SYS_RESOURCE, which we might not have in a
+     * containerized environment; on the other hand, no particular
+     * permission is needed to poke around /proc, so try that if going
+     * through the syscall didn't work */
+    if (virProcessGetLimitFromProc(pid, resource, old_limit) == 0)
+        return 0;
+
+    if (same_process && virProcessGetRLimit(resource, old_limit) == 0)
+        return 0;
+
+    return -1;
+}
+#endif /* WITH_GETRLIMIT */
+
+#if WITH_SETRLIMIT
+static int
+virProcessSetLimit(pid_t pid,
+                   int resource,
+                   const struct rlimit *new_limit)
+{
+    pid_t current_pid = getpid();
+    bool same_process = (pid == current_pid);
+
+    if (virProcessPrLimit(pid, resource, new_limit, NULL) == 0)
+        return 0;
+
+    if (same_process && virProcessSetRLimit(resource, new_limit) == 0)
+        return 0;
+
+    return -1;
+}
+#endif /* WITH_SETRLIMIT */
+
+#if WITH_SETRLIMIT && defined(RLIMIT_MEMLOCK)
+/**
+ * virProcessSetMaxMemLock:
+ * @pid: process to be changed
+ * @bytes: new limit
+ *
+ * Sets a new limit on the amount of locked memory for a process.
+ *
+ * Returns: 0 on success, <0 on failure.
+ */
 int
 virProcessSetMaxMemLock(pid_t pid, unsigned long long bytes)
 {
     struct rlimit rlim;
-
-    if (bytes == 0)
-        return 0;
 
     /* We use VIR_DOMAIN_MEMORY_PARAM_UNLIMITED internally to represent
      * unlimited memory amounts, but setrlimit() and prlimit() use
@@ -763,21 +914,11 @@ virProcessSetMaxMemLock(pid_t pid, unsigned long long bytes)
     else
         rlim.rlim_cur = rlim.rlim_max = RLIM_INFINITY;
 
-    if (pid == 0) {
-        if (setrlimit(RLIMIT_MEMLOCK, &rlim) < 0) {
-            virReportSystemError(errno,
-                                 _("cannot limit locked memory to %llu"),
-                                 bytes);
-            return -1;
-        }
-    } else {
-        if (virProcessPrLimit(pid, RLIMIT_MEMLOCK, &rlim, NULL) < 0) {
-            virReportSystemError(errno,
-                                 _("cannot limit locked memory "
-                                   "of process %lld to %llu"),
-                                 (long long int)pid, bytes);
-            return -1;
-        }
+    if (virProcessSetLimit(pid, RLIMIT_MEMLOCK, &rlim) < 0) {
+        virReportSystemError(errno,
+                             _("cannot limit locked memory "
+                               "of process %lld to %llu"),
+                             (long long int)pid, bytes);
     }
 
     VIR_DEBUG("Locked memory for process %lld limited to %llu bytes",
@@ -785,19 +926,26 @@ virProcessSetMaxMemLock(pid_t pid, unsigned long long bytes)
 
     return 0;
 }
-#else /* ! (HAVE_SETRLIMIT && defined(RLIMIT_MEMLOCK)) */
+#else /* ! (WITH_SETRLIMIT && defined(RLIMIT_MEMLOCK)) */
 int
-virProcessSetMaxMemLock(pid_t pid ATTRIBUTE_UNUSED, unsigned long long bytes)
+virProcessSetMaxMemLock(pid_t pid G_GNUC_UNUSED,
+                        unsigned long long bytes G_GNUC_UNUSED)
 {
-    if (bytes == 0)
-        return 0;
-
     virReportSystemError(ENOSYS, "%s", _("Not supported on this platform"));
     return -1;
 }
-#endif /* ! (HAVE_SETRLIMIT && defined(RLIMIT_MEMLOCK)) */
+#endif /* ! (WITH_SETRLIMIT && defined(RLIMIT_MEMLOCK)) */
 
-#if HAVE_GETRLIMIT && defined(RLIMIT_MEMLOCK)
+#if WITH_GETRLIMIT && defined(RLIMIT_MEMLOCK)
+/**
+ * virProcessGetMaxMemLock:
+ * @pid: process to be queried
+ * @bytes: return location for the limit
+ *
+ * Obtain the current limit on the amount of locked memory for a process.
+ *
+ * Returns: 0 on success, <0 on failure.
+ */
 int
 virProcessGetMaxMemLock(pid_t pid,
                         unsigned long long *bytes)
@@ -807,21 +955,12 @@ virProcessGetMaxMemLock(pid_t pid,
     if (!bytes)
         return 0;
 
-    if (pid == 0) {
-        if (getrlimit(RLIMIT_MEMLOCK, &rlim) < 0) {
-            virReportSystemError(errno,
-                                 "%s",
-                                 _("cannot get locked memory limit"));
-            return -1;
-        }
-    } else {
-        if (virProcessPrLimit(pid, RLIMIT_MEMLOCK, NULL, &rlim) < 0) {
-            virReportSystemError(errno,
-                                 _("cannot get locked memory limit "
-                                   "of process %lld"),
-                                 (long long int) pid);
-            return -1;
-        }
+    if (virProcessGetLimit(pid, RLIMIT_MEMLOCK, &rlim) < 0) {
+        virReportSystemError(errno,
+                             _("cannot get locked memory limit "
+                               "of process %lld"),
+                             (long long int) pid);
+        return -1;
     }
 
     /* virProcessSetMaxMemLock() sets both rlim_cur and rlim_max to the
@@ -836,67 +975,67 @@ virProcessGetMaxMemLock(pid_t pid,
 
     return 0;
 }
-#else /* ! (HAVE_GETRLIMIT && defined(RLIMIT_MEMLOCK)) */
+#else /* ! (WITH_GETRLIMIT && defined(RLIMIT_MEMLOCK)) */
 int
-virProcessGetMaxMemLock(pid_t pid ATTRIBUTE_UNUSED,
-                        unsigned long long *bytes)
+virProcessGetMaxMemLock(pid_t pid G_GNUC_UNUSED,
+                        unsigned long long *bytes G_GNUC_UNUSED)
 {
-    if (!bytes)
-        return 0;
-
     virReportSystemError(ENOSYS, "%s", _("Not supported on this platform"));
     return -1;
 }
-#endif /* ! (HAVE_GETRLIMIT && defined(RLIMIT_MEMLOCK)) */
+#endif /* ! (WITH_GETRLIMIT && defined(RLIMIT_MEMLOCK)) */
 
-#if HAVE_SETRLIMIT && defined(RLIMIT_NPROC)
+#if WITH_SETRLIMIT && defined(RLIMIT_NPROC)
+/**
+ * virProcessSetMaxProcesses:
+ * @pid: process to be changed
+ * @procs: new limit
+ *
+ * Sets a new limit on the amount of processes for the user the
+ * process is running as.
+ *
+ * Returns: 0 on success, <0 on failure.
+ */
 int
 virProcessSetMaxProcesses(pid_t pid, unsigned int procs)
 {
     struct rlimit rlim;
 
-    if (procs == 0)
-        return 0;
-
     rlim.rlim_cur = rlim.rlim_max = procs;
-    if (pid == 0) {
-        if (setrlimit(RLIMIT_NPROC, &rlim) < 0) {
-            virReportSystemError(errno,
-                                 _("cannot limit number of subprocesses to %u"),
-                                 procs);
-            return -1;
-        }
-    } else {
-        if (virProcessPrLimit(pid, RLIMIT_NPROC, &rlim, NULL) < 0) {
-            virReportSystemError(errno,
-                                 _("cannot limit number of subprocesses "
-                                   "of process %lld to %u"),
-                                 (long long int)pid, procs);
-            return -1;
-        }
+
+    if (virProcessSetLimit(pid, RLIMIT_NPROC, &rlim) < 0) {
+        virReportSystemError(errno,
+                _("cannot limit number of subprocesses "
+                  "of process %lld to %u"),
+                (long long int)pid, procs);
+        return -1;
     }
     return 0;
 }
-#else /* ! (HAVE_SETRLIMIT && defined(RLIMIT_NPROC)) */
+#else /* ! (WITH_SETRLIMIT && defined(RLIMIT_NPROC)) */
 int
-virProcessSetMaxProcesses(pid_t pid ATTRIBUTE_UNUSED, unsigned int procs)
+virProcessSetMaxProcesses(pid_t pid G_GNUC_UNUSED,
+                          unsigned int procs G_GNUC_UNUSED)
 {
-    if (procs == 0)
-        return 0;
-
     virReportSystemError(ENOSYS, "%s", _("Not supported on this platform"));
     return -1;
 }
-#endif /* ! (HAVE_SETRLIMIT && defined(RLIMIT_NPROC)) */
+#endif /* ! (WITH_SETRLIMIT && defined(RLIMIT_NPROC)) */
 
-#if HAVE_SETRLIMIT && defined(RLIMIT_NOFILE)
+#if WITH_SETRLIMIT && defined(RLIMIT_NOFILE)
+/**
+ * virProcessSetMaxFiles:
+ * @pid: process to be changed
+ * @files: new limit
+ *
+ * Sets a new limit on the number of opened files for a process.
+ *
+ * Returns: 0 on success, <0 on failure.
+ */
 int
 virProcessSetMaxFiles(pid_t pid, unsigned int files)
 {
     struct rlimit rlim;
-
-    if (files == 0)
-        return 0;
 
    /* Max number of opened files is one greater than actual limit. See
     * man setrlimit.
@@ -907,73 +1046,63 @@ virProcessSetMaxFiles(pid_t pid, unsigned int files)
     * behavior.
     */
     rlim.rlim_cur = rlim.rlim_max = files + 1;
-    if (pid == 0) {
-        if (setrlimit(RLIMIT_NOFILE, &rlim) < 0) {
-            virReportSystemError(errno,
-                                 _("cannot limit number of open files to %u"),
-                                 files);
-            return -1;
-        }
-    } else {
-        if (virProcessPrLimit(pid, RLIMIT_NOFILE, &rlim, NULL) < 0) {
-            virReportSystemError(errno,
-                                 _("cannot limit number of open files "
-                                   "of process %lld to %u"),
-                                 (long long int)pid, files);
-            return -1;
-        }
+
+    if (virProcessSetLimit(pid, RLIMIT_NOFILE, &rlim) < 0) {
+        virReportSystemError(errno,
+                             _("cannot limit number of open files "
+                               "of process %lld to %u"),
+                             (long long int)pid, files);
+        return -1;
     }
+
     return 0;
 }
-#else /* ! (HAVE_SETRLIMIT && defined(RLIMIT_NOFILE)) */
+#else /* ! (WITH_SETRLIMIT && defined(RLIMIT_NOFILE)) */
 int
-virProcessSetMaxFiles(pid_t pid ATTRIBUTE_UNUSED, unsigned int files)
+virProcessSetMaxFiles(pid_t pid G_GNUC_UNUSED,
+                      unsigned int files G_GNUC_UNUSED)
 {
-    if (files == 0)
-        return 0;
-
     virReportSystemError(ENOSYS, "%s", _("Not supported on this platform"));
     return -1;
 }
-#endif /* ! (HAVE_SETRLIMIT && defined(RLIMIT_NOFILE)) */
+#endif /* ! (WITH_SETRLIMIT && defined(RLIMIT_NOFILE)) */
 
-#if HAVE_SETRLIMIT && defined(RLIMIT_CORE)
+#if WITH_SETRLIMIT && defined(RLIMIT_CORE)
+/**
+ * virProcessSetMaxCoreSize:
+ * @pid: process to be changed
+ * @bytes: new limit (0 to disable core dumps)
+ *
+ * Sets a new limit on the size of core dumps for a process.
+ *
+ * Returns: 0 on success, <0 on failure.
+ */
 int
 virProcessSetMaxCoreSize(pid_t pid, unsigned long long bytes)
 {
     struct rlimit rlim;
 
     rlim.rlim_cur = rlim.rlim_max = bytes;
-    if (pid == 0) {
-        if (setrlimit(RLIMIT_CORE, &rlim) < 0) {
-            virReportSystemError(errno,
-                                 _("cannot limit core file size to %llu"),
-                                 bytes);
-            return -1;
-        }
-    } else {
-        if (virProcessPrLimit(pid, RLIMIT_CORE, &rlim, NULL) < 0) {
-            virReportSystemError(errno,
-                                 _("cannot limit core file size "
-                                   "of process %lld to %llu"),
-                                 (long long int)pid, bytes);
-            return -1;
-        }
+
+    if (virProcessSetLimit(pid, RLIMIT_CORE, &rlim) < 0) {
+        virReportSystemError(errno,
+                _("cannot limit core file size "
+                  "of process %lld to %llu"),
+                (long long int)pid, bytes);
+        return -1;
     }
+
     return 0;
 }
-#else /* ! (HAVE_SETRLIMIT && defined(RLIMIT_CORE)) */
+#else /* ! (WITH_SETRLIMIT && defined(RLIMIT_CORE)) */
 int
-virProcessSetMaxCoreSize(pid_t pid ATTRIBUTE_UNUSED,
-                         unsigned long long bytes)
+virProcessSetMaxCoreSize(pid_t pid G_GNUC_UNUSED,
+                         unsigned long long bytes G_GNUC_UNUSED)
 {
-    if (bytes == 0)
-        return 0;
-
     virReportSystemError(ENOSYS, "%s", _("Not supported on this platform"));
     return -1;
 }
-#endif /* ! (HAVE_SETRLIMIT && defined(RLIMIT_CORE)) */
+#endif /* ! (WITH_SETRLIMIT && defined(RLIMIT_CORE)) */
 
 
 #ifdef __linux__
@@ -986,12 +1115,11 @@ int virProcessGetStartTime(pid_t pid,
 {
     char *tmp;
     int len;
-    VIR_AUTOFREE(char *) filename = NULL;
-    VIR_AUTOFREE(char *) buf = NULL;
-    VIR_AUTOSTRINGLIST tokens = NULL;
+    g_autofree char *filename = NULL;
+    g_autofree char *buf = NULL;
+    g_auto(GStrv) tokens = NULL;
 
-    if (virAsprintf(&filename, "/proc/%llu/stat", (long long) pid) < 0)
-        return -1;
+    filename = g_strdup_printf("/proc/%llu/stat", (long long)pid);
 
     if ((len = virFileReadAll(filename, 1024, &buf)) < 0)
         return -1;
@@ -1015,9 +1143,10 @@ int virProcessGetStartTime(pid_t pid,
         return -1;
     }
 
-    tokens = virStringSplit(tmp, " ", 0);
+    tokens = g_strsplit(tmp, " ", 0);
 
-    if (virStringListLength((const char * const *)tokens) < 20) {
+    if (!tokens ||
+        g_strv_length(tokens) < 20) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Cannot find start time in %s"),
                        filename);
@@ -1065,7 +1194,7 @@ int virProcessGetStartTime(pid_t pid,
                            unsigned long long *timestamp)
 {
     static int warned;
-    if (virAtomicIntInc(&warned) == 1) {
+    if (g_atomic_int_add(&warned, 1) == 0) {
         VIR_WARN("Process start time of pid %lld not available on this platform",
                  (long long) pid);
     }
@@ -1075,6 +1204,7 @@ int virProcessGetStartTime(pid_t pid,
 #endif
 
 
+#ifdef __linux__
 typedef struct _virProcessNamespaceHelperData virProcessNamespaceHelperData;
 struct _virProcessNamespaceHelperData {
     pid_t pid;
@@ -1082,16 +1212,15 @@ struct _virProcessNamespaceHelperData {
     void *opaque;
 };
 
-static int virProcessNamespaceHelper(pid_t pid ATTRIBUTE_UNUSED,
+static int virProcessNamespaceHelper(pid_t pid G_GNUC_UNUSED,
                                      void *opaque)
 {
     virProcessNamespaceHelperData *data = opaque;
     int fd = -1;
     int ret = -1;
-    VIR_AUTOFREE(char *) path = NULL;
+    g_autofree char *path = NULL;
 
-    if (virAsprintf(&path, "/proc/%lld/ns/mnt", (long long) data->pid) < 0)
-        goto cleanup;
+    path = g_strdup_printf("/proc/%lld/ns/mnt", (long long)data->pid);
 
     if ((fd = open(path, O_RDONLY)) < 0) {
         virReportSystemError(errno, "%s",
@@ -1128,6 +1257,40 @@ virProcessRunInMountNamespace(pid_t pid,
     return virProcessRunInFork(virProcessNamespaceHelper, &data);
 }
 
+#else /* ! __linux__ */
+
+int
+virProcessRunInMountNamespace(pid_t pid G_GNUC_UNUSED,
+                              virProcessNamespaceCallback cb G_GNUC_UNUSED,
+                              void *opaque G_GNUC_UNUSED)
+{
+    virReportSystemError(ENOSYS, "%s",
+                         _("Namespaces are not supported on this platform"));
+    return -1;
+}
+
+#endif /* ! __linux__ */
+
+
+#ifndef WIN32
+/* We assume that error messages will fit into 1024 chars */
+# define VIR_PROCESS_ERROR_MAX_LENGTH 1024
+typedef struct {
+    int code;
+    int domain;
+    char message[VIR_PROCESS_ERROR_MAX_LENGTH];
+    virErrorLevel level;
+    char str1[VIR_PROCESS_ERROR_MAX_LENGTH];
+    char str2[VIR_PROCESS_ERROR_MAX_LENGTH];
+    char str3[VIR_PROCESS_ERROR_MAX_LENGTH];
+    int int1;
+    int int2;
+} errorData;
+
+typedef union {
+    errorData data;
+    char bindata[sizeof(errorData)];
+} errorDataBin;
 
 static int
 virProcessRunInForkHelper(int errfd,
@@ -1137,9 +1300,24 @@ virProcessRunInForkHelper(int errfd,
 {
     if (cb(ppid, opaque) < 0) {
         virErrorPtr err = virGetLastError();
+
         if (err) {
-            size_t len = strlen(err->message) + 1;
-            ignore_value(safewrite(errfd, err->message, len));
+            g_autofree errorDataBin *bin = g_new0(errorDataBin, 1);
+
+            bin->data.code = err->code;
+            bin->data.domain = err->domain;
+            virStrcpyStatic(bin->data.message, err->message);
+            bin->data.level = err->level;
+            if (err->str1)
+                virStrcpyStatic(bin->data.str1, err->str1);
+            if (err->str2)
+                virStrcpyStatic(bin->data.str2, err->str2);
+            if (err->str3)
+                virStrcpyStatic(bin->data.str3, err->str3);
+            bin->data.int1 = err->int1;
+            bin->data.int2 = err->int2;
+
+            ignore_value(safewrite(errfd, bin->bindata, sizeof(*bin)));
         }
 
         return -1;
@@ -1161,7 +1339,7 @@ virProcessRunInForkHelper(int errfd,
  * particular no mutexes should be used in @cb, unless steps were
  * taken before forking to guarantee a predictable state. @cb
  * must not exec any external binaries, instead
- * virCommand/virExec should be used for that purpose.
+ * virCommand should be used for that purpose.
  *
  * On return, the returned value is either -1 with error message
  * reported if something went bad in the parent, if child has
@@ -1177,11 +1355,8 @@ virProcessRunInFork(virProcessForkCallback cb,
     pid_t parent = getpid();
     int errfd[2] = { -1, -1 };
 
-    if (pipe2(errfd, O_CLOEXEC) < 0) {
-        virReportSystemError(errno, "%s",
-                             _("Cannot create pipe for child"));
+    if (virPipe(errfd) < 0)
         return -1;
-    }
 
     if ((child = virFork()) < 0)
         goto cleanup;
@@ -1193,17 +1368,39 @@ virProcessRunInFork(virProcessForkCallback cb,
         _exit(ret < 0 ? EXIT_CANCELED : ret);
     } else {
         int status;
-        VIR_AUTOFREE(char *) buf = NULL;
+        g_autofree char *buf = NULL;
+        g_autofree errorDataBin *bin = NULL;
+        int nread;
 
         VIR_FORCE_CLOSE(errfd[1]);
-        ignore_value(virFileReadHeaderFD(errfd[0], 1024, &buf));
+        nread = virFileReadHeaderFD(errfd[0], sizeof(*bin), &buf);
         ret = virProcessWait(child, &status, false);
         if (ret == 0) {
             ret = status == EXIT_CANCELED ? -1 : status;
             if (ret) {
-                virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("child reported (status=%d): %s"),
-                               status, NULLSTR(buf));
+                if (nread == sizeof(*bin)) {
+                    bin = g_new0(errorDataBin, 1);
+                    memcpy(bin->bindata, buf, sizeof(*bin));
+
+                    virReportError(VIR_ERR_INTERNAL_ERROR,
+                                   _("child reported (status=%d): %s"),
+                                   status, NULLSTR(bin->data.message));
+
+                    virRaiseErrorFull(__FILE__, __FUNCTION__, __LINE__,
+                                      bin->data.domain,
+                                      bin->data.code,
+                                      bin->data.level,
+                                      bin->data.str1,
+                                      bin->data.str2,
+                                      bin->data.str3,
+                                      bin->data.int1,
+                                      bin->data.int2,
+                                      "%s", bin->data.message);
+                } else {
+                    virReportError(VIR_ERR_INTERNAL_ERROR,
+                                   _("child didn't write error (status=%d)"),
+                                   status);
+                }
             }
         }
     }
@@ -1214,47 +1411,46 @@ virProcessRunInFork(virProcessForkCallback cb,
     return ret;
 }
 
+#else /* WIN32 */
 
-#if defined(HAVE_SYS_MOUNT_H) && defined(HAVE_UNSHARE)
+int
+virProcessRunInFork(virProcessForkCallback cb G_GNUC_UNUSED,
+                    void *opaque G_GNUC_UNUSED)
+{
+    virReportSystemError(ENOSYS, "%s",
+                         _("Process spawning is not supported on this platform"));
+    return -1;
+}
+
+#endif /* WIN32 */
+
+
+#if defined(__linux__)
 int
 virProcessSetupPrivateMountNS(void)
 {
-    int ret = -1;
-
     if (unshare(CLONE_NEWNS) < 0) {
         virReportSystemError(errno, "%s",
                              _("Cannot unshare mount namespace"));
-        goto cleanup;
+        return -1;
     }
 
     if (mount("", "/", "none", MS_SLAVE|MS_REC, NULL) < 0) {
         virReportSystemError(errno, "%s",
-                             _("Failed to switch root mount into slave mode"));
-        goto cleanup;
+                             _("Failed disable mount propagation out of the root filesystem"));
+        return -1;
     }
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
-#else /* !defined(HAVE_SYS_MOUNT_H) || !defined(HAVE_UNSHARE) */
 
-int
-virProcessSetupPrivateMountNS(void)
-{
-    virReportSystemError(ENOSYS, "%s",
-                         _("Namespaces are not supported on this platform."));
-    return -1;
-}
-#endif /* !defined(HAVE_SYS_MOUNT_H) || !defined(HAVE_UNSHARE) */
-
-#if defined(__linux__)
-ATTRIBUTE_NORETURN static int
-virProcessDummyChild(void *argv ATTRIBUTE_UNUSED)
+G_GNUC_NORETURN static int
+virProcessDummyChild(void *argv G_GNUC_UNUSED)
 {
     _exit(0);
 }
+
 
 /**
  * virProcessNamespaceAvailable:
@@ -1273,7 +1469,7 @@ virProcessNamespaceAvailable(unsigned int ns)
     int cpid;
     char *childStack;
     int stacksize = getpagesize() * 4;
-    VIR_AUTOFREE(char *)stack = NULL;
+    g_autofree char *stack = NULL;
 
     if (ns & VIR_PROCESS_NAMESPACE_MNT)
         flags |= CLONE_NEWNS;
@@ -1291,17 +1487,15 @@ virProcessNamespaceAvailable(unsigned int ns)
     /* Signal parent as soon as the child dies. RIP. */
     flags |= SIGCHLD;
 
-    if (VIR_ALLOC_N(stack, stacksize) < 0)
-        return -1;
+    stack = g_new0(char, stacksize);
 
     childStack = stack + stacksize;
 
     cpid = clone(virProcessDummyChild, childStack, flags, NULL);
 
     if (cpid < 0) {
-        char ebuf[1024] ATTRIBUTE_UNUSED;
         VIR_DEBUG("clone call returned %s, container support is not enabled",
-                  virStrerror(errno, ebuf, sizeof(ebuf)));
+                  g_strerror(errno));
         return -1;
     } else if (virProcessWait(cpid, NULL, false) < 0) {
         return -1;
@@ -1314,12 +1508,21 @@ virProcessNamespaceAvailable(unsigned int ns)
 #else /* !defined(__linux__) */
 
 int
-virProcessNamespaceAvailable(unsigned int ns ATTRIBUTE_UNUSED)
+virProcessSetupPrivateMountNS(void)
 {
     virReportSystemError(ENOSYS, "%s",
                          _("Namespaces are not supported on this platform."));
     return -1;
 }
+
+int
+virProcessNamespaceAvailable(unsigned int ns G_GNUC_UNUSED)
+{
+    virReportSystemError(ENOSYS, "%s",
+                         _("Namespaces are not supported on this platform."));
+    return -1;
+}
+
 #endif /* !defined(__linux__) */
 
 /**
@@ -1340,6 +1543,7 @@ virProcessExitWithStatus(int status)
 {
     int value = EXIT_CANNOT_INVOKE;
 
+#ifndef WIN32
     if (WIFEXITED(status)) {
         value = WEXITSTATUS(status);
     } else if (WIFSIGNALED(status)) {
@@ -1356,10 +1560,13 @@ virProcessExitWithStatus(int status)
         raise(WTERMSIG(status));
         value = 128 + WTERMSIG(status);
     }
+#else /* WIN32 */
+    (void)status;
+#endif /* WIN32 */
     exit(value);
 }
 
-#if HAVE_SCHED_SETSCHEDULER
+#if WITH_SCHED_SETSCHEDULER
 
 static int
 virProcessSchedTranslatePolicy(virProcessSchedPolicy policy)
@@ -1455,12 +1662,12 @@ virProcessSetScheduler(pid_t pid,
     return 0;
 }
 
-#else /* ! HAVE_SCHED_SETSCHEDULER */
+#else /* ! WITH_SCHED_SETSCHEDULER */
 
 int
-virProcessSetScheduler(pid_t pid ATTRIBUTE_UNUSED,
+virProcessSetScheduler(pid_t pid G_GNUC_UNUSED,
                        virProcessSchedPolicy policy,
-                       int priority ATTRIBUTE_UNUSED)
+                       int priority G_GNUC_UNUSED)
 {
     if (!policy)
         return 0;
@@ -1471,4 +1678,4 @@ virProcessSetScheduler(pid_t pid ATTRIBUTE_UNUSED,
     return -1;
 }
 
-#endif /* !HAVE_SCHED_SETSCHEDULER */
+#endif /* !WITH_SCHED_SETSCHEDULER */

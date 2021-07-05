@@ -21,7 +21,7 @@
 #include <stdio.h>
 #include <mntent.h>
 #include <sys/vfs.h>
-#if HAVE_LINUX_MAGIC_H
+#if WITH_LINUX_MAGIC_H
 # include <linux/magic.h>
 #endif
 
@@ -33,7 +33,7 @@
 
 static FILE *(*real_setmntent)(const char *filename, const char *type);
 static int (*real_statfs)(const char *path, struct statfs *buf);
-static char *(*real_canonicalize_file_name)(const char *path);
+static char *(*real_realpath)(const char *path, char *resolved);
 
 
 static void
@@ -44,7 +44,7 @@ init_syms(void)
 
     VIR_MOCK_REAL_INIT(setmntent);
     VIR_MOCK_REAL_INIT(statfs);
-    VIR_MOCK_REAL_INIT(canonicalize_file_name);
+    VIR_MOCK_REAL_INIT(realpath);
 }
 
 
@@ -92,6 +92,9 @@ setmntent(const char *filename, const char *type)
 #ifndef GPFS_SUPER_MAGIC
 # define GPFS_SUPER_MAGIC 0x47504653
 #endif
+#ifndef QB_MAGIC
+# define QB_MAGIC 0x51626d6e
+#endif
 
 
 static int
@@ -113,7 +116,7 @@ statfs_mock(const char *mtab,
     /* We don't need to do this in callers because real statfs(2)
      * does that for us. However, in mocked implementation we
      * need to do this. */
-    if (!(canonPath = canonicalize_file_name(path)))
+    if (!(canonPath = realpath(path, NULL)))
         return -1;
 
     while (getmntent_r(f, &mb, mntbuf, sizeof(mntbuf))) {
@@ -175,22 +178,28 @@ statfs(const char *path, struct statfs *buf)
 
 
 char *
-canonicalize_file_name(const char *path)
+realpath(const char *path, char *resolved)
 {
 
     init_syms();
 
     if (getenv("LIBVIRT_MTAB")) {
         const char *p;
-        char *ret;
 
-        if ((p = STRSKIP(path, "/some/symlink")))
-            ignore_value(virAsprintfQuiet(&ret, "/gluster%s", p));
-        else
-            ignore_value(VIR_STRDUP_QUIET(ret, path));
+        if ((p = STRSKIP(path, "/some/symlink"))) {
+            if (resolved)
+                g_snprintf(resolved, PATH_MAX, "/gluster%s", p);
+            else
+                resolved = g_strdup_printf("/gluster%s", p);
+        } else {
+            if (resolved)
+                g_strlcpy(resolved, path, PATH_MAX);
+            else
+                resolved = g_strdup(path);
+        }
 
-        return ret;
+        return resolved;
     }
 
-    return real_canonicalize_file_name(path);
+    return real_realpath(path, resolved);
 }

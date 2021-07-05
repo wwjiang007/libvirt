@@ -30,7 +30,7 @@
 #include "viruuid.h"
 #include "virstring.h"
 
-#if HAVE_DLFCN_H
+#if WITH_DLFCN_H
 # include <dlfcn.h>
 #endif
 #include <unistd.h>
@@ -59,13 +59,13 @@ VIR_LOG_INIT("locking.lock_manager");
 
 struct _virLockManagerPlugin {
     char *name;
-    virLockDriverPtr driver;
+    virLockDriver *driver;
     void *handle;
     int refs;
 };
 
 static void virLockManagerLogParams(size_t nparams,
-                                    virLockManagerParamPtr params)
+                                    virLockManagerParam *params)
 {
     size_t i;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
@@ -116,32 +116,30 @@ static void virLockManagerLogParams(size_t nparams,
  *
  * Returns a plugin object, or NULL if loading failed.
  */
-#if HAVE_DLFCN_H
-virLockManagerPluginPtr virLockManagerPluginNew(const char *name,
+#if WITH_DLFCN_H
+virLockManagerPlugin *virLockManagerPluginNew(const char *name,
                                                 const char *driverName,
                                                 const char *configDir,
                                                 unsigned int flags)
 {
     void *handle = NULL;
-    virLockDriverPtr driver;
-    virLockManagerPluginPtr plugin = NULL;
+    virLockDriver *driver;
+    virLockManagerPlugin *plugin = NULL;
     char *modfile = NULL;
     char *configFile = NULL;
 
     VIR_DEBUG("name=%s driverName=%s configDir=%s flags=0x%x",
               name, driverName, configDir, flags);
 
-    if (virAsprintf(&configFile, "%s/%s-%s.conf",
-                    configDir, driverName, name) < 0)
-        return NULL;
+    configFile = g_strdup_printf("%s/%s-%s.conf", configDir, driverName, name);
 
     if (STREQ(name, "nop")) {
         driver = &virLockDriverNop;
     } else {
         if (!(modfile = virFileFindResourceFull(name,
                                                 NULL,
-                                                ".so",
-                                                abs_top_builddir "/src/.libs",
+                                                VIR_FILE_MODULE_EXT,
+                                                abs_top_builddir "/src",
                                                 LIBDIR "/libvirt/lock-driver",
                                                 "LIBVIRT_LOCK_MANAGER_PLUGIN_DIR")))
             goto cleanup;
@@ -173,14 +171,12 @@ virLockManagerPluginPtr virLockManagerPluginNew(const char *name,
     if (driver->drvInit(VIR_LOCK_MANAGER_VERSION, configFile, flags) < 0)
         goto cleanup;
 
-    if (VIR_ALLOC(plugin) < 0)
-        goto cleanup;
+    plugin = g_new0(virLockManagerPlugin, 1);
 
     plugin->driver = driver;
     plugin->handle = handle;
     plugin->refs = 1;
-    if (VIR_STRDUP(plugin->name, name) < 0)
-        goto cleanup;
+    plugin->name = g_strdup(name);
 
     VIR_FREE(configFile);
     VIR_FREE(modfile);
@@ -194,18 +190,18 @@ virLockManagerPluginPtr virLockManagerPluginNew(const char *name,
         dlclose(handle);
     return NULL;
 }
-#else /* !HAVE_DLFCN_H */
-virLockManagerPluginPtr
-virLockManagerPluginNew(const char *name ATTRIBUTE_UNUSED,
-                        const char *driverName ATTRIBUTE_UNUSED,
-                        const char *configDir ATTRIBUTE_UNUSED,
-                        unsigned int flags_unused ATTRIBUTE_UNUSED)
+#else /* !WITH_DLFCN_H */
+virLockManagerPlugin *
+virLockManagerPluginNew(const char *name G_GNUC_UNUSED,
+                        const char *driverName G_GNUC_UNUSED,
+                        const char *configDir G_GNUC_UNUSED,
+                        unsigned int flags_unused G_GNUC_UNUSED)
 {
     virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                    _("this platform is missing dlopen"));
     return NULL;
 }
-#endif /* !HAVE_DLFCN_H */
+#endif /* !WITH_DLFCN_H */
 
 
 /**
@@ -214,7 +210,7 @@ virLockManagerPluginNew(const char *name ATTRIBUTE_UNUSED,
  *
  * Acquires an additional reference on the plugin.
  */
-void virLockManagerPluginRef(virLockManagerPluginPtr plugin)
+void virLockManagerPluginRef(virLockManagerPlugin *plugin)
 {
     plugin->refs++;
 }
@@ -230,8 +226,8 @@ void virLockManagerPluginRef(virLockManagerPluginPtr plugin)
  * result in an unsafe scenario.
  *
  */
-#if HAVE_DLFCN_H
-void virLockManagerPluginUnref(virLockManagerPluginPtr plugin)
+#if WITH_DLFCN_H
+void virLockManagerPluginUnref(virLockManagerPlugin *plugin)
 {
     if (!plugin)
         return;
@@ -249,17 +245,17 @@ void virLockManagerPluginUnref(virLockManagerPluginPtr plugin)
         return;
     }
 
-    VIR_FREE(plugin->name);
-    VIR_FREE(plugin);
+    g_free(plugin->name);
+    g_free(plugin);
 }
-#else /* !HAVE_DLFCN_H */
-void virLockManagerPluginUnref(virLockManagerPluginPtr plugin ATTRIBUTE_UNUSED)
+#else /* !WITH_DLFCN_H */
+void virLockManagerPluginUnref(virLockManagerPlugin *plugin G_GNUC_UNUSED)
 {
 }
-#endif /* !HAVE_DLFCN_H */
+#endif /* !WITH_DLFCN_H */
 
 
-const char *virLockManagerPluginGetName(virLockManagerPluginPtr plugin)
+const char *virLockManagerPluginGetName(virLockManagerPlugin *plugin)
 {
     VIR_DEBUG("plugin=%p", plugin);
 
@@ -267,7 +263,7 @@ const char *virLockManagerPluginGetName(virLockManagerPluginPtr plugin)
 }
 
 
-bool virLockManagerPluginUsesState(virLockManagerPluginPtr plugin)
+bool virLockManagerPluginUsesState(virLockManagerPlugin *plugin)
 {
     VIR_DEBUG("plugin=%p", plugin);
 
@@ -275,7 +271,7 @@ bool virLockManagerPluginUsesState(virLockManagerPluginPtr plugin)
 }
 
 
-virLockDriverPtr virLockManagerPluginGetDriver(virLockManagerPluginPtr plugin)
+virLockDriver *virLockManagerPluginGetDriver(virLockManagerPlugin *plugin)
 {
     VIR_DEBUG("plugin=%p", plugin);
 
@@ -293,21 +289,20 @@ virLockDriverPtr virLockManagerPluginGetDriver(virLockManagerPluginPtr plugin)
  *
  * Returns a new lock manager context
  */
-virLockManagerPtr virLockManagerNew(virLockDriverPtr driver,
+virLockManager *virLockManagerNew(virLockDriver *driver,
                                     unsigned int type,
                                     size_t nparams,
-                                    virLockManagerParamPtr params,
+                                    virLockManagerParam *params,
                                     unsigned int flags)
 {
-    virLockManagerPtr lock;
+    virLockManager *lock;
     VIR_DEBUG("driver=%p type=%u nparams=%zu params=%p flags=0x%x",
               driver, type, nparams, params, flags);
     virLockManagerLogParams(nparams, params);
 
     CHECK_DRIVER(drvNew, NULL);
 
-    if (VIR_ALLOC(lock) < 0)
-        return NULL;
+    lock = g_new0(virLockManager, 1);
 
     lock->driver = driver;
 
@@ -320,11 +315,11 @@ virLockManagerPtr virLockManagerNew(virLockDriverPtr driver,
 }
 
 
-int virLockManagerAddResource(virLockManagerPtr lock,
+int virLockManagerAddResource(virLockManager *lock,
                               unsigned int type,
                               const char *name,
                               size_t nparams,
-                              virLockManagerParamPtr params,
+                              virLockManagerParam *params,
                               unsigned int flags)
 {
     VIR_DEBUG("lock=%p type=%u name=%s nparams=%zu params=%p flags=0x%x",
@@ -339,7 +334,7 @@ int virLockManagerAddResource(virLockManagerPtr lock,
                                         flags);
 }
 
-int virLockManagerAcquire(virLockManagerPtr lock,
+int virLockManagerAcquire(virLockManager *lock,
                           const char *state,
                           unsigned int flags,
                           virDomainLockFailureAction action,
@@ -357,7 +352,7 @@ int virLockManagerAcquire(virLockManagerPtr lock,
 }
 
 
-int virLockManagerRelease(virLockManagerPtr lock,
+int virLockManagerRelease(virLockManager *lock,
                           char **state,
                           unsigned int flags)
 {
@@ -369,7 +364,7 @@ int virLockManagerRelease(virLockManagerPtr lock,
 }
 
 
-int virLockManagerInquire(virLockManagerPtr lock,
+int virLockManagerInquire(virLockManager *lock,
                           char **state,
                           unsigned int flags)
 {
@@ -381,7 +376,7 @@ int virLockManagerInquire(virLockManagerPtr lock,
 }
 
 
-int virLockManagerFree(virLockManagerPtr lock)
+int virLockManagerFree(virLockManager *lock)
 {
     VIR_DEBUG("lock=%p", lock);
 
@@ -392,7 +387,7 @@ int virLockManagerFree(virLockManagerPtr lock)
 
     lock->driver->drvFree(lock);
 
-    VIR_FREE(lock);
+    g_free(lock);
 
     return 0;
 }

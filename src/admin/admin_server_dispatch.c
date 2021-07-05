@@ -34,19 +34,19 @@
 #include "virstring.h"
 #include "virthreadjob.h"
 #include "virtypedparam.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_ADMIN
 
 VIR_LOG_INIT("daemon.admin");
 
 typedef struct daemonAdmClientPrivate daemonAdmClientPrivate;
-typedef daemonAdmClientPrivate *daemonAdmClientPrivatePtr;
 /* Separate private data for admin connection */
 struct daemonAdmClientPrivate {
     /* Just a placeholder, not that there is anything to be locked */
     virMutex lock;
 
-    virNetDaemonPtr dmn;
+    virNetDaemon *dmn;
 };
 
 void
@@ -56,17 +56,38 @@ remoteAdmClientFree(void *data)
 
     virMutexDestroy(&priv->lock);
     virObjectUnref(priv->dmn);
-    VIR_FREE(priv);
+    g_free(priv);
 }
 
 void *
-remoteAdmClientNew(virNetServerClientPtr client ATTRIBUTE_UNUSED,
+remoteAdmClientNew(virNetServerClient *client G_GNUC_UNUSED,
                    void *opaque)
 {
     struct daemonAdmClientPrivate *priv;
+    uid_t clientuid;
+    gid_t clientgid;
+    pid_t clientpid;
+    unsigned long long timestamp;
 
-    if (VIR_ALLOC(priv) < 0)
+    if (virNetServerClientGetUNIXIdentity(client,
+                                          &clientuid,
+                                          &clientgid,
+                                          &clientpid,
+                                          &timestamp) < 0)
         return NULL;
+
+    VIR_DEBUG("New client pid %lld uid %lld",
+              (long long)clientpid,
+              (long long)clientuid);
+
+    if (geteuid() != clientuid) {
+        virReportRestrictedError(_("Disallowing client %lld with uid %lld"),
+                                 (long long)clientpid,
+                                 (long long)clientuid);
+        return NULL;
+    }
+
+    priv = g_new0(struct daemonAdmClientPrivate, 1);
 
     if (virMutexInit(&priv->lock) < 0) {
         VIR_FREE(priv);
@@ -84,20 +105,17 @@ remoteAdmClientNew(virNetServerClientPtr client ATTRIBUTE_UNUSED,
     return priv;
 }
 
-void *remoteAdmClientNewPostExecRestart(virNetServerClientPtr client,
-                                        virJSONValuePtr object ATTRIBUTE_UNUSED,
+void *remoteAdmClientNewPostExecRestart(virNetServerClient *client,
+                                        virJSONValue *object G_GNUC_UNUSED,
                                         void *opaque)
 {
     return remoteAdmClientNew(client, opaque);
 }
 
-virJSONValuePtr remoteAdmClientPreExecRestart(virNetServerClientPtr client ATTRIBUTE_UNUSED,
-                                              void *data ATTRIBUTE_UNUSED)
+virJSONValue *remoteAdmClientPreExecRestart(virNetServerClient *client G_GNUC_UNUSED,
+                                            void *data G_GNUC_UNUSED)
 {
-    virJSONValuePtr object = virJSONValueNewObject();
-
-    if (!object)
-        return NULL;
+    virJSONValue *object = virJSONValueNewObject();
 
     /* No content to add at this time - just need empty object */
 
@@ -107,43 +125,40 @@ virJSONValuePtr remoteAdmClientPreExecRestart(virNetServerClientPtr client ATTRI
 
 /* Helpers */
 
-static virNetServerPtr
-get_nonnull_server(virNetDaemonPtr dmn, admin_nonnull_server srv)
+static virNetServer *
+get_nonnull_server(virNetDaemon *dmn, admin_nonnull_server srv)
 {
     return virNetDaemonGetServer(dmn, srv.name);
 }
 
-static int ATTRIBUTE_RETURN_CHECK
+static void
 make_nonnull_server(admin_nonnull_server *srv_dst,
-                    virNetServerPtr srv_src)
+                    virNetServer *srv_src)
 {
-    if (VIR_STRDUP(srv_dst->name, virNetServerGetName(srv_src)) < 0)
-        return -1;
-    return 0;
+    srv_dst->name = g_strdup(virNetServerGetName(srv_src));
 }
 
-static virNetServerClientPtr
-get_nonnull_client(virNetServerPtr srv, admin_nonnull_client clnt)
+static virNetServerClient *
+get_nonnull_client(virNetServer *srv, admin_nonnull_client clnt)
 {
     return virNetServerGetClient(srv, clnt.id);
 }
 
-static int
+static void
 make_nonnull_client(admin_nonnull_client *clt_dst,
-                    virNetServerClientPtr clt_src)
+                    virNetServerClient *clt_src)
 {
     clt_dst->id = virNetServerClientGetID(clt_src);
     clt_dst->timestamp = virNetServerClientGetTimestamp(clt_src);
     clt_dst->transport = virNetServerClientGetTransport(clt_src);
-    return 0;
 }
 
 /* Functions */
 static int
-adminDispatchConnectOpen(virNetServerPtr server ATTRIBUTE_UNUSED,
-                         virNetServerClientPtr client,
-                         virNetMessagePtr msg ATTRIBUTE_UNUSED,
-                         virNetMessageErrorPtr rerr,
+adminDispatchConnectOpen(virNetServer *server G_GNUC_UNUSED,
+                         virNetServerClient *client,
+                         virNetMessage *msg G_GNUC_UNUSED,
+                         struct virNetMessageError *rerr,
                          struct admin_connect_open_args *args)
 {
     unsigned int flags;
@@ -166,17 +181,17 @@ adminDispatchConnectOpen(virNetServerPtr server ATTRIBUTE_UNUSED,
 }
 
 static int
-adminDispatchConnectClose(virNetServerPtr server ATTRIBUTE_UNUSED,
-                          virNetServerClientPtr client,
-                          virNetMessagePtr msg ATTRIBUTE_UNUSED,
-                          virNetMessageErrorPtr rerr ATTRIBUTE_UNUSED)
+adminDispatchConnectClose(virNetServer *server G_GNUC_UNUSED,
+                          virNetServerClient *client,
+                          virNetMessage *msg G_GNUC_UNUSED,
+                          struct virNetMessageError *rerr G_GNUC_UNUSED)
 {
     virNetServerClientDelayedClose(client);
     return 0;
 }
 
 static int
-adminConnectGetLibVersion(virNetDaemonPtr dmn ATTRIBUTE_UNUSED,
+adminConnectGetLibVersion(virNetDaemon *dmn G_GNUC_UNUSED,
                           unsigned long long *libVer)
 {
     if (libVer)
@@ -184,16 +199,25 @@ adminConnectGetLibVersion(virNetDaemonPtr dmn ATTRIBUTE_UNUSED,
     return 0;
 }
 
+static virNetDaemon *
+adminGetConn(virNetServerClient *client)
+{
+    struct daemonAdmClientPrivate *priv =
+        virNetServerClientGetPrivateData(client);
+
+    return priv->dmn;
+}
+
 static int
-adminDispatchServerGetThreadpoolParameters(virNetServerPtr server ATTRIBUTE_UNUSED,
-                                           virNetServerClientPtr client,
-                                           virNetMessagePtr msg ATTRIBUTE_UNUSED,
-                                           virNetMessageErrorPtr rerr,
+adminDispatchServerGetThreadpoolParameters(virNetServer *server G_GNUC_UNUSED,
+                                           virNetServerClient *client,
+                                           virNetMessage *msg G_GNUC_UNUSED,
+                                           struct virNetMessageError *rerr,
                                            struct admin_server_get_threadpool_parameters_args *args,
                                            struct admin_server_get_threadpool_parameters_ret *ret)
 {
     int rv = -1;
-    virNetServerPtr srv = NULL;
+    virNetServer *srv = NULL;
     virTypedParameterPtr params = NULL;
     int nparams = 0;
     struct daemonAdmClientPrivate *priv =
@@ -206,16 +230,9 @@ adminDispatchServerGetThreadpoolParameters(virNetServerPtr server ATTRIBUTE_UNUS
                                            args->flags) < 0)
         goto cleanup;
 
-    if (nparams > ADMIN_SERVER_THREADPOOL_PARAMETERS_MAX) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Number of threadpool parameters %d exceeds max "
-                         "allowed limit: %d"), nparams,
-                       ADMIN_SERVER_THREADPOOL_PARAMETERS_MAX);
-        goto cleanup;
-    }
-
     if (virTypedParamsSerialize(params, nparams,
-                                (virTypedParameterRemotePtr *) &ret->params.params_val,
+                                ADMIN_SERVER_THREADPOOL_PARAMETERS_MAX,
+                                (struct _virTypedParameterRemote **) &ret->params.params_val,
                                 &ret->params.params_len, 0) < 0)
         goto cleanup;
 
@@ -230,14 +247,14 @@ adminDispatchServerGetThreadpoolParameters(virNetServerPtr server ATTRIBUTE_UNUS
 }
 
 static int
-adminDispatchServerSetThreadpoolParameters(virNetServerPtr server ATTRIBUTE_UNUSED,
-                                           virNetServerClientPtr client,
-                                           virNetMessagePtr msg ATTRIBUTE_UNUSED,
-                                           virNetMessageErrorPtr rerr,
+adminDispatchServerSetThreadpoolParameters(virNetServer *server G_GNUC_UNUSED,
+                                           virNetServerClient *client,
+                                           virNetMessage *msg G_GNUC_UNUSED,
+                                           struct virNetMessageError *rerr,
                                            struct admin_server_set_threadpool_parameters_args *args)
 {
     int rv = -1;
-    virNetServerPtr srv = NULL;
+    virNetServer *srv = NULL;
     virTypedParameterPtr params = NULL;
     int nparams = 0;
     struct daemonAdmClientPrivate *priv =
@@ -250,7 +267,7 @@ adminDispatchServerSetThreadpoolParameters(virNetServerPtr server ATTRIBUTE_UNUS
         goto cleanup;
     }
 
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) args->params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) args->params.params_val,
                                   args->params.params_len,
                                   ADMIN_SERVER_THREADPOOL_PARAMETERS_MAX,
                                   &params,
@@ -273,16 +290,16 @@ adminDispatchServerSetThreadpoolParameters(virNetServerPtr server ATTRIBUTE_UNUS
 }
 
 static int
-adminDispatchClientGetInfo(virNetServerPtr server ATTRIBUTE_UNUSED,
-                           virNetServerClientPtr client,
-                           virNetMessagePtr msg ATTRIBUTE_UNUSED,
-                           virNetMessageErrorPtr rerr,
+adminDispatchClientGetInfo(virNetServer *server G_GNUC_UNUSED,
+                           virNetServerClient *client,
+                           virNetMessage *msg G_GNUC_UNUSED,
+                           struct virNetMessageError *rerr,
                            struct admin_client_get_info_args *args,
                            struct admin_client_get_info_ret *ret)
 {
     int rv = -1;
-    virNetServerPtr srv = NULL;
-    virNetServerClientPtr clnt = NULL;
+    virNetServer *srv = NULL;
+    virNetServerClient *clnt = NULL;
     virTypedParameterPtr params = NULL;
     int nparams = 0;
     struct daemonAdmClientPrivate *priv =
@@ -305,16 +322,9 @@ adminDispatchClientGetInfo(virNetServerPtr server ATTRIBUTE_UNUSED,
     if (adminClientGetInfo(clnt, &params, &nparams, args->flags) < 0)
         goto cleanup;
 
-    if (nparams > ADMIN_CLIENT_INFO_PARAMETERS_MAX) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Number of client info parameters %d exceeds max "
-                         "allowed limit: %d"), nparams,
-                       ADMIN_CLIENT_INFO_PARAMETERS_MAX);
-        goto cleanup;
-    }
-
     if (virTypedParamsSerialize(params, nparams,
-                                (virTypedParameterRemotePtr *) &ret->params.params_val,
+                                ADMIN_CLIENT_INFO_PARAMETERS_MAX,
+                                (struct _virTypedParameterRemote **) &ret->params.params_val,
                                 &ret->params.params_len,
                                 VIR_TYPED_PARAM_STRING_OKAY) < 0)
         goto cleanup;
@@ -332,15 +342,15 @@ adminDispatchClientGetInfo(virNetServerPtr server ATTRIBUTE_UNUSED,
 }
 
 static int
-adminDispatchServerGetClientLimits(virNetServerPtr server ATTRIBUTE_UNUSED,
-                                   virNetServerClientPtr client,
-                                   virNetMessagePtr msg ATTRIBUTE_UNUSED,
-                                   virNetMessageErrorPtr rerr ATTRIBUTE_UNUSED,
+adminDispatchServerGetClientLimits(virNetServer *server G_GNUC_UNUSED,
+                                   virNetServerClient *client,
+                                   virNetMessage *msg G_GNUC_UNUSED,
+                                   struct virNetMessageError *rerr G_GNUC_UNUSED,
                                    admin_server_get_client_limits_args *args,
                                    admin_server_get_client_limits_ret *ret)
 {
     int rv = -1;
-    virNetServerPtr srv = NULL;
+    virNetServer *srv = NULL;
     virTypedParameterPtr params = NULL;
     int nparams = 0;
     struct daemonAdmClientPrivate *priv =
@@ -352,16 +362,9 @@ adminDispatchServerGetClientLimits(virNetServerPtr server ATTRIBUTE_UNUSED,
     if (adminServerGetClientLimits(srv, &params, &nparams, args->flags) < 0)
         goto cleanup;
 
-    if (nparams > ADMIN_SERVER_CLIENT_LIMITS_MAX) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Number of client processing parameters %d exceeds "
-                         "max allowed limit: %d"), nparams,
-                       ADMIN_SERVER_CLIENT_LIMITS_MAX);
-        goto cleanup;
-    }
-
     if (virTypedParamsSerialize(params, nparams,
-                                (virTypedParameterRemotePtr *) &ret->params.params_val,
+                                ADMIN_SERVER_CLIENT_LIMITS_MAX,
+                                (struct _virTypedParameterRemote **) &ret->params.params_val,
                                 &ret->params.params_len, 0) < 0)
         goto cleanup;
 
@@ -376,14 +379,14 @@ adminDispatchServerGetClientLimits(virNetServerPtr server ATTRIBUTE_UNUSED,
 }
 
 static int
-adminDispatchServerSetClientLimits(virNetServerPtr server ATTRIBUTE_UNUSED,
-                                   virNetServerClientPtr client,
-                                   virNetMessagePtr msg ATTRIBUTE_UNUSED,
-                                   virNetMessageErrorPtr rerr ATTRIBUTE_UNUSED,
+adminDispatchServerSetClientLimits(virNetServer *server G_GNUC_UNUSED,
+                                   virNetServerClient *client,
+                                   virNetMessage *msg G_GNUC_UNUSED,
+                                   struct virNetMessageError *rerr G_GNUC_UNUSED,
                                    admin_server_set_client_limits_args *args)
 {
     int rv = -1;
-    virNetServerPtr srv = NULL;
+    virNetServer *srv = NULL;
     virTypedParameterPtr params = NULL;
     int nparams = 0;
     struct daemonAdmClientPrivate *priv =
@@ -396,7 +399,7 @@ adminDispatchServerSetClientLimits(virNetServerPtr server ATTRIBUTE_UNUSED,
         goto cleanup;
     }
 
-    if (virTypedParamsDeserialize((virTypedParameterRemotePtr) args->params.params_val,
+    if (virTypedParamsDeserialize((struct _virTypedParameterRemote *) args->params.params_val,
         args->params.params_len,
         ADMIN_SERVER_CLIENT_LIMITS_MAX, &params, &nparams) < 0)
         goto cleanup;
@@ -445,7 +448,7 @@ adminConnectGetLoggingFilters(char **filters, unsigned int flags)
 }
 
 static int
-adminConnectSetLoggingOutputs(virNetDaemonPtr dmn ATTRIBUTE_UNUSED,
+adminConnectSetLoggingOutputs(virNetDaemon *dmn G_GNUC_UNUSED,
                               const char *outputs,
                               unsigned int flags)
 {
@@ -455,7 +458,7 @@ adminConnectSetLoggingOutputs(virNetDaemonPtr dmn ATTRIBUTE_UNUSED,
 }
 
 static int
-adminConnectSetLoggingFilters(virNetDaemonPtr dmn ATTRIBUTE_UNUSED,
+adminConnectSetLoggingFilters(virNetDaemon *dmn G_GNUC_UNUSED,
                               const char *filters,
                               unsigned int flags)
 {
@@ -465,10 +468,10 @@ adminConnectSetLoggingFilters(virNetDaemonPtr dmn ATTRIBUTE_UNUSED,
 }
 
 static int
-adminDispatchConnectGetLoggingOutputs(virNetServerPtr server ATTRIBUTE_UNUSED,
-                                      virNetServerClientPtr client ATTRIBUTE_UNUSED,
-                                      virNetMessagePtr msg ATTRIBUTE_UNUSED,
-                                      virNetMessageErrorPtr rerr,
+adminDispatchConnectGetLoggingOutputs(virNetServer *server G_GNUC_UNUSED,
+                                      virNetServerClient *client G_GNUC_UNUSED,
+                                      virNetMessage *msg G_GNUC_UNUSED,
+                                      struct virNetMessageError *rerr,
                                       admin_connect_get_logging_outputs_args *args,
                                       admin_connect_get_logging_outputs_ret *ret)
 {
@@ -480,17 +483,17 @@ adminDispatchConnectGetLoggingOutputs(virNetServerPtr server ATTRIBUTE_UNUSED,
         return -1;
     }
 
-    VIR_STEAL_PTR(ret->outputs, outputs);
+    ret->outputs = g_steal_pointer(&outputs);
     ret->noutputs = noutputs;
 
     return 0;
 }
 
 static int
-adminDispatchConnectGetLoggingFilters(virNetServerPtr server ATTRIBUTE_UNUSED,
-                                      virNetServerClientPtr client ATTRIBUTE_UNUSED,
-                                      virNetMessagePtr msg ATTRIBUTE_UNUSED,
-                                      virNetMessageErrorPtr rerr,
+adminDispatchConnectGetLoggingFilters(virNetServer *server G_GNUC_UNUSED,
+                                      virNetServerClient *client G_GNUC_UNUSED,
+                                      virNetMessage *msg G_GNUC_UNUSED,
+                                      struct virNetMessageError *rerr,
                                       admin_connect_get_logging_filters_args *args,
                                       admin_connect_get_logging_filters_ret *ret)
 {
@@ -506,8 +509,7 @@ adminDispatchConnectGetLoggingFilters(virNetServerPtr server ATTRIBUTE_UNUSED,
         ret->filters = NULL;
     } else {
         char **ret_filters = NULL;
-        if (VIR_ALLOC(ret_filters) < 0)
-            return -1;
+        ret_filters = g_new0(char *, 1);
 
         *ret_filters = filters;
         ret->filters = ret_filters;

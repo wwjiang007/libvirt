@@ -6,9 +6,12 @@
 #include "storage_backend_vstorage.h"
 #include "virlog.h"
 #include "virstring.h"
+#include "virutil.h"
 #include <mntent.h>
+#include <paths.h>
 #include <pwd.h>
 #include <grp.h>
+#include <unistd.h>
 #include "storage_util.h"
 
 #define VIR_FROM_THIS VIR_FROM_STORAGE
@@ -25,7 +28,7 @@ VIR_LOG_INIT("storage.storage_backend_vstorage");
  * Returns 0 on success, -1 on error
  */
 static int
-virStorageBackendVzPoolBuild(virStoragePoolObjPtr pool,
+virStorageBackendVzPoolBuild(virStoragePoolObj *pool,
                              unsigned int flags)
 {
     virCheckFlags(0, -1);
@@ -35,13 +38,14 @@ virStorageBackendVzPoolBuild(virStoragePoolObjPtr pool,
 
 
 static int
-virStorageBackendVzPoolStart(virStoragePoolObjPtr pool)
+virStorageBackendVzPoolStart(virStoragePoolObj *pool)
 {
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
-    VIR_AUTOFREE(char *) grp_name = NULL;
-    VIR_AUTOFREE(char *) usr_name = NULL;
-    VIR_AUTOFREE(char *) mode = NULL;
-    VIR_AUTOPTR(virCommand) cmd = NULL;
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
+    g_autofree char *grp_name = NULL;
+    g_autofree char *usr_name = NULL;
+    g_autofree char *mode = NULL;
+    g_autoptr(virCommand) cmd = NULL;
+    int ret;
 
     /* Check the permissions */
     if (def->target.perms.mode == (mode_t)-1)
@@ -59,32 +63,36 @@ virStorageBackendVzPoolStart(virStoragePoolObjPtr pool)
     if (!(usr_name = virGetUserName(def->target.perms.uid)))
         return -1;
 
-    if (virAsprintf(&mode, "%o", def->target.perms.mode) < 0)
-        return -1;
+    mode = g_strdup_printf("%o", def->target.perms.mode);
 
-    cmd = virCommandNewArgList(VSTORAGE_MOUNT,
+    cmd = virCommandNewArgList("vstorage-mount",
                                "-c", def->source.name,
                                def->target.path,
                                "-m", mode,
                                "-g", grp_name, "-u", usr_name,
                                NULL);
 
-    return virCommandRun(cmd, NULL);
+    /* Mounting a shared FS might take a long time. Don't hold
+     * the pool locked meanwhile. */
+    virObjectUnlock(pool);
+    ret = virCommandRun(cmd, NULL);
+    virObjectLock(pool);
+
+    return ret;
 }
 
 
 static int
-virStorageBackendVzIsMounted(virStoragePoolObjPtr pool)
+virStorageBackendVzIsMounted(virStoragePoolObj *pool)
 {
     int ret = -1;
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
     FILE *mtab;
     struct mntent ent;
     char buf[1024];
-    VIR_AUTOFREE(char *) cluster = NULL;
+    g_autofree char *cluster = NULL;
 
-    if (virAsprintf(&cluster, "vstorage://%s", def->source.name) < 0)
-        return -1;
+    cluster = g_strdup_printf("vstorage://%s", def->source.name);
 
     if ((mtab = fopen(_PATH_MOUNTED, "r")) == NULL) {
         virReportSystemError(errno,
@@ -111,17 +119,17 @@ virStorageBackendVzIsMounted(virStoragePoolObjPtr pool)
 
 
 static int
-virStorageBackendVzPoolStop(virStoragePoolObjPtr pool)
+virStorageBackendVzPoolStop(virStoragePoolObj *pool)
 {
-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+    virStoragePoolDef *def = virStoragePoolObjGetDef(pool);
     int rc;
-    VIR_AUTOPTR(virCommand) cmd = NULL;
+    g_autoptr(virCommand) cmd = NULL;
 
     /* Short-circuit if already unmounted */
     if ((rc = virStorageBackendVzIsMounted(pool)) != 1)
         return rc;
 
-    cmd = virCommandNewArgList(UMOUNT, def->target.path, NULL);
+    cmd = virCommandNewArgList("umount", def->target.path, NULL);
     return virCommandRun(cmd, NULL);
 }
 
@@ -130,7 +138,7 @@ virStorageBackendVzPoolStop(virStoragePoolObjPtr pool)
  * Check whether the cluster is mounted
  */
 static int
-virStorageBackendVzCheck(virStoragePoolObjPtr pool,
+virStorageBackendVzCheck(virStoragePoolObj *pool,
                          bool *isActive)
 {
     int ret = -1;

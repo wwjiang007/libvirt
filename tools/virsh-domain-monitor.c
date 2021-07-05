@@ -23,13 +23,10 @@
 #include "virsh-util.h"
 
 #include <libxml/parser.h>
-#include <libxml/tree.h>
 #include <libxml/xpath.h>
-#include <libxml/xmlsave.h>
 
 #include "internal.h"
 #include "conf/virdomainobjlist.h"
-#include "intprops.h"
 #include "viralloc.h"
 #include "virmacaddr.h"
 #include "virxml.h"
@@ -73,7 +70,7 @@ virshGetDomainDescription(vshControl *ctl, virDomainPtr dom, bool title,
         int errCode = virGetLastErrorCode();
 
         if (errCode == VIR_ERR_NO_DOMAIN_METADATA) {
-            desc = vshStrdup(ctl, "");
+            desc = g_strdup("");
             vshResetLibvirtError();
             return desc;
         }
@@ -92,7 +89,7 @@ virshGetDomainDescription(vshControl *ctl, virDomainPtr dom, bool title,
         desc = virXPathString("string(./description[1])", ctxt);
 
     if (!desc)
-        desc = vshStrdup(ctl, "");
+        desc = g_strdup("");
 
  cleanup:
     xmlXPathFreeContext(ctxt);
@@ -376,6 +373,10 @@ cmdDomMemStat(vshControl *ctl, const vshCmd *cmd)
             vshPrint(ctl, "last_update %llu\n", stats[i].val);
         if (stats[i].tag == VIR_DOMAIN_MEMORY_STAT_DISK_CACHES)
             vshPrint(ctl, "disk_caches %llu\n", stats[i].val);
+        if (stats[i].tag == VIR_DOMAIN_MEMORY_STAT_HUGETLB_PGALLOC)
+            vshPrint(ctl, "hugetlb_pgalloc %llu\n", stats[i].val);
+        if (stats[i].tag == VIR_DOMAIN_MEMORY_STAT_HUGETLB_PGFAIL)
+            vshPrint(ctl, "hugetlb_pgfail %llu\n", stats[i].val);
     }
 
     ret = true;
@@ -416,22 +417,20 @@ static const vshCmdOptDef opts_domblkinfo[] = {
 };
 
 static bool
-cmdDomblkinfoGet(vshControl *ctl,
-                   const virDomainBlockInfo *info,
-                   char **cap,
-                   char **alloc,
-                   char **phy,
-                   bool human)
+cmdDomblkinfoGet(const virDomainBlockInfo *info,
+                 char **cap,
+                 char **alloc,
+                 char **phy,
+                 bool human)
 {
     if (info->capacity == 0 && info->allocation == 0 && info->physical == 0) {
-        *cap = vshStrdup(ctl, "-");
-        *alloc = vshStrdup(ctl, "-");
-        *phy = vshStrdup(ctl, "-");
+        *cap = g_strdup("-");
+        *alloc = g_strdup("-");
+        *phy = g_strdup("-");
     } else if (!human) {
-        if (virAsprintf(cap, "%llu", info->capacity) < 0 ||
-            virAsprintf(alloc, "%llu", info->allocation) < 0 ||
-            virAsprintf(phy, "%llu", info->physical) < 0)
-            return false;
+        *cap = g_strdup_printf("%llu", info->capacity);
+        *alloc = g_strdup_printf("%llu", info->allocation);
+        *phy = g_strdup_printf("%llu", info->physical);
     } else {
         double val_cap, val_alloc, val_phy;
         const char *unit_cap, *unit_alloc, *unit_phy;
@@ -440,10 +439,9 @@ cmdDomblkinfoGet(vshControl *ctl,
         val_alloc = vshPrettyCapacity(info->allocation, &unit_alloc);
         val_phy = vshPrettyCapacity(info->physical, &unit_phy);
 
-        if (virAsprintf(cap, "%.3lf %s", val_cap, unit_cap) < 0 ||
-            virAsprintf(alloc, "%.3lf %s", val_alloc, unit_alloc) < 0 ||
-            virAsprintf(phy, "%.3lf %s", val_phy, unit_phy) < 0)
-            return false;
+        *cap = g_strdup_printf("%.3lf %s", val_cap, unit_cap);
+        *alloc = g_strdup_printf("%.3lf %s", val_alloc, unit_alloc);
+        *phy = g_strdup_printf("%.3lf %s", val_phy, unit_phy);
     }
 
     return true;
@@ -469,7 +467,9 @@ cmdDomblkinfo(vshControl *ctl, const vshCmd *cmd)
     char *cap = NULL;
     char *alloc = NULL;
     char *phy = NULL;
-    vshTablePtr table = NULL;
+    vshTable *table = NULL;
+
+    VSH_EXCLUSIVE_OPTIONS("all", "device");
 
     if (!(dom = virshCommandOptDomain(ctl, cmd, NULL)))
         return false;
@@ -503,23 +503,30 @@ cmdDomblkinfo(vshControl *ctl, const vshCmd *cmd)
             protocol = virXPathString("string(./source/@protocol)", ctxt);
             target = virXPathString("string(./target/@dev)", ctxt);
 
-            rc = virDomainGetBlockInfo(dom, target, &info, 0);
+            if (virXPathBoolean("boolean(./source)", ctxt) == 1) {
 
-            if (rc < 0) {
-                /* If protocol is present that's an indication of a networked
-                 * storage device which cannot provide statistics, so generate
-                 * 0 based data and get the next disk. */
-                if (protocol && !active &&
-                    virGetLastErrorCode() == VIR_ERR_INTERNAL_ERROR &&
-                    virGetLastErrorDomain() == VIR_FROM_STORAGE) {
-                    memset(&info, 0, sizeof(info));
-                    vshResetLibvirtError();
-                } else {
-                    goto cleanup;
+                rc = virDomainGetBlockInfo(dom, target, &info, 0);
+
+                if (rc < 0) {
+                    /* If protocol is present that's an indication of a
+                     * networked storage device which cannot provide statistics,
+                     * so generate 0 based data and get the next disk. */
+                    if (protocol && !active &&
+                        virGetLastErrorCode() == VIR_ERR_INTERNAL_ERROR &&
+                        virGetLastErrorDomain() == VIR_FROM_STORAGE) {
+                        memset(&info, 0, sizeof(info));
+                        vshResetLibvirtError();
+                    } else {
+                        goto cleanup;
+                    }
                 }
+            } else {
+                /* if we don't call virDomainGetBlockInfo() who clears 'info'
+                 * we have to do it manually */
+                memset(&info, 0, sizeof(info));
             }
 
-            if (!cmdDomblkinfoGet(ctl, &info, &cap, &alloc, &phy, human))
+            if (!cmdDomblkinfoGet(&info, &cap, &alloc, &phy, human))
                 goto cleanup;
             if (vshTableRowAppend(table, target, cap, alloc, phy, NULL) < 0)
                 goto cleanup;
@@ -534,7 +541,7 @@ cmdDomblkinfo(vshControl *ctl, const vshCmd *cmd)
         if (virDomainGetBlockInfo(dom, device, &info, 0) < 0)
             goto cleanup;
 
-        if (!cmdDomblkinfoGet(ctl, &info, &cap, &alloc, &phy, human))
+        if (!cmdDomblkinfoGet(&info, &cap, &alloc, &phy, human))
             goto cleanup;
         vshPrint(ctl, "%-15s %s\n", _("Capacity:"), cap);
         vshPrint(ctl, "%-15s %s\n", _("Allocation:"), alloc);
@@ -598,7 +605,7 @@ cmdDomblklist(vshControl *ctl, const vshCmd *cmd)
     char *device = NULL;
     char *target = NULL;
     char *source = NULL;
-    vshTablePtr table = NULL;
+    vshTable *table = NULL;
 
     if (vshCommandOptBool(cmd, "inactive"))
         flags |= VIR_DOMAIN_XML_INACTIVE;
@@ -623,8 +630,8 @@ cmdDomblklist(vshControl *ctl, const vshCmd *cmd)
     for (i = 0; i < ndisks; i++) {
         ctxt->node = disks[i];
 
+        type = virXPathString("string(./@type)", ctxt);
         if (details) {
-            type = virXPathString("string(./@type)", ctxt);
             device = virXPathString("string(./@device)", ctxt);
             if (!type || !device) {
                 vshPrint(ctl, "unable to query block list details");
@@ -637,11 +644,30 @@ cmdDomblklist(vshControl *ctl, const vshCmd *cmd)
             vshError(ctl, "unable to query block list");
             goto cleanup;
         }
-        source = virXPathString("string(./source/@file"
-                                "|./source/@dev"
-                                "|./source/@dir"
-                                "|./source/@name"
-                                "|./source/@volume)", ctxt);
+
+        if (STREQ_NULLABLE(type, "nvme")) {
+            g_autofree char *namespace = NULL;
+            virPCIDeviceAddress addr = { 0 };
+            xmlNodePtr addrNode = NULL;
+
+            if (!(namespace = virXPathString("string(./source/@namespace)", ctxt)) ||
+                !(addrNode = virXPathNode("./source/address", ctxt)) ||
+                virPCIDeviceAddressParseXML(addrNode, &addr) < 0) {
+                vshError(ctl, "Unable to query NVMe disk address");
+                goto cleanup;
+            }
+
+            source = g_strdup_printf("nvme://%04x:%02x:%02x.%d/%s",
+                                     addr.domain, addr.bus, addr.slot,
+                                     addr.function, namespace);
+        } else {
+            source = virXPathString("string(./source/@file"
+                                    "|./source/@dev"
+                                    "|./source/@dir"
+                                    "|./source/@name"
+                                    "|./source/@volume)", ctxt);
+        }
+
         if (details) {
             if (vshTableRowAppend(table, type, device, target,
                                   NULLSTR_MINUS(source), NULL) < 0)
@@ -702,7 +728,7 @@ cmdDomiflist(vshControl *ctl, const vshCmd *cmd)
     int ninterfaces;
     xmlNodePtr *interfaces = NULL;
     size_t i;
-    vshTablePtr table = NULL;
+    vshTable *table = NULL;
 
     if (vshCommandOptBool(cmd, "inactive"))
         flags |= VIR_DOMAIN_XML_INACTIVE;
@@ -720,11 +746,11 @@ cmdDomiflist(vshControl *ctl, const vshCmd *cmd)
         goto cleanup;
 
     for (i = 0; i < ninterfaces; i++) {
-        VIR_AUTOFREE(char *) type = NULL;
-        VIR_AUTOFREE(char *) source = NULL;
-        VIR_AUTOFREE(char *) target = NULL;
-        VIR_AUTOFREE(char *) model = NULL;
-        VIR_AUTOFREE(char *) mac = NULL;
+        g_autofree char *type = NULL;
+        g_autofree char *source = NULL;
+        g_autofree char *target = NULL;
+        g_autofree char *model = NULL;
+        g_autofree char *mac = NULL;
 
         ctxt->node = interfaces[i];
         type = virXPathString("string(./@type)", ctxt);
@@ -818,10 +844,9 @@ cmdDomIfGetLink(vshControl *ctl, const vshCmd *cmd)
     if (virMacAddrParse(iface, &macaddr) == 0)
         virMacAddrFormat(&macaddr, macstr);
 
-    if (virAsprintf(&xpath, "/domain/devices/interface[(mac/@address = '%s') or "
-                            "                          (target/@dev = '%s')]",
-                           macstr, iface) < 0)
-        goto cleanup;
+    xpath = g_strdup_printf("/domain/devices/interface[(mac/@address = '%s') or "
+                            "                          (target/@dev = '%s')]", macstr,
+                            iface);
 
     if ((ninterfaces = virXPathNodeSet(xpath, ctxt, &interfaces)) < 0) {
         vshError(ctl, _("Failed to extract interface information"));
@@ -1038,8 +1063,7 @@ cmdDomblkstat(vshControl *ctl, const vshCmd *cmd)
         DOMBLKSTAT_LEGACY_PRINT(3, stats.wr_bytes);
         DOMBLKSTAT_LEGACY_PRINT(4, stats.errs);
     } else {
-        params = vshCalloc(ctl, nparams, sizeof(*params));
-
+        params = g_new0(virTypedParameter, nparams);
         if (virDomainBlockStatsFlags(dom, device, params, &nparams, 0) < 0) {
             vshError(ctl, _("Failed to get block stats for domain '%s' device '%s'"), name, device);
             goto cleanup;
@@ -1196,7 +1220,7 @@ cmdDomBlkError(vshControl *ctl, const vshCmd *cmd)
 {
     virDomainPtr dom;
     virDomainDiskErrorPtr disks = NULL;
-    unsigned int ndisks;
+    unsigned int ndisks = 0;
     size_t i;
     int count;
     bool ret = false;
@@ -1206,11 +1230,10 @@ cmdDomBlkError(vshControl *ctl, const vshCmd *cmd)
 
     if ((count = virDomainGetDiskErrors(dom, NULL, 0, 0)) < 0)
         goto cleanup;
-    ndisks = count;
 
-    if (ndisks) {
-        if (VIR_ALLOC_N(disks, ndisks) < 0)
-            goto cleanup;
+    if (count > 0) {
+        disks = g_new0(virDomainDiskError, count);
+        ndisks = count;
 
         if ((count = virDomainGetDiskErrors(dom, disks, ndisks, 0)) == -1)
             goto cleanup;
@@ -1229,7 +1252,7 @@ cmdDomBlkError(vshControl *ctl, const vshCmd *cmd)
     ret = true;
 
  cleanup:
-    for (i = 0; i < count; i++)
+    for (i = 0; i < ndisks; i++)
         VIR_FREE(disks[i].disk);
     VIR_FREE(disks);
     virshDomainFree(dom);
@@ -1267,7 +1290,8 @@ cmdDominfo(vshControl *ctl, const vshCmd *cmd)
     unsigned int id;
     char *str, uuid[VIR_UUID_STRING_BUFLEN];
     int has_managed_save = 0;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
+    g_auto(GStrv) messages = NULL;
 
     if (!(dom = virshCommandOptDomain(ctl, cmd, NULL)))
         return false;
@@ -1353,10 +1377,7 @@ cmdDominfo(vshControl *ctl, const vshCmd *cmd)
             vshPrint(ctl, "%-15s %s\n", _("Security DOI:"), secmodel.doi);
 
             /* Security labels are only valid for active domains */
-            if (VIR_ALLOC(seclabel) < 0) {
-                virshDomainFree(dom);
-                return false;
-            }
+            seclabel = g_new0(virSecurityLabel, 1);
 
             if (virDomainGetSecurityLabel(dom, seclabel) == -1) {
                 virshDomainFree(dom);
@@ -1371,6 +1392,15 @@ cmdDominfo(vshControl *ctl, const vshCmd *cmd)
             VIR_FREE(seclabel);
         }
     }
+
+    if (virDomainGetMessages(dom, &messages, 0) > 0) {
+        size_t i;
+        for (i = 0; messages[i] != NULL; i++) {
+            vshPrint(ctl, "%-15s %s\n",
+                     i == 0 ? _("Messages:") : "", messages[i]);
+        }
+    }
+
     virshDomainFree(dom);
     return ret;
 }
@@ -1509,17 +1539,13 @@ cmdDomTime(vshControl *ctl, const vshCmd *cmd)
             goto cleanup;
 
         if (pretty) {
-            char timestr[100];
-            time_t cur_time = seconds;
-            struct tm time_info;
+            g_autoptr(GDateTime) then = NULL;
+            g_autofree char *thenstr = NULL;
 
-            if (!gmtime_r(&cur_time, &time_info)) {
-                vshError(ctl, _("Unable to format time"));
-                goto cleanup;
-            }
-            strftime(timestr, sizeof(timestr), "%Y-%m-%d %H:%M:%S", &time_info);
+            then = g_date_time_new_from_unix_utc(seconds);
+            thenstr = g_date_time_format(then, "%Y-%m-%d %H:%M:%S");
 
-            vshPrint(ctl, _("Time: %s"), timestr);
+            vshPrint(ctl, _("Time: %s"), thenstr);
         } else {
             vshPrint(ctl, _("Time: %lld"), seconds);
         }
@@ -1544,7 +1570,7 @@ static const vshCmdInfo info_list[] = {
     {.name = NULL}
 };
 
-/* compare domains, pack NULLed ones at the end*/
+/* compare domains, pack NULLed ones at the end */
 static int
 virshDomainSorter(const void *a, const void *b)
 {
@@ -1583,27 +1609,24 @@ struct virshDomainList {
     virDomainPtr *domains;
     size_t ndomains;
 };
-typedef struct virshDomainList *virshDomainListPtr;
 
 static void
-virshDomainListFree(virshDomainListPtr domlist)
+virshDomainListFree(struct virshDomainList *domlist)
 {
     size_t i;
 
     if (domlist && domlist->domains) {
-        for (i = 0; i < domlist->ndomains; i++) {
-            if (domlist->domains[i])
-                virshDomainFree(domlist->domains[i]);
-        }
-        VIR_FREE(domlist->domains);
+        for (i = 0; i < domlist->ndomains; i++)
+            virshDomainFree(domlist->domains[i]);
+        g_free(domlist->domains);
     }
-    VIR_FREE(domlist);
+    g_free(domlist);
 }
 
-static virshDomainListPtr
+static struct virshDomainList *
 virshDomainListCollect(vshControl *ctl, unsigned int flags)
 {
-    virshDomainListPtr list = vshMalloc(ctl, sizeof(*list));
+    struct virshDomainList *list = g_new0(struct virshDomainList, 1);
     size_t i;
     int ret;
     int *ids = NULL;
@@ -1617,8 +1640,9 @@ virshDomainListCollect(vshControl *ctl, unsigned int flags)
     int autostart;
     int state;
     int nsnap;
+    int nchk;
     int mansave;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     /* try the list with flags support (0.9.13 and later) */
     if ((ret = virConnectListAllDomains(priv->conn, &list->domains,
@@ -1664,7 +1688,7 @@ virshDomainListCollect(vshControl *ctl, unsigned int flags)
         }
 
         if (nids) {
-            ids = vshMalloc(ctl, sizeof(int) * nids);
+            ids = g_new0(int, nids);
 
             if ((nids = virConnectListDomains(priv->conn, ids, nids)) < 0) {
                 vshError(ctl, "%s", _("Failed to list active domains"));
@@ -1681,7 +1705,7 @@ virshDomainListCollect(vshControl *ctl, unsigned int flags)
         }
 
         if (nnames) {
-            names = vshMalloc(ctl, sizeof(char *) * nnames);
+            names = g_new0(char *, nnames);
 
             if ((nnames = virConnectListDefinedDomains(priv->conn, names,
                                                       nnames)) < 0) {
@@ -1691,7 +1715,7 @@ virshDomainListCollect(vshControl *ctl, unsigned int flags)
         }
     }
 
-    list->domains = vshMalloc(ctl, sizeof(virDomainPtr) * (nids + nnames));
+    list->domains = g_new0(virDomainPtr, nids + nnames);
     list->ndomains = 0;
 
     /* get active domains */
@@ -1784,6 +1808,17 @@ virshDomainListCollect(vshControl *ctl, unsigned int flags)
                 goto remove_entry;
         }
 
+        /* checkpoint filter */
+        if (VSH_MATCH(VIR_CONNECT_LIST_DOMAINS_FILTERS_CHECKPOINT)) {
+            if ((nchk = virDomainListAllCheckpoints(dom, NULL, 0)) < 0) {
+                vshError(ctl, "%s", _("Failed to get checkpoint count"));
+                goto cleanup;
+            }
+            if (!((VSH_MATCH(VIR_CONNECT_LIST_DOMAINS_HAS_CHECKPOINT) && nchk > 0) ||
+                  (VSH_MATCH(VIR_CONNECT_LIST_DOMAINS_NO_CHECKPOINT) && nchk == 0)))
+                goto remove_entry;
+        }
+
         /* the domain matched all filters, it may stay */
         continue;
 
@@ -1845,6 +1880,14 @@ static const vshCmdOptDef opts_list[] = {
      .type = VSH_OT_BOOL,
      .help = N_("list domains without a snapshot")
     },
+    {.name = "with-checkpoint",
+     .type = VSH_OT_BOOL,
+     .help = N_("list domains with existing checkpoint")
+    },
+    {.name = "without-checkpoint",
+     .type = VSH_OT_BOOL,
+     .help = N_("list domains without a checkpoint")
+    },
     {.name = "state-running",
      .type = VSH_OT_BOOL,
      .help = N_("list domains in running state")
@@ -1885,6 +1928,10 @@ static const vshCmdOptDef opts_list[] = {
      .type = VSH_OT_BOOL,
      .help = N_("list domain names only")
     },
+    {.name = "id",
+     .type = VSH_OT_BOOL,
+     .help = N_("list domain IDs only")
+    },
     {.name = "table",
      .type = VSH_OT_BOOL,
      .help = N_("list table (default)")
@@ -1911,17 +1958,18 @@ cmdList(vshControl *ctl, const vshCmd *cmd)
     bool optTable = vshCommandOptBool(cmd, "table");
     bool optUUID = vshCommandOptBool(cmd, "uuid");
     bool optName = vshCommandOptBool(cmd, "name");
+    bool optID = vshCommandOptBool(cmd, "id");
     size_t i;
     char *title;
     char uuid[VIR_UUID_STRING_BUFLEN];
     int state;
     bool ret = false;
-    virshDomainListPtr list = NULL;
+    struct virshDomainList *list = NULL;
     virDomainPtr dom;
-    char id_buf[INT_BUFSIZE_BOUND(unsigned int)];
+    char id_buf[VIR_INT64_STR_BUFLEN];
     unsigned int id;
     unsigned int flags = VIR_CONNECT_LIST_DOMAINS_ACTIVE;
-    vshTablePtr table = NULL;
+    vshTable *table = NULL;
 
     /* construct filter flags */
     if (vshCommandOptBool(cmd, "inactive") ||
@@ -1944,6 +1992,9 @@ cmdList(vshControl *ctl, const vshCmd *cmd)
     FILTER("with-snapshot",    VIR_CONNECT_LIST_DOMAINS_HAS_SNAPSHOT);
     FILTER("without-snapshot", VIR_CONNECT_LIST_DOMAINS_NO_SNAPSHOT);
 
+    FILTER("with-checkpoint",    VIR_CONNECT_LIST_DOMAINS_HAS_CHECKPOINT);
+    FILTER("without-checkpoint", VIR_CONNECT_LIST_DOMAINS_NO_CHECKPOINT);
+
     FILTER("state-running", VIR_CONNECT_LIST_DOMAINS_RUNNING);
     FILTER("state-paused",  VIR_CONNECT_LIST_DOMAINS_PAUSED);
     FILTER("state-shutoff", VIR_CONNECT_LIST_DOMAINS_SHUTOFF);
@@ -1951,8 +2002,9 @@ cmdList(vshControl *ctl, const vshCmd *cmd)
 
     VSH_EXCLUSIVE_OPTIONS("table", "name");
     VSH_EXCLUSIVE_OPTIONS("table", "uuid");
+    VSH_EXCLUSIVE_OPTIONS("table", "id");
 
-    if (!optUUID && !optName)
+    if (!optUUID && !optName && !optID)
         optTable = true;
 
     if (!(list = virshDomainListCollect(ctl, flags)))
@@ -1970,10 +2022,12 @@ cmdList(vshControl *ctl, const vshCmd *cmd)
     }
 
     for (i = 0; i < list->ndomains; i++) {
+        const char *sep = "";
+
         dom = list->domains[i];
         id = virDomainGetID(dom);
         if (id != (unsigned int) -1)
-            snprintf(id_buf, sizeof(id_buf), "%d", id);
+            g_snprintf(id_buf, sizeof(id_buf), "%d", id);
         else
             ignore_value(virStrcpyStatic(id_buf, "-"));
 
@@ -2007,20 +2061,28 @@ cmdList(vshControl *ctl, const vshCmd *cmd)
                     goto cleanup;
             }
 
-        } else if (optUUID && optName) {
-            if (virDomainGetUUIDString(dom, uuid) < 0) {
-                vshError(ctl, "%s", _("Failed to get domain's UUID"));
-                goto cleanup;
+        } else {
+            if (optUUID) {
+                if (virDomainGetUUIDString(dom, uuid) < 0) {
+                    vshError(ctl, "%s", _("Failed to get domain's UUID"));
+                    goto cleanup;
+                }
+                vshPrint(ctl, "%s", uuid);
+                sep = " ";
             }
-            vshPrint(ctl, "%-36s %-30s\n", uuid, virDomainGetName(dom));
-        } else if (optUUID) {
-            if (virDomainGetUUIDString(dom, uuid) < 0) {
-                vshError(ctl, "%s", _("Failed to get domain's UUID"));
-                goto cleanup;
+            if (optID) {
+                /* If we are asked to print IDs only then do that
+                 * only for live domains. */
+                if (id == (unsigned int) -1 && !optUUID && !optName)
+                    continue;
+                vshPrint(ctl, "%s%s", sep, id_buf);
+                sep = " ";
             }
-            vshPrint(ctl, "%s\n", uuid);
-        } else if (optName) {
-            vshPrint(ctl, "%s\n", virDomainGetName(dom));
+            if (optName) {
+                vshPrint(ctl, "%s%s", sep, virDomainGetName(dom));
+                sep = " ";
+            }
+            vshPrint(ctl, "\n");
         }
     }
 
@@ -2081,6 +2143,14 @@ static const vshCmdOptDef opts_domstats[] = {
      .type = VSH_OT_BOOL,
      .help = N_("report domain IOThread information"),
     },
+    {.name = "memory",
+     .type = VSH_OT_BOOL,
+     .help = N_("report domain memory usage"),
+    },
+    {.name = "dirtyrate",
+     .type = VSH_OT_BOOL,
+     .help = N_("report domain dirty rate information"),
+    },
     {.name = "list-active",
      .type = VSH_OT_BOOL,
      .help = N_("list only active domains"),
@@ -2135,9 +2205,9 @@ static const vshCmdOptDef opts_domstats[] = {
 
 
 static bool
-virshDomainStatsPrintRecord(vshControl *ctl ATTRIBUTE_UNUSED,
+virshDomainStatsPrintRecord(vshControl *ctl G_GNUC_UNUSED,
                             virDomainStatsRecordPtr record,
-                            bool raw ATTRIBUTE_UNUSED)
+                            bool raw G_GNUC_UNUSED)
 {
     char *param;
     size_t i;
@@ -2171,7 +2241,7 @@ cmdDomstats(vshControl *ctl, const vshCmd *cmd)
     int flags = 0;
     const vshCmdOpt *opt = NULL;
     bool ret = false;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     if (vshCommandOptBool(cmd, "state"))
         stats |= VIR_DOMAIN_STATS_STATE;
@@ -2196,6 +2266,12 @@ cmdDomstats(vshControl *ctl, const vshCmd *cmd)
 
     if (vshCommandOptBool(cmd, "iothread"))
         stats |= VIR_DOMAIN_STATS_IOTHREAD;
+
+    if (vshCommandOptBool(cmd, "memory"))
+        stats |= VIR_DOMAIN_STATS_MEMORY;
+
+    if (vshCommandOptBool(cmd, "dirtyrate"))
+        stats |= VIR_DOMAIN_STATS_DIRTYRATE;
 
     if (vshCommandOptBool(cmd, "list-active"))
         flags |= VIR_CONNECT_GET_ALL_DOMAINS_STATS_ACTIVE;
@@ -2231,8 +2307,7 @@ cmdDomstats(vshControl *ctl, const vshCmd *cmd)
         flags |= VIR_CONNECT_GET_ALL_DOMAINS_STATS_NOWAIT;
 
     if (vshCommandOptBool(cmd, "domain")) {
-        if (VIR_ALLOC_N(domlist, 1) < 0)
-            goto cleanup;
+        domlist = g_new0(virDomainPtr, 1);
         ndoms = 1;
 
         while ((opt = vshCommandOptArgv(ctl, cmd, opt))) {
@@ -2297,9 +2372,16 @@ static const vshCmdOptDef opts_domifaddr[] = {
     {.name = "source",
      .type = VSH_OT_STRING,
      .flags = VSH_OFLAG_NONE,
+     .completer = virshDomainInterfaceAddrSourceCompleter,
      .help = N_("address source: 'lease', 'agent', or 'arp'")},
     {.name = NULL}
 };
+
+VIR_ENUM_IMPL(virshDomainInterfaceAddressesSource,
+              VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_LAST,
+              "lease",
+              "agent",
+              "arp");
 
 static bool
 cmdDomIfAddr(vshControl *ctl, const vshCmd *cmd)
@@ -2314,26 +2396,19 @@ cmdDomIfAddr(vshControl *ctl, const vshCmd *cmd)
     const char *sourcestr = NULL;
     int source = VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE;
 
-    if (!(dom = virshCommandOptDomain(ctl, cmd, NULL)))
+    if (vshCommandOptStringReq(ctl, cmd, "interface", &ifacestr) < 0)
+        return false;
+    if (vshCommandOptStringReq(ctl, cmd, "source", &sourcestr) < 0)
         return false;
 
-    if (vshCommandOptStringReq(ctl, cmd, "interface", &ifacestr) < 0)
-        goto cleanup;
-    if (vshCommandOptStringReq(ctl, cmd, "source", &sourcestr) < 0)
-        goto cleanup;
-
-    if (sourcestr) {
-        if (STREQ(sourcestr, "lease")) {
-            source = VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE;
-        } else if (STREQ(sourcestr, "agent")) {
-            source = VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_AGENT;
-        } else if (STREQ(sourcestr, "arp")) {
-            source = VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_ARP;
-        } else {
-            vshError(ctl, _("Unknown data source '%s'"), sourcestr);
-            goto cleanup;
-        }
+    if (sourcestr &&
+        (source = virshDomainInterfaceAddressesSourceTypeFromString(sourcestr)) < 0) {
+        vshError(ctl, _("Unknown data source '%s'"), sourcestr);
+        return false;
     }
+
+    if (!(dom = virshCommandOptDomain(ctl, cmd, NULL)))
+        return false;
 
     if ((ifaces_count = virDomainInterfaceAddresses(dom, &ifaces, source, 0)) < 0) {
         vshError(ctl, _("Failed to query for interfaces addresses"));
@@ -2362,7 +2437,7 @@ cmdDomIfAddr(vshControl *ctl, const vshCmd *cmd)
         }
 
         for (j = 0; j < iface->naddrs; j++) {
-            virBuffer buf = VIR_BUFFER_INITIALIZER;
+            g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
             switch (iface->addrs[j].type) {
             case VIR_IP_ADDR_TYPE_IPV4:
@@ -2377,16 +2452,10 @@ cmdDomIfAddr(vshControl *ctl, const vshCmd *cmd)
                               type, iface->addrs[j].addr,
                               iface->addrs[j].prefix);
 
-            if (virBufferError(&buf)) {
-                virBufferFreeAndReset(&buf);
-                virReportOOMError();
-                goto cleanup;
-            }
-
             ip_addr_str = virBufferContentAndReset(&buf);
 
             if (!ip_addr_str)
-                ip_addr_str = vshStrdup(ctl, "");
+                ip_addr_str = g_strdup("");
 
             /* Don't repeat interface name */
             if (full || !j)
@@ -2397,7 +2466,6 @@ cmdDomIfAddr(vshControl *ctl, const vshCmd *cmd)
                 vshPrint(ctl, " %-10s %-17s    %s\n",
                          "-", "-", ip_addr_str);
 
-            virBufferFreeAndReset(&buf);
             VIR_FREE(ip_addr_str);
         }
     }

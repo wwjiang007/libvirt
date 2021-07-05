@@ -20,20 +20,15 @@
 
 #include <inttypes.h>
 #include <math.h>
-#include <strings.h>
 #include <time.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#ifdef WITH_GNUTLS
-# include <gnutls/gnutls.h>
-# include <gnutls/crypto.h>
-#endif
+#include <gnutls/gnutls.h>
+#include <gnutls/crypto.h>
 
 #include "virrandom.h"
 #include "virthread.h"
-#include "count-one-bits.h"
-#include "virutil.h"
 #include "virerror.h"
 #include "virfile.h"
 #include "virlog.h"
@@ -42,8 +37,6 @@
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 VIR_LOG_INIT("util.random");
-
-#define RANDOM_SOURCE "/dev/urandom"
 
 /**
  * virRandomBits:
@@ -96,11 +89,10 @@ double virRandom(void)
  */
 uint32_t virRandomInt(uint32_t max)
 {
-    if ((max & (max - 1)) == 0)
-        return virRandomBits(ffs(max) - 1);
+    if (VIR_IS_POW2(max))
+        return virRandomBits(__builtin_ffs(max) - 1);
 
-    double val = virRandom();
-    return val * max;
+    return virRandom() * max;
 }
 
 
@@ -109,7 +101,7 @@ uint32_t virRandomInt(uint32_t max)
  * @buf: Pointer to location to store bytes
  * @buflen: Number of bytes to store
  *
- * Generate a stream of random bytes from RANDOM_SOURCE
+ * Generate a stream of random bytes using gnutls_rnd()
  * into @buf of size @buflen
  *
  * Returns 0 on success or -1 (with error reported)
@@ -118,45 +110,14 @@ int
 virRandomBytes(unsigned char *buf,
                size_t buflen)
 {
-#if WITH_GNUTLS
     int rv;
 
-    /* Generate the byte stream using gnutls_rnd() if possible */
     if ((rv = gnutls_rnd(GNUTLS_RND_RANDOM, buf, buflen)) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("failed to generate byte stream: %s"),
                        gnutls_strerror(rv));
         return -1;
     }
-
-#else /* !WITH_GNUTLS */
-
-    int fd;
-
-    if ((fd = open(RANDOM_SOURCE, O_RDONLY)) < 0) {
-        virReportSystemError(errno,
-                             _("unable to open %s"),
-                             RANDOM_SOURCE);
-        return -1;
-    }
-
-    while (buflen > 0) {
-        ssize_t n;
-
-        if ((n = saferead(fd, buf, buflen)) <= 0) {
-            virReportSystemError(errno,
-                                 _("unable to read from %s"),
-                                 RANDOM_SOURCE);
-            VIR_FORCE_CLOSE(fd);
-            return n < 0 ? -errno : -ENODATA;
-        }
-
-        buf += n;
-        buflen -= n;
-    }
-
-    VIR_FORCE_CLOSE(fd);
-#endif /* !WITH_GNUTLS */
 
     return 0;
 }
@@ -183,8 +144,7 @@ virRandomGenerateWWN(char **wwn,
     if (STREQ(virt_type, "QEMU")) {
         oui = QUMRANET_OUI;
     } else if (STREQ(virt_type, "Xen") ||
-               STREQ(virt_type, "xenlight") ||
-               STREQ(virt_type, "XenAPI")) {
+               STREQ(virt_type, "xenlight")) {
         oui = XEN_OUI;
     } else if (STREQ(virt_type, "ESX") ||
                STREQ(virt_type, "VMWARE")) {
@@ -197,8 +157,25 @@ virRandomGenerateWWN(char **wwn,
         return -1;
     }
 
-    if (virAsprintf(wwn, "5" "%s%09llx", oui,
-                    (unsigned long long)virRandomBits(36)) < 0)
-        return -1;
+    *wwn = g_strdup_printf("5" "%s%09llx", oui,
+                           (unsigned long long)virRandomBits(36));
     return 0;
+}
+
+char *virRandomToken(size_t len)
+{
+    g_autofree unsigned char *data = g_new0(unsigned char, len);
+    g_autofree char *token = g_new0(char, (len * 2) + 1);
+    static const char hex[] = "0123456789abcdef";
+    size_t i;
+
+    if (virRandomBytes(data, len) < 0)
+        return NULL;
+
+    for (i = 0; i < len; i++) {
+        token[(i*2)] = hex[data[i] & 0xf];
+        token[(i*2)+1] = hex[(data[i] >> 4) & 0xf];
+    }
+
+    return g_steal_pointer(&token);
 }

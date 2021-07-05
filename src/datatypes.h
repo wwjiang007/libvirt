@@ -19,35 +19,35 @@
  *
  */
 
-#ifndef LIBVIRT_DATATYPES_H
-# define LIBVIRT_DATATYPES_H
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
-# include "driver.h"
-# include "virthread.h"
-# include "virobject.h"
-# include "viruuid.h"
+#include "driver.h"
+#include "virthread.h"
+#include "virobject.h"
+#include "viruuid.h"
 
-extern virClassPtr virConnectClass;
-extern virClassPtr virDomainClass;
-extern virClassPtr virDomainCheckpointClass;
-extern virClassPtr virDomainSnapshotClass;
-extern virClassPtr virInterfaceClass;
-extern virClassPtr virNetworkClass;
-extern virClassPtr virNodeDeviceClass;
-extern virClassPtr virNWFilterClass;
-extern virClassPtr virNWFilterBindingClass;
-extern virClassPtr virSecretClass;
-extern virClassPtr virStreamClass;
-extern virClassPtr virStorageVolClass;
-extern virClassPtr virStoragePoolClass;
+extern virClass *virConnectClass;
+extern virClass *virDomainClass;
+extern virClass *virDomainCheckpointClass;
+extern virClass *virDomainSnapshotClass;
+extern virClass *virInterfaceClass;
+extern virClass *virNetworkClass;
+extern virClass *virNetworkPortClass;
+extern virClass *virNodeDeviceClass;
+extern virClass *virNWFilterClass;
+extern virClass *virNWFilterBindingClass;
+extern virClass *virSecretClass;
+extern virClass *virStreamClass;
+extern virClass *virStorageVolClass;
+extern virClass *virStoragePoolClass;
 
-extern virClassPtr virAdmConnectClass;
-extern virClassPtr virAdmServerClass;
-extern virClassPtr virAdmClientClass;
+extern virClass *virAdmConnectClass;
+extern virClass *virAdmServerClass;
+extern virClass *virAdmClientClass;
 
-# define virCheckConnectReturn(obj, retval) \
+#define virCheckConnectReturn(obj, retval) \
     do { \
         if (!virObjectIsClass(obj, virConnectClass)) { \
             virReportErrorHelper(VIR_FROM_THIS, VIR_ERR_INVALID_CONN, \
@@ -57,7 +57,7 @@ extern virClassPtr virAdmClientClass;
             return retval; \
         } \
     } while (0)
-# define virCheckConnectGoto(obj, label) \
+#define virCheckConnectGoto(obj, label) \
     do { \
         if (!virObjectIsClass(obj, virConnectClass)) { \
             virReportErrorHelper(VIR_FROM_THIS, VIR_ERR_INVALID_CONN, \
@@ -67,7 +67,7 @@ extern virClassPtr virAdmClientClass;
         } \
     } while (0)
 
-# define virCheckDomainReturn(obj, retval) \
+#define virCheckDomainReturn(obj, retval) \
     do { \
         virDomainPtr _dom = (obj); \
         if (!virObjectIsClass(_dom, virDomainClass) || \
@@ -79,7 +79,7 @@ extern virClassPtr virAdmClientClass;
             return retval; \
         } \
     } while (0)
-# define virCheckDomainGoto(obj, label) \
+#define virCheckDomainGoto(obj, label) \
     do { \
         virDomainPtr _dom = (obj); \
         if (!virObjectIsClass(_dom, virDomainClass) || \
@@ -91,7 +91,7 @@ extern virClassPtr virAdmClientClass;
         } \
     } while (0)
 
-# define virCheckNetworkReturn(obj, retval) \
+#define virCheckNetworkReturn(obj, retval) \
     do { \
         virNetworkPtr _net = (obj); \
         if (!virObjectIsClass(_net, virNetworkClass) || \
@@ -104,7 +104,7 @@ extern virClassPtr virAdmClientClass;
             return retval; \
         } \
     } while (0)
-# define virCheckNetworkGoto(obj, label) \
+#define virCheckNetworkGoto(obj, label) \
     do { \
         virNetworkPtr _net = (obj); \
         if (!virObjectIsClass(_net, virNetworkClass) || \
@@ -117,7 +117,34 @@ extern virClassPtr virAdmClientClass;
         } \
     } while (0)
 
-# define virCheckInterfaceReturn(obj, retval) \
+#define virCheckNetworkPortReturn(obj, retval) \
+    do { \
+        virNetworkPortPtr _port = (obj); \
+        if (!virObjectIsClass(_port, virNetworkPortClass) || \
+            !virObjectIsClass(_port->net, virNetworkClass)) { \
+            virReportErrorHelper(VIR_FROM_NETWORK, \
+                                 VIR_ERR_INVALID_NETWORK_PORT, \
+                                 __FILE__, __FUNCTION__, __LINE__, \
+                                 __FUNCTION__); \
+            virDispatchError(NULL); \
+            return retval; \
+        } \
+    } while (0)
+
+#define virCheckNetworkPortGoto(obj, label) \
+    do { \
+        virNetworkPortPtr _port = (obj); \
+        if (!virObjectIsClass(_port, virNetworkPortClass) || \
+            !virObjectIsClass(_port->net, virNetworkClass)) { \
+            virReportErrorHelper(VIR_FROM_NETWORK, \
+                                 VIR_ERR_INVALID_NETWORK_PORT, \
+                                 __FILE__, __FUNCTION__, __LINE__, \
+                                 __FUNCTION__); \
+            goto label; \
+        } \
+    } while (0)
+
+#define virCheckInterfaceReturn(obj, retval) \
     do { \
         virInterfacePtr _iface = (obj); \
         if (!virObjectIsClass(_iface, virInterfaceClass) || \
@@ -131,7 +158,7 @@ extern virClassPtr virAdmClientClass;
         } \
     } while (0)
 
-# define virCheckStoragePoolReturn(obj, retval) \
+#define virCheckStoragePoolReturn(obj, retval) \
     do { \
         virStoragePoolPtr _pool = (obj); \
         if (!virObjectIsClass(_pool, virStoragePoolClass) || \
@@ -145,7 +172,7 @@ extern virClassPtr virAdmClientClass;
         } \
     } while (0)
 
-# define virCheckStoragePoolGoto(obj, label) \
+#define virCheckStoragePoolGoto(obj, label) \
     do { \
         virStoragePoolPtr _pool= (obj); \
         if (!virObjectIsClass(_pool, virStoragePoolClass) || \
@@ -158,7 +185,7 @@ extern virClassPtr virAdmClientClass;
         } \
     } while (0)
 
-# define virCheckStorageVolReturn(obj, retval) \
+#define virCheckStorageVolReturn(obj, retval) \
     do { \
         virStorageVolPtr _vol = (obj); \
         if (!virObjectIsClass(_vol, virStorageVolClass) || \
@@ -171,7 +198,7 @@ extern virClassPtr virAdmClientClass;
             return retval; \
         } \
     } while (0)
-# define virCheckStorageVolGoto(obj, label) \
+#define virCheckStorageVolGoto(obj, label) \
     do { \
         virStorageVolPtr _vol = (obj); \
         if (!virObjectIsClass(_vol, virStorageVolClass) || \
@@ -184,7 +211,7 @@ extern virClassPtr virAdmClientClass;
         } \
     } while (0)
 
-# define virCheckNodeDeviceReturn(obj, retval) \
+#define virCheckNodeDeviceReturn(obj, retval) \
     do { \
         virNodeDevicePtr _node = (obj); \
         if (!virObjectIsClass(_node, virNodeDeviceClass) || \
@@ -198,7 +225,7 @@ extern virClassPtr virAdmClientClass;
         } \
     } while (0)
 
-# define virCheckNodeDeviceGoto(obj, label) \
+#define virCheckNodeDeviceGoto(obj, label) \
     do { \
         virNodeDevicePtr _dev= (obj); \
         if (!virObjectIsClass(_dev, virNodeDeviceClass) || \
@@ -211,7 +238,7 @@ extern virClassPtr virAdmClientClass;
         } \
     } while (0)
 
-# define virCheckSecretReturn(obj, retval) \
+#define virCheckSecretReturn(obj, retval) \
     do { \
         virSecretPtr _secret = (obj); \
         if (!virObjectIsClass(_secret, virSecretClass) || \
@@ -225,7 +252,7 @@ extern virClassPtr virAdmClientClass;
         } \
     } while (0)
 
-# define virCheckSecretGoto(obj, label) \
+#define virCheckSecretGoto(obj, label) \
     do { \
         virSecretPtr _secret = (obj); \
         if (!virObjectIsClass(_secret, virSecretClass) || \
@@ -239,7 +266,7 @@ extern virClassPtr virAdmClientClass;
         } \
     } while (0)
 
-# define virCheckStreamReturn(obj, retval) \
+#define virCheckStreamReturn(obj, retval) \
     do { \
         virStreamPtr _st = (obj); \
         if (!virObjectIsClass(_st, virStreamClass) || \
@@ -252,7 +279,7 @@ extern virClassPtr virAdmClientClass;
             return retval; \
         } \
     } while (0)
-# define virCheckStreamGoto(obj, label) \
+#define virCheckStreamGoto(obj, label) \
     do { \
         virStreamPtr _st = (obj); \
         if (!virObjectIsClass(_st, virStreamClass) || \
@@ -265,7 +292,7 @@ extern virClassPtr virAdmClientClass;
         } \
     } while (0)
 
-# define virCheckNWFilterReturn(obj, retval) \
+#define virCheckNWFilterReturn(obj, retval) \
     do { \
         virNWFilterPtr _nw = (obj); \
         if (!virObjectIsClass(_nw, virNWFilterClass) || \
@@ -279,7 +306,7 @@ extern virClassPtr virAdmClientClass;
         } \
     } while (0)
 
-# define virCheckNWFilterBindingReturn(obj, retval) \
+#define virCheckNWFilterBindingReturn(obj, retval) \
     do { \
         virNWFilterBindingPtr _nw = (obj); \
         if (!virObjectIsClass(_nw, virNWFilterBindingClass) || \
@@ -293,7 +320,7 @@ extern virClassPtr virAdmClientClass;
         } \
     } while (0)
 
-# define virCheckDomainCheckpointReturn(obj, retval) \
+#define virCheckDomainCheckpointReturn(obj, retval) \
     do { \
         virDomainCheckpointPtr _check = (obj); \
         if (!virObjectIsClass(_check, virDomainCheckpointClass) || \
@@ -308,7 +335,7 @@ extern virClassPtr virAdmClientClass;
         } \
     } while (0)
 
-# define virCheckDomainSnapshotReturn(obj, retval) \
+#define virCheckDomainSnapshotReturn(obj, retval) \
     do { \
         virDomainSnapshotPtr _snap = (obj); \
         if (!virObjectIsClass(_snap, virDomainSnapshotClass) || \
@@ -332,29 +359,29 @@ extern virClassPtr virAdmClientClass;
  * "define a(b,...) b,##__VA_ARGS__" as a means of eliding a comma
  * when no var-args are present, but we don't want to require gcc.
  */
-# define VIR_ARG15(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, \
-                   _11, _12, _13, _14, _15, ...) _15
-# define VIR_HAS_COMMA(...) VIR_ARG15(__VA_ARGS__, \
-                                      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0)
+#define VIR_ARG15(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, \
+                  _11, _12, _13, _14, _15, ...) _15
+#define VIR_HAS_COMMA(...) VIR_ARG15(__VA_ARGS__, \
+                                     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0)
 
 /* Form the name VIR_DOMAIN_DEBUG_[01], then call that macro,
  * according to how many arguments are present.  Two-phase due to
  * macro expansion rules.  */
-# define VIR_DOMAIN_DEBUG_EXPAND(a, b, ...) \
+#define VIR_DOMAIN_DEBUG_EXPAND(a, b, ...) \
     VIR_DOMAIN_DEBUG_PASTE(a, b, __VA_ARGS__)
-# define VIR_DOMAIN_DEBUG_PASTE(a, b, ...) \
+#define VIR_DOMAIN_DEBUG_PASTE(a, b, ...) \
     a##b(__VA_ARGS__)
 
 /* Internal use only, when VIR_DOMAIN_DEBUG has one argument.  */
-# define VIR_DOMAIN_DEBUG_0(dom) \
+#define VIR_DOMAIN_DEBUG_0(dom) \
     VIR_DOMAIN_DEBUG_2(dom, "%s", "")
 
 /* Internal use only, when VIR_DOMAIN_DEBUG has three or more arguments.  */
-# define VIR_DOMAIN_DEBUG_1(dom, fmt, ...) \
+#define VIR_DOMAIN_DEBUG_1(dom, fmt, ...) \
     VIR_DOMAIN_DEBUG_2(dom, ", " fmt, __VA_ARGS__)
 
 /* Internal use only, with final format.  */
-# define VIR_DOMAIN_DEBUG_2(dom, fmt, ...) \
+#define VIR_DOMAIN_DEBUG_2(dom, fmt, ...) \
     do { \
         char _uuidstr[VIR_UUID_STRING_BUFLEN]; \
         const char *_domname = NULL; \
@@ -370,7 +397,7 @@ extern virClassPtr virAdmClientClass;
                   dom, NULLSTR(_domname), _uuidstr, __VA_ARGS__); \
     } while (0)
 
-# define virCheckAdmConnectReturn(obj, retval) \
+#define virCheckAdmConnectReturn(obj, retval) \
     do { \
         if (!virObjectIsClass(obj, virAdmConnectClass)) { \
             virReportErrorHelper(VIR_FROM_THIS, VIR_ERR_INVALID_CONN, \
@@ -380,7 +407,7 @@ extern virClassPtr virAdmClientClass;
             return retval; \
         } \
     } while (0)
-# define virCheckAdmConnectGoto(obj, label) \
+#define virCheckAdmConnectGoto(obj, label) \
     do { \
         if (!virObjectIsClass(obj, virAdmConnectClass)) { \
             virReportErrorHelper(VIR_FROM_THIS, VIR_ERR_INVALID_CONN, \
@@ -390,7 +417,7 @@ extern virClassPtr virAdmClientClass;
         } \
     } while (0)
 
-# define virCheckAdmServerReturn(obj, retval) \
+#define virCheckAdmServerReturn(obj, retval) \
     do { \
         virAdmServerPtr _srv = (obj); \
         if (!virObjectIsClass(_srv, virAdmServerClass) || \
@@ -402,7 +429,7 @@ extern virClassPtr virAdmClientClass;
             return retval; \
         } \
     } while (0)
-# define virCheckAdmServerGoto(obj, label) \
+#define virCheckAdmServerGoto(obj, label) \
     do { \
         virAdmServerPtr _srv = (obj); \
         if (!virObjectIsClass(_srv, virAdmServerClass) || \
@@ -414,7 +441,7 @@ extern virClassPtr virAdmClientClass;
         } \
     } while (0);
 
-# define virCheckAdmClientReturn(obj, retval) \
+#define virCheckAdmClientReturn(obj, retval) \
     do { \
         virAdmClientPtr _clt = (obj); \
         if (!virObjectIsClass(_clt, virAdmClientClass) || \
@@ -427,7 +454,7 @@ extern virClassPtr virAdmClientClass;
             return retval; \
         } \
     } while (0)
-# define virCheckAdmClientGoto(obj, label) \
+#define virCheckAdmClientGoto(obj, label) \
     do { \
         virAdmClientPtr _clt = (obj); \
         if (!virObjectIsClass(_clt, virAdmClientClass) || \
@@ -446,16 +473,14 @@ extern virClassPtr virAdmClientClass;
  * @fmt: optional format for additional information
  * @...: optional arguments corresponding to @fmt.
  */
-# define VIR_DOMAIN_DEBUG(...) \
+#define VIR_DOMAIN_DEBUG(...) \
     VIR_DOMAIN_DEBUG_EXPAND(VIR_DOMAIN_DEBUG_, \
                             VIR_HAS_COMMA(__VA_ARGS__), \
                             __VA_ARGS__)
 
 
 typedef struct _virConnectCloseCallbackData virConnectCloseCallbackData;
-typedef virConnectCloseCallbackData *virConnectCloseCallbackDataPtr;
 typedef struct _virAdmConnectCloseCallbackData virAdmConnectCloseCallbackData;
-typedef virAdmConnectCloseCallbackData *virAdmConnectCloseCallbackDataPtr;
 
 /**
  * Internal structures holding data related to connection close callbacks.
@@ -492,16 +517,16 @@ struct _virConnect {
      * them.
      */
     unsigned int flags;     /* a set of connection flags */
-    virURIPtr uri;          /* connection URI */
+    virURI *uri;          /* connection URI */
 
     /* The underlying hypervisor driver and network driver. */
-    virHypervisorDriverPtr driver;
-    virNetworkDriverPtr networkDriver;
-    virInterfaceDriverPtr interfaceDriver;
-    virStorageDriverPtr storageDriver;
-    virNodeDeviceDriverPtr nodeDeviceDriver;
-    virSecretDriverPtr secretDriver;
-    virNWFilterDriverPtr nwfilterDriver;
+    virHypervisorDriver *driver;
+    virNetworkDriver *networkDriver;
+    virInterfaceDriver *interfaceDriver;
+    virStorageDriver *storageDriver;
+    virNodeDeviceDriver *nodeDeviceDriver;
+    virSecretDriver *secretDriver;
+    virNWFilterDriver *nwfilterDriver;
 
     /* Private data pointer which can be used by domain driver as
      * it pleases.
@@ -521,6 +546,9 @@ struct _virConnect {
     void *userData;         /* the user data */
 };
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virConnect, virObjectUnref);
+
+
 /**
  * _virAdmConnect:
  *
@@ -528,13 +556,13 @@ struct _virConnect {
  */
 struct _virAdmConnect {
     virObjectLockable parent;
-    virURIPtr uri;
+    virURI *uri;
 
     void *privateData;
     virFreeCallback privateDataFreeFunc;
 
     /* Per-connection close callback */
-    virAdmConnectCloseCallbackDataPtr closeCallback;
+    virAdmConnectCloseCallbackData *closeCallback;
 };
 
 /**
@@ -580,7 +608,7 @@ struct _virDomain {
 /**
 * _virNetwork:
 *
-* Internal structure associated to a domain
+* Internal structure associated to a network
 */
 struct _virNetwork {
     virObject parent;
@@ -588,6 +616,25 @@ struct _virNetwork {
     char *name;                          /* the network external name */
     unsigned char uuid[VIR_UUID_BUFLEN]; /* the network unique identifier */
 };
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNetwork, virObjectUnref);
+
+
+/**
+* _virNetworkPort:
+*
+* Internal structure associated to a network port
+*/
+struct _virNetworkPort {
+    virObject parent;
+    virNetworkPtr net;                   /* pointer back to the connection */
+    unsigned char uuid[VIR_UUID_BUFLEN]; /* the network unique identifier */
+};
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNetworkPort, virObjectUnref);
+
+/* virNetworkDHCPLease is defined in the public API - libvirt-network.h */
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNetworkDHCPLease, virNetworkDHCPLeaseFree);
 
 /**
 * _virInterface:
@@ -620,6 +667,9 @@ struct _virStoragePool {
     virFreeCallback privateDataFreeFunc;
 };
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virStoragePool, virObjectUnref);
+
+
 /**
 * _virStorageVol:
 *
@@ -640,6 +690,9 @@ struct _virStorageVol {
     virFreeCallback privateDataFreeFunc;
 };
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virStorageVol, virObjectUnref);
+
+
 /**
  * _virNodeDevice:
  *
@@ -651,6 +704,8 @@ struct _virNodeDevice {
     char *name;                         /* device name (unique on node) */
     char *parentName;                   /* parent device name */
 };
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virNodeDevice, virObjectUnref);
 
 /**
  * _virSecret:
@@ -679,7 +734,7 @@ struct _virStream {
     virConnectPtr conn;
     unsigned int flags;
 
-    virStreamDriverPtr driver;
+    virStreamDriver *driver;
     void *privateData;
     virFreeCallback ff;
 };
@@ -746,6 +801,8 @@ virDomainPtr virGetDomain(virConnectPtr conn,
 virNetworkPtr virGetNetwork(virConnectPtr conn,
                             const char *name,
                             const unsigned char *uuid);
+virNetworkPortPtr virGetNetworkPort(virNetworkPtr net,
+                                    const unsigned char *uuid);
 virInterfacePtr virGetInterface(virConnectPtr conn,
                                 const char *name,
                                 const char *mac);
@@ -788,25 +845,29 @@ virAdmClientPtr virAdmGetClient(virAdmServerPtr srv,
                                 unsigned long long timestamp,
                                 unsigned int transport);
 
-virConnectCloseCallbackDataPtr virNewConnectCloseCallbackData(void);
-void virConnectCloseCallbackDataRegister(virConnectCloseCallbackDataPtr close,
+/* Thread local to watch if an ObjectUnref causes a Dispoe */
+void virConnectWatchDispose(void);
+bool virConnectWasDisposed(void);
+void virAdmConnectWatchDispose(void);
+bool virAdmConnectWasDisposed(void);
+
+virConnectCloseCallbackData *virNewConnectCloseCallbackData(void);
+void virConnectCloseCallbackDataRegister(virConnectCloseCallbackData *close,
                                          virConnectPtr conn,
                                          virConnectCloseFunc cb,
                                          void *opaque,
                                          virFreeCallback freecb);
-void virConnectCloseCallbackDataUnregister(virConnectCloseCallbackDataPtr close,
+void virConnectCloseCallbackDataUnregister(virConnectCloseCallbackData *close,
                                            virConnectCloseFunc cb);
-void virConnectCloseCallbackDataCall(virConnectCloseCallbackDataPtr close,
+void virConnectCloseCallbackDataCall(virConnectCloseCallbackData *close,
                                      int reason);
 virConnectCloseFunc
-virConnectCloseCallbackDataGetCallback(virConnectCloseCallbackDataPtr close);
-void virAdmConnectCloseCallbackDataReset(virAdmConnectCloseCallbackDataPtr cbdata);
-int virAdmConnectCloseCallbackDataRegister(virAdmConnectCloseCallbackDataPtr cbdata,
+virConnectCloseCallbackDataGetCallback(virConnectCloseCallbackData *close);
+void virAdmConnectCloseCallbackDataReset(virAdmConnectCloseCallbackData *cbdata);
+int virAdmConnectCloseCallbackDataRegister(virAdmConnectCloseCallbackData *cbdata,
                                            virAdmConnectPtr conn,
                                            virAdmConnectCloseFunc cb,
                                            void *opaque,
                                            virFreeCallback freecb);
-int virAdmConnectCloseCallbackDataUnregister(virAdmConnectCloseCallbackDataPtr cbdata,
+int virAdmConnectCloseCallbackDataUnregister(virAdmConnectCloseCallbackData *cbdata,
                                              virAdmConnectCloseFunc cb);
-
-#endif /* LIBVIRT_DATATYPES_H */

@@ -19,51 +19,53 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_LIBXL_CONF_H
-# define LIBVIRT_LIBXL_CONF_H
+#pragma once
 
-# include <libxl.h>
+#include <libxl.h>
 
-# include "internal.h"
-# include "libvirt_internal.h"
-# include "virdomainobjlist.h"
-# include "domain_event.h"
-# include "capabilities.h"
-# include "configmake.h"
-# include "virportallocator.h"
-# include "virobject.h"
-# include "virchrdev.h"
-# include "virhostdev.h"
-# include "locking/lock_manager.h"
-# include "virfirmware.h"
-# include "libxl_capabilities.h"
-# include "libxl_logger.h"
+#include "internal.h"
+#include "libvirt_internal.h"
+#include "virdomainobjlist.h"
+#include "domain_event.h"
+#include "capabilities.h"
+#include "configmake.h"
+#include "virportallocator.h"
+#include "virobject.h"
+#include "virchrdev.h"
+#include "virhostdev.h"
+#include "locking/lock_manager.h"
+#include "virfirmware.h"
+#include "libxl_capabilities.h"
+#include "libxl_logger.h"
 
-# define LIBXL_DRIVER_NAME "xenlight"
-# define LIBXL_VNC_PORT_MIN  5900
-# define LIBXL_VNC_PORT_MAX  65535
+#define LIBXL_DRIVER_EXTERNAL_NAME "Xen"
+/*
+ * We are stuck with the 'xenlight' name since it is used by the hostdev
+ * manager. Changing it would break management of any host devices previously
+ * managed under the name 'xenlight'.
+ */
+#define LIBXL_DRIVER_INTERNAL_NAME "xenlight"
+#define LIBXL_VNC_PORT_MIN  5900
+#define LIBXL_VNC_PORT_MAX  65535
 
-# define LIBXL_MIGRATION_PORT_MIN  49152
-# define LIBXL_MIGRATION_PORT_MAX  49216
+#define LIBXL_MIGRATION_PORT_MIN  49152
+#define LIBXL_MIGRATION_PORT_MAX  49216
 
-# define LIBXL_CONFIG_BASE_DIR SYSCONFDIR "/libvirt"
-# define LIBXL_CONFIG_DIR SYSCONFDIR "/libvirt/libxl"
-# define LIBXL_AUTOSTART_DIR LIBXL_CONFIG_DIR "/autostart"
-# define LIBXL_STATE_DIR LOCALSTATEDIR "/run/libvirt/libxl"
-# define LIBXL_LOG_DIR LOCALSTATEDIR "/log/libvirt/libxl"
-# define LIBXL_LIB_DIR LOCALSTATEDIR "/lib/libvirt/libxl"
-# define LIBXL_SAVE_DIR LIBXL_LIB_DIR "/save"
-# define LIBXL_DUMP_DIR LIBXL_LIB_DIR "/dump"
-# define LIBXL_CHANNEL_DIR LIBXL_LIB_DIR "/channel/target"
-# define LIBXL_BOOTLOADER_PATH "pygrub"
+#define LIBXL_CONFIG_BASE_DIR SYSCONFDIR "/libvirt"
+#define LIBXL_CONFIG_DIR SYSCONFDIR "/libvirt/libxl"
+#define LIBXL_AUTOSTART_DIR LIBXL_CONFIG_DIR "/autostart"
+#define LIBXL_STATE_DIR RUNSTATEDIR "/libvirt/libxl"
+#define LIBXL_LOG_DIR LOCALSTATEDIR "/log/libvirt/libxl"
+#define LIBXL_LIB_DIR LOCALSTATEDIR "/lib/libvirt/libxl"
+#define LIBXL_SAVE_DIR LIBXL_LIB_DIR "/save"
+#define LIBXL_DUMP_DIR LIBXL_LIB_DIR "/dump"
+#define LIBXL_CHANNEL_DIR LIBXL_LIB_DIR "/channel/target"
+#define LIBXL_BOOTLOADER_PATH "pygrub"
 
 
 typedef struct _libxlDriverPrivate libxlDriverPrivate;
-typedef libxlDriverPrivate *libxlDriverPrivatePtr;
 
 typedef struct _libxlDriverConfig libxlDriverConfig;
-typedef libxlDriverConfig *libxlDriverConfigPtr;
-
 struct _libxlDriverConfig {
     virObject parent;
 
@@ -71,7 +73,7 @@ struct _libxlDriverConfig {
     unsigned int version;
 
     /* log stream for driver-wide libxl ctx */
-    libxlLoggerPtr logger;
+    libxlLogger *logger;
     /* libxl ctx for driver wide ops; getVersion, getNodeInfo, ... */
     libxl_ctx *ctx;
 
@@ -87,7 +89,7 @@ struct _libxlDriverConfig {
     bool nested_hvm;
 
     /* Once created, caps are immutable */
-    virCapsPtr caps;
+    virCaps *caps;
 
     char *configBaseDir;
     char *configDir;
@@ -99,18 +101,23 @@ struct _libxlDriverConfig {
     char *autoDumpDir;
     char *channelDir;
 
-    virFirmwarePtr *firmwares;
+    virFirmware **firmwares;
     size_t nfirmwares;
 };
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(libxlDriverConfig, virObjectUnref);
 
 
 struct _libxlDriverPrivate {
     virMutex lock;
 
-    virHostdevManagerPtr hostdevMgr;
+    virHostdevManager *hostdevMgr;
     /* Require lock to get reference on 'config',
      * then lockless thereafter */
-    libxlDriverConfigPtr config;
+    libxlDriverConfig *config;
+
+    /* pid file FD, ensures two copies of the driver can't use the same root */
+    int lockFD;
 
     /* Atomic inc/dec only */
     unsigned int nactive;
@@ -120,36 +127,35 @@ struct _libxlDriverPrivate {
     void *inhibitOpaque;
 
     /* Immutable pointer, self-locking APIs */
-    virDomainObjListPtr domains;
+    virDomainObjList *domains;
 
     /* Immutable pointer, immutable object */
-    virDomainXMLOptionPtr xmlopt;
+    virDomainXMLOption *xmlopt;
 
     /* Immutable pointer, self-locking APIs */
-    virObjectEventStatePtr domainEventState;
+    virObjectEventState *domainEventState;
 
     /* Immutable pointer, immutable object */
-    virPortAllocatorRangePtr reservedGraphicsPorts;
+    virPortAllocatorRange *reservedGraphicsPorts;
 
     /* Immutable pointer, immutable object */
-    virPortAllocatorRangePtr migrationPorts;
+    virPortAllocatorRange *migrationPorts;
 
-    /* Immutable pointer, lockless APIs*/
-    virSysinfoDefPtr hostsysinfo;
+    /* Immutable pointer, lockless APIs */
+    virSysinfoDef *hostsysinfo;
 
     /* Immutable pointer. lockless access */
-    virLockManagerPluginPtr lockManager;
+    virLockManagerPlugin *lockManager;
 };
 
-# define LIBXL_SAVE_MAGIC "libvirt-xml\n \0 \r"
-# ifdef LIBXL_HAVE_SRM_V2
-#  define LIBXL_SAVE_VERSION 2
-# else
-#  define LIBXL_SAVE_VERSION 1
-# endif
+#define LIBXL_SAVE_MAGIC "libvirt-xml\n \0 \r"
+#ifdef LIBXL_HAVE_SRM_V2
+# define LIBXL_SAVE_VERSION 2
+#else
+# define LIBXL_SAVE_VERSION 1
+#endif
 
 typedef struct _libxlSavefileHeader libxlSavefileHeader;
-typedef libxlSavefileHeader *libxlSavefileHeaderPtr;
 struct _libxlSavefileHeader {
     char magic[sizeof(LIBXL_SAVE_MAGIC)-1];
     uint32_t version;
@@ -158,74 +164,81 @@ struct _libxlSavefileHeader {
     uint32_t unused[10];
 };
 
-libxlDriverConfigPtr
-libxlDriverConfigNew(void);
 
-libxlDriverConfigPtr
-libxlDriverConfigGet(libxlDriverPrivatePtr driver);
+typedef struct _libxlDomainXmlNsDef libxlDomainXmlNsDef;
+struct _libxlDomainXmlNsDef {
+    size_t num_args;
+    char **args;
+};
+
+libxlDriverConfig *
+libxlDriverConfigNew(void);
+int
+libxlDriverConfigInit(libxlDriverConfig *cfg);
+
+libxlDriverConfig *
+libxlDriverConfigGet(libxlDriverPrivate *driver);
 
 int
-libxlDriverNodeGetInfo(libxlDriverPrivatePtr driver,
+libxlDriverNodeGetInfo(libxlDriverPrivate *driver,
                        virNodeInfoPtr info);
 
-int libxlDriverConfigLoadFile(libxlDriverConfigPtr cfg,
+int libxlDriverConfigLoadFile(libxlDriverConfig *cfg,
                               const char *filename);
 
 int
-libxlDriverGetDom0MaxmemConf(libxlDriverConfigPtr cfg,
+libxlDriverGetDom0MaxmemConf(libxlDriverConfig *cfg,
                              unsigned long long *maxmem);
 
 int
-libxlMakeDisk(virDomainDiskDefPtr l_dev, libxl_device_disk *x_dev);
+libxlMakeDisk(virDomainDiskDef *l_dev, libxl_device_disk *x_dev);
 
 void
-libxlUpdateDiskDef(virDomainDiskDefPtr l_dev, libxl_device_disk *x_dev);
+libxlUpdateDiskDef(virDomainDiskDef *l_dev, libxl_device_disk *x_dev);
 
 int
-libxlMakeNic(virDomainDefPtr def,
-             virDomainNetDefPtr l_nic,
+libxlMakeNic(virDomainDef *def,
+             virDomainNetDef *l_nic,
              libxl_device_nic *x_nic,
              bool attach);
 int
-libxlMakeVfb(virPortAllocatorRangePtr graphicsports,
-             virDomainGraphicsDefPtr l_vfb, libxl_device_vfb *x_vfb);
+libxlMakeVfb(virPortAllocatorRange *graphicsports,
+             virDomainGraphicsDef *l_vfb, libxl_device_vfb *x_vfb);
 
 int
-libxlMakePCI(virDomainHostdevDefPtr hostdev, libxl_device_pci *pcidev);
+libxlMakePCI(virDomainHostdevDef *hostdev, libxl_device_pci *pcidev);
 
-# ifdef LIBXL_HAVE_PVUSB
+#ifdef LIBXL_HAVE_PVUSB
 int
-libxlMakeUSBController(virDomainControllerDefPtr controller,
+libxlMakeUSBController(virDomainControllerDef *controller,
                        libxl_device_usbctrl *usbctrl);
 
 int
-libxlMakeUSB(virDomainHostdevDefPtr hostdev, libxl_device_usbdev *usbdev);
-# endif
+libxlMakeUSB(virDomainHostdevDef *hostdev, libxl_device_usbdev *usbdev);
+#endif
 
-virDomainXMLOptionPtr
-libxlCreateXMLConf(void);
+virDomainXMLOption *
+libxlCreateXMLConf(libxlDriverPrivate *driver);
 
-# ifdef LIBXL_HAVE_DEVICE_CHANNEL
-#  define LIBXL_ATTR_UNUSED
-# else
-#  define LIBXL_ATTR_UNUSED ATTRIBUTE_UNUSED
-# endif
+#ifdef LIBXL_HAVE_DEVICE_CHANNEL
+# define LIBXL_ATTR_UNUSED
+#else
+# define LIBXL_ATTR_UNUSED G_GNUC_UNUSED
+#endif
 int
-libxlBuildDomainConfig(virPortAllocatorRangePtr graphicsports,
-                       virDomainDefPtr def,
-                       libxlDriverConfigPtr cfg,
+libxlBuildDomainConfig(virPortAllocatorRange *graphicsports,
+                       virDomainDef *def,
+                       libxlDriverConfig *cfg,
                        libxl_domain_config *d_config);
 
 static inline void
-libxlDriverLock(libxlDriverPrivatePtr driver)
+libxlDriverLock(libxlDriverPrivate *driver)
 {
     virMutexLock(&driver->lock);
 }
 
 static inline void
-libxlDriverUnlock(libxlDriverPrivatePtr driver)
+libxlDriverUnlock(libxlDriverPrivate *driver)
 {
     virMutexUnlock(&driver->lock);
 }
-
-#endif /* LIBVIRT_LIBXL_CONF_H */

@@ -13,15 +13,15 @@
 
 # define VIR_FROM_THIS VIR_FROM_VMWARE
 
-static virCapsPtr caps;
-static virDomainXMLOptionPtr xmlopt;
+static virCaps *caps;
+static virDomainXMLOption *xmlopt;
 static virVMXContext ctx;
 
 
 static void
 testCapsInit(void)
 {
-    virCapsGuestPtr guest = NULL;
+    virCapsGuest *guest = NULL;
 
     caps = virCapabilitiesNew(VIR_ARCH_I686, true, true);
 
@@ -66,17 +66,25 @@ testCapsInit(void)
 }
 
 static int
-testCompareFiles(const char *vmx, const char *xml)
+testCompareFiles(const char *vmx, const char *xml, bool should_fail_parse)
 {
     int ret = -1;
     char *vmxData = NULL;
     char *formatted = NULL;
-    virDomainDefPtr def = NULL;
+    virDomainDef *def = NULL;
 
     if (virTestLoadFile(vmx, &vmxData) < 0)
-        goto cleanup;
+        return -1;
 
-    if (!(def = virVMXParseConfig(&ctx, xmlopt, caps, vmxData)))
+    def = virVMXParseConfig(&ctx, xmlopt, caps, vmxData);
+    if (should_fail_parse) {
+        if (!def)
+            ret = 0;
+        else
+            VIR_TEST_DEBUG("passed instead of expected failure");
+        goto cleanup;
+    }
+    if (!def)
         goto cleanup;
 
     if (!virDomainDefCheckABIStability(def, def, xmlopt)) {
@@ -84,7 +92,7 @@ testCompareFiles(const char *vmx, const char *xml)
         goto cleanup;
     }
 
-    if (!(formatted = virDomainDefFormat(def, caps,
+    if (!(formatted = virDomainDefFormat(def, xmlopt,
                                          VIR_DOMAIN_DEF_FORMAT_SECURE)))
         goto cleanup;
 
@@ -104,6 +112,7 @@ testCompareFiles(const char *vmx, const char *xml)
 struct testInfo {
     const char *input;
     const char *output;
+    bool should_fail;
 };
 
 static int
@@ -114,63 +123,67 @@ testCompareHelper(const void *data)
     char *vmx = NULL;
     char *xml = NULL;
 
-    if (virAsprintf(&vmx, "%s/vmx2xmldata/vmx2xml-%s.vmx", abs_srcdir,
-                    info->input) < 0 ||
-        virAsprintf(&xml, "%s/vmx2xmldata/vmx2xml-%s.xml", abs_srcdir,
-                    info->output) < 0) {
-        goto cleanup;
-    }
+    vmx = g_strdup_printf("%s/vmx2xmldata/vmx2xml-%s.vmx", abs_srcdir,
+                          info->input);
+    xml = g_strdup_printf("%s/vmx2xmldata/vmx2xml-%s.xml", abs_srcdir,
+                          info->output);
 
-    ret = testCompareFiles(vmx, xml);
+    ret = testCompareFiles(vmx, xml, info->should_fail);
 
- cleanup:
     VIR_FREE(vmx);
     VIR_FREE(xml);
 
     return ret;
 }
 
-static char *
-testParseVMXFileName(const char *fileName, void *opaque ATTRIBUTE_UNUSED)
+static int
+testParseVMXFileName(const char *fileName,
+                     void *opaque G_GNUC_UNUSED,
+                     char **src,
+                     bool allow_missing)
 {
-    char *copyOfFileName = NULL;
+    g_autofree char *copyOfFileName = NULL;
     char *tmp = NULL;
     char *saveptr = NULL;
     char *datastoreName = NULL;
     char *directoryAndFileName = NULL;
-    char *src = NULL;
+
+    *src = NULL;
 
     if (STRPREFIX(fileName, "/vmfs/volumes/")) {
         /* Found absolute path referencing a file inside a datastore */
-        if (VIR_STRDUP(copyOfFileName, fileName) < 0)
-            goto cleanup;
+        copyOfFileName = g_strdup(fileName);
 
         /* Expected format: '/vmfs/volumes/<datastore>/<path>' */
         if ((tmp = STRSKIP(copyOfFileName, "/vmfs/volumes/")) == NULL ||
             (datastoreName = strtok_r(tmp, "/", &saveptr)) == NULL ||
             (directoryAndFileName = strtok_r(NULL, "", &saveptr)) == NULL) {
-            goto cleanup;
+            return -1;
         }
 
-        if (virAsprintf(&src, "[%s] %s", datastoreName,
-                        directoryAndFileName) < 0)
-            goto cleanup;
+        if (STREQ(datastoreName, "missing") ||
+            STRPREFIX(directoryAndFileName, "missing")) {
+            if (allow_missing)
+                return 0;
+
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           "Referenced missing file '%s'", fileName);
+            return -1;
+        }
+
+        *src = g_strdup_printf("[%s] %s", datastoreName, directoryAndFileName);
     } else if (STRPREFIX(fileName, "/")) {
         /* Found absolute path referencing a file outside a datastore */
-        ignore_value(VIR_STRDUP(src, fileName));
+        *src = g_strdup(fileName);
     } else if (strchr(fileName, '/') != NULL) {
         /* Found relative path, this is not supported */
-        src = NULL;
+        return -1;
     } else {
         /* Found single file name referencing a file inside a datastore */
-        if (virAsprintf(&src, "[datastore] directory/%s", fileName) < 0)
-            goto cleanup;
+        *src = g_strdup_printf("[datastore] directory/%s", fileName);
     }
 
- cleanup:
-    VIR_FREE(copyOfFileName);
-
-    return src;
+    return 0;
 }
 
 static int
@@ -178,9 +191,9 @@ mymain(void)
 {
     int ret = 0;
 
-# define DO_TEST(_in, _out) \
+# define DO_TEST_FULL(_in, _out, _should_fail) \
         do { \
-            struct testInfo info = { _in, _out }; \
+            struct testInfo info = { _in, _out, _should_fail }; \
             virResetLastError(); \
             if (virTestRun("VMware VMX-2-XML "_in" -> "_out, \
                            testCompareHelper, &info) < 0) { \
@@ -188,12 +201,15 @@ mymain(void)
             } \
         } while (0)
 
+# define DO_TEST(_in, _out) DO_TEST_FULL(_in, _out, false)
+# define DO_TEST_FAIL(_in, _out) DO_TEST_FULL(_in, _out, true)
+
     testCapsInit();
 
     if (caps == NULL)
         return EXIT_FAILURE;
 
-    if (!(xmlopt = virVMXDomainXMLConfInit()))
+    if (!(xmlopt = virVMXDomainXMLConfInit(caps)))
         return EXIT_FAILURE;
 
     ctx.opaque = NULL;
@@ -225,10 +241,17 @@ mymain(void)
     DO_TEST("cdrom-scsi-passthru", "cdrom-scsi-passthru");
     DO_TEST("cdrom-ide-file", "cdrom-ide-file");
     DO_TEST("cdrom-ide-empty", "cdrom-ide-empty");
+    DO_TEST("cdrom-ide-empty-2", "cdrom-ide-empty-2");
     DO_TEST("cdrom-ide-device", "cdrom-ide-device");
     DO_TEST("cdrom-ide-raw-device", "cdrom-ide-raw-device");
     DO_TEST("cdrom-ide-raw-auto-detect", "cdrom-ide-raw-auto-detect");
     DO_TEST("cdrom-ide-raw-auto-detect", "cdrom-ide-raw-auto-detect");
+
+    DO_TEST("cdrom-ide-file-missing-datastore", "cdrom-ide-empty");
+    DO_TEST("cdrom-ide-file-missing-file", "cdrom-ide-empty");
+
+    DO_TEST_FAIL("harddisk-ide-file-missing-datastore", "harddisk-ide-file");
+    DO_TEST_FAIL("harddisk-scsi-file-missing-file", "harddisk-scsi-file");
 
     DO_TEST("floppy-file", "floppy-file");
     DO_TEST("floppy-device", "floppy-device");
@@ -268,6 +291,7 @@ mymain(void)
     DO_TEST("esx-in-the-wild-7", "esx-in-the-wild-7");
     DO_TEST("esx-in-the-wild-8", "esx-in-the-wild-8");
     DO_TEST("esx-in-the-wild-9", "esx-in-the-wild-9");
+    DO_TEST("esx-in-the-wild-10", "esx-in-the-wild-10");
 
     DO_TEST("gsx-in-the-wild-1", "gsx-in-the-wild-1");
     DO_TEST("gsx-in-the-wild-2", "gsx-in-the-wild-2");

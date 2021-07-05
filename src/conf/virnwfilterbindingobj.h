@@ -19,38 +19,36 @@
  *
  */
 
-#ifndef LIBVIRT_VIRNWFILTERBINDINGOBJ_H
-# define LIBVIRT_VIRNWFILTERBINDINGOBJ_H
+#pragma once
 
-# include "internal.h"
-# include "virnwfilterbindingdef.h"
-# include "virobject.h"
+#include "internal.h"
+#include "virnwfilterbindingdef.h"
+#include "virobject.h"
 
 typedef struct _virNWFilterBindingObj virNWFilterBindingObj;
-typedef virNWFilterBindingObj *virNWFilterBindingObjPtr;
 
-virNWFilterBindingObjPtr
+virNWFilterBindingObj *
 virNWFilterBindingObjNew(void);
 
-virNWFilterBindingDefPtr
-virNWFilterBindingObjGetDef(virNWFilterBindingObjPtr obj);
+virNWFilterBindingDef *
+virNWFilterBindingObjGetDef(virNWFilterBindingObj *obj);
 
 void
-virNWFilterBindingObjSetDef(virNWFilterBindingObjPtr obj,
-                            virNWFilterBindingDefPtr def);
+virNWFilterBindingObjSetDef(virNWFilterBindingObj *obj,
+                            virNWFilterBindingDef *def);
 
-virNWFilterBindingDefPtr
-virNWFilterBindingObjStealDef(virNWFilterBindingObjPtr obj);
+virNWFilterBindingDef *
+virNWFilterBindingObjStealDef(virNWFilterBindingObj *obj);
 
 bool
-virNWFilterBindingObjGetRemoving(virNWFilterBindingObjPtr obj);
+virNWFilterBindingObjGetRemoving(virNWFilterBindingObj *obj);
 
 void
-virNWFilterBindingObjSetRemoving(virNWFilterBindingObjPtr obj,
+virNWFilterBindingObjSetRemoving(virNWFilterBindingObj *obj,
                                  bool removing);
 
 void
-virNWFilterBindingObjEndAPI(virNWFilterBindingObjPtr *obj);
+virNWFilterBindingObjEndAPI(virNWFilterBindingObj **obj);
 
 char *
 virNWFilterBindingObjConfigFile(const char *dir,
@@ -64,10 +62,8 @@ int
 virNWFilterBindingObjDelete(const virNWFilterBindingObj *obj,
                             const char *statusDir);
 
-virNWFilterBindingObjPtr
+virNWFilterBindingObj *
 virNWFilterBindingObjParseFile(const char *filename);
 
 char *
 virNWFilterBindingObjFormat(const virNWFilterBindingObj *obj);
-
-#endif /* LIBVIRT_VIRNWFILTERBINDINGOBJ_H */

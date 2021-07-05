@@ -31,37 +31,37 @@
 VIR_LOG_INIT("util.firmware");
 
 
-static void
-virFirmwareFree(virFirmwarePtr firmware)
+void
+virFirmwareFree(virFirmware *firmware)
 {
     if (!firmware)
         return;
 
-    VIR_FREE(firmware->name);
-    VIR_FREE(firmware->nvram);
-    VIR_FREE(firmware);
+    g_free(firmware->name);
+    g_free(firmware->nvram);
+    g_free(firmware);
 }
 
 
 void
-virFirmwareFreeList(virFirmwarePtr *firmwares, size_t nfirmwares)
+virFirmwareFreeList(virFirmware **firmwares, size_t nfirmwares)
 {
     size_t i;
 
     for (i = 0; i < nfirmwares; i++)
         virFirmwareFree(firmwares[i]);
 
-    VIR_FREE(firmwares);
+    g_free(firmwares);
 }
 
 
 int
-virFirmwareParse(const char *str, virFirmwarePtr firmware)
+virFirmwareParse(const char *str, virFirmware *firmware)
 {
     int ret = -1;
     char **token;
 
-    if (!(token = virStringSplit(str, ":", 0)))
+    if (!(token = g_strsplit(str, ":", 0)))
         goto cleanup;
 
     if (token[0]) {
@@ -79,27 +79,26 @@ virFirmwareParse(const char *str, virFirmwarePtr firmware)
         goto cleanup;
     }
 
-    if (VIR_STRDUP(firmware->name, token[0]) < 0 ||
-        VIR_STRDUP(firmware->nvram, token[1]) < 0)
-        goto cleanup;
+    firmware->name = g_strdup(token[0]);
+    firmware->nvram = g_strdup(token[1]);
 
     ret = 0;
  cleanup:
-    virStringListFree(token);
+    g_strfreev(token);
     return ret;
 }
 
 
 int
 virFirmwareParseList(const char *list,
-                     virFirmwarePtr **firmwares,
+                     virFirmware ***firmwares,
                      size_t *nfirmwares)
 {
     int ret = -1;
     char **token;
     size_t i, j;
 
-    if (!(token = virStringSplit(list, ":", 0)))
+    if (!(token = g_strsplit(list, ":", 0)))
         goto cleanup;
 
     for (i = 0; token[i]; i += 2) {
@@ -113,23 +112,20 @@ virFirmwareParseList(const char *list,
     }
 
     if (i) {
-        if (VIR_ALLOC_N(*firmwares, i / 2) < 0)
-            goto cleanup;
+        *firmwares = g_new0(virFirmware *, i / 2);
         *nfirmwares = i / 2;
 
         for (j = 0; j < i / 2; j++) {
-            virFirmwarePtr *fws = *firmwares;
+            virFirmware **fws = *firmwares;
 
-            if (VIR_ALLOC(fws[j]) < 0)
-                goto cleanup;
-            if (VIR_STRDUP(fws[j]->name, token[2 * j]) < 0 ||
-                VIR_STRDUP(fws[j]->nvram, token[2 * j + 1]) < 0)
-                goto cleanup;
+            fws[j] = g_new0(virFirmware, 1);
+            fws[j]->name = g_strdup(token[2 * j]);
+            fws[j]->nvram = g_strdup(token[2 * j + 1]);
         }
     }
 
     ret = 0;
  cleanup:
-    virStringListFree(token);
+    g_strfreev(token);
     return ret;
 }

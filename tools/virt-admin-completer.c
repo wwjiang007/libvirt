@@ -24,15 +24,14 @@
 #include "internal.h"
 #include "virt-admin.h"
 #include "viralloc.h"
-#include "virstring.h"
 
 
 char **
 vshAdmServerCompleter(vshControl *ctl,
-                      const vshCmd *cmd ATTRIBUTE_UNUSED,
+                      const vshCmd *cmd G_GNUC_UNUSED,
                       unsigned int flags)
 {
-    vshAdmControlPtr priv = ctl->privData;
+    vshAdmControl *priv = ctl->privData;
     virAdmServerPtr *srvs = NULL;
     int nsrvs = 0;
     size_t i = 0;
@@ -47,27 +46,16 @@ vshAdmServerCompleter(vshControl *ctl,
     if ((nsrvs = virAdmConnectListServers(priv->conn, &srvs, 0)) < 0)
         return NULL;
 
-    if (VIR_ALLOC_N(ret, nsrvs + 1) < 0)
-        goto error;
+    ret = g_new0(char *, nsrvs + 1);
 
     for (i = 0; i < nsrvs; i++) {
         const char *name = virAdmServerGetName(srvs[i]);
 
-        if (VIR_STRDUP(ret[i], name) < 0)
-            goto error;
+        ret[i] = g_strdup(name);
 
         virAdmServerFree(srvs[i]);
     }
     VIR_FREE(srvs);
 
-    return ret;
-
- error:
-    for (; i < nsrvs; i++)
-        virAdmServerFree(srvs[i]);
-    VIR_FREE(srvs);
-    for (i = 0; i < nsrvs; i++)
-        VIR_FREE(ret[i]);
-    VIR_FREE(ret);
     return ret;
 }

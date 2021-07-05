@@ -19,35 +19,35 @@
  *
  */
 
-#ifndef LIBVIRT_VIRNUMA_H
-# define LIBVIRT_VIRNUMA_H
+#pragma once
 
-# include "internal.h"
-# include "virbitmap.h"
-# include "virutil.h"
+#include "internal.h"
+#include "virbitmap.h"
 
 
 char *virNumaGetAutoPlacementAdvice(unsigned short vcpus,
                                     unsigned long long balloon);
 
 int virNumaSetupMemoryPolicy(virDomainNumatuneMemMode mode,
-                             virBitmapPtr nodeset);
+                             virBitmap *nodeset);
 
-virBitmapPtr virNumaGetHostMemoryNodeset(void);
-bool virNumaNodesetIsAvailable(virBitmapPtr nodeset) ATTRIBUTE_NOINLINE;
-bool virNumaIsAvailable(void) ATTRIBUTE_NOINLINE;
-int virNumaGetMaxNode(void) ATTRIBUTE_NOINLINE;
-bool virNumaNodeIsAvailable(int node) ATTRIBUTE_NOINLINE;
+virBitmap *virNumaGetHostMemoryNodeset(void);
+bool virNumaNodesetIsAvailable(virBitmap *nodeset) G_GNUC_NO_INLINE;
+bool virNumaIsAvailable(void) G_GNUC_NO_INLINE;
+int virNumaGetMaxNode(void) G_GNUC_NO_INLINE;
+bool virNumaNodeIsAvailable(int node) G_GNUC_NO_INLINE;
 int virNumaGetDistances(int node,
                         int **distances,
-                        int *ndistances) ATTRIBUTE_NOINLINE;
+                        int *ndistances) G_GNUC_NO_INLINE;
 int virNumaGetNodeMemory(int node,
                          unsigned long long *memsize,
-                         unsigned long long *memfree) ATTRIBUTE_NOINLINE;
+                         unsigned long long *memfree) G_GNUC_NO_INLINE;
 
-unsigned int virNumaGetMaxCPUs(void);
+unsigned int virNumaGetMaxCPUs(void) G_GNUC_NO_INLINE;
 
-int virNumaGetNodeCPUs(int node, virBitmapPtr *cpus) ATTRIBUTE_NOINLINE;
+int virNumaGetNodeCPUs(int node, virBitmap **cpus) G_GNUC_NO_INLINE;
+int virNumaNodesetToCPUset(virBitmap *nodeset,
+                           virBitmap **cpuset);
 
 int virNumaGetPageInfo(int node,
                        unsigned int page_size,
@@ -59,9 +59,8 @@ int virNumaGetPages(int node,
                     unsigned long long **pages_avail,
                     unsigned long long **pages_free,
                     size_t *npages)
-    ATTRIBUTE_NONNULL(5) ATTRIBUTE_NOINLINE;
+    ATTRIBUTE_NONNULL(5) G_GNUC_NO_INLINE;
 int virNumaSetPagePoolSize(int node,
                            unsigned int page_size,
                            unsigned long long page_count,
                            bool add);
-#endif /* LIBVIRT_VIRNUMA_H */

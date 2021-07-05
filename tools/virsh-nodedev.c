@@ -22,13 +22,13 @@
 #include "virsh-nodedev.h"
 
 #include "internal.h"
-#include "virbuffer.h"
 #include "viralloc.h"
 #include "virfile.h"
 #include "virstring.h"
 #include "virtime.h"
 #include "conf/node_device_conf.h"
 #include "virenum.h"
+#include "virutil.h"
 
 /*
  * "nodedev-create" command
@@ -59,7 +59,7 @@ cmdNodeDeviceCreate(vshControl *ctl, const vshCmd *cmd)
     const char *from = NULL;
     bool ret = true;
     char *buffer;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     if (vshCommandOptStringReq(ctl, cmd, "file", &from) < 0)
         return false;
@@ -111,23 +111,18 @@ static const vshCmdOptDef opts_node_device_destroy[] = {
     {.name = NULL}
 };
 
-static bool
-cmdNodeDeviceDestroy(vshControl *ctl, const vshCmd *cmd)
+static virNodeDevice*
+vshFindNodeDevice(vshControl *ctl, const char *value)
 {
     virNodeDevicePtr dev = NULL;
-    bool ret = false;
-    const char *device_value = NULL;
     char **arr = NULL;
     int narr;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
-    if (vshCommandOptStringReq(ctl, cmd, "device", &device_value) < 0)
-        return false;
-
-    if (strchr(device_value, ',')) {
-        narr = vshStringToArray(device_value, &arr);
+    if (strchr(value, ',')) {
+        narr = vshStringToArray(value, &arr);
         if (narr != 2) {
-            vshError(ctl, _("Malformed device value '%s'"), device_value);
+            vshError(ctl, _("Malformed device value '%s'"), value);
             goto cleanup;
         }
 
@@ -136,13 +131,32 @@ cmdNodeDeviceDestroy(vshControl *ctl, const vshCmd *cmd)
 
         dev = virNodeDeviceLookupSCSIHostByWWN(priv->conn, arr[0], arr[1], 0);
     } else {
-        dev = virNodeDeviceLookupByName(priv->conn, device_value);
+        dev = virNodeDeviceLookupByName(priv->conn, value);
     }
 
     if (!dev) {
-        vshError(ctl, "%s '%s'", _("Could not find matching device"), device_value);
+        vshError(ctl, "%s '%s'", _("Could not find matching device"), value);
         goto cleanup;
     }
+
+ cleanup:
+    g_strfreev(arr);
+    return dev;
+}
+
+static bool
+cmdNodeDeviceDestroy(vshControl *ctl, const vshCmd *cmd)
+{
+    virNodeDevice *dev = NULL;
+    bool ret = false;
+    const char *device_value = NULL;
+
+    if (vshCommandOptStringReq(ctl, cmd, "device", &device_value) < 0)
+        return false;
+
+    dev = vshFindNodeDevice(ctl, device_value);
+    if (!dev)
+        goto cleanup;
 
     if (virNodeDeviceDestroy(dev) == 0) {
         vshPrintExtra(ctl, _("Destroyed node device '%s'\n"), device_value);
@@ -153,7 +167,6 @@ cmdNodeDeviceDestroy(vshControl *ctl, const vshCmd *cmd)
 
     ret = true;
  cleanup:
-    virStringListFree(arr);
     if (dev)
         virNodeDeviceFree(dev);
     return ret;
@@ -193,10 +206,9 @@ struct virshNodeDeviceList {
     virNodeDevicePtr *devices;
     size_t ndevices;
 };
-typedef struct virshNodeDeviceList *virshNodeDeviceListPtr;
 
 static void
-virshNodeDeviceListFree(virshNodeDeviceListPtr list)
+virshNodeDeviceListFree(struct virshNodeDeviceList *list)
 {
     size_t i;
 
@@ -205,18 +217,18 @@ virshNodeDeviceListFree(virshNodeDeviceListPtr list)
             if (list->devices[i])
                 virNodeDeviceFree(list->devices[i]);
         }
-        VIR_FREE(list->devices);
+        g_free(list->devices);
     }
-    VIR_FREE(list);
+    g_free(list);
 }
 
-static virshNodeDeviceListPtr
+static struct virshNodeDeviceList *
 virshNodeDeviceListCollect(vshControl *ctl,
                          char **capnames,
                          int ncapnames,
                          unsigned int flags)
 {
-    virshNodeDeviceListPtr list = vshMalloc(ctl, sizeof(*list));
+    struct virshNodeDeviceList *list = g_new0(struct virshNodeDeviceList, 1);
     size_t i;
     int ret;
     virNodeDevicePtr device;
@@ -224,7 +236,7 @@ virshNodeDeviceListCollect(vshControl *ctl,
     size_t deleted = 0;
     int ndevices = 0;
     char **names = NULL;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     /* try the list with flags support (0.10.2 and later) */
     if ((ret = virConnectListAllNodeDevices(priv->conn,
@@ -256,7 +268,7 @@ virshNodeDeviceListCollect(vshControl *ctl,
     if (ndevices == 0)
         return list;
 
-    names = vshMalloc(ctl, sizeof(char *) * ndevices);
+    names = g_new0(char *, ndevices);
 
     ndevices = virNodeListDevices(priv->conn, NULL, names, ndevices, 0);
     if (ndevices < 0) {
@@ -264,7 +276,7 @@ virshNodeDeviceListCollect(vshControl *ctl,
         goto cleanup;
     }
 
-    list->devices = vshMalloc(ctl, sizeof(virNodeDevicePtr) * (ndevices));
+    list->devices = g_new0(virNodeDevicePtr, ndevices);
     list->ndevices = 0;
 
     /* get the node devices */
@@ -285,6 +297,7 @@ virshNodeDeviceListCollect(vshControl *ctl,
         char **caps = NULL;
         int ncaps = 0;
         bool match = false;
+        size_t j, k;
 
         device = list->devices[i];
 
@@ -294,7 +307,7 @@ virshNodeDeviceListCollect(vshControl *ctl,
             goto cleanup;
         }
 
-        caps = vshMalloc(ctl, sizeof(char *) * ncaps);
+        caps = g_new0(char *, ncaps);
 
         if ((ncaps = virNodeDeviceListCaps(device, caps, ncaps)) < 0) {
             vshError(ctl, "%s", _("Failed to get capability names of the device"));
@@ -305,7 +318,6 @@ virshNodeDeviceListCollect(vshControl *ctl,
         /* Check if the device's capability matches with provided
          * capabilities.
          */
-        size_t j, k;
         for (j = 0; j < ncaps; j++) {
             for (k = 0; k < ncapnames; k++) {
                 if (STREQ(caps[j], capnames[k])) {
@@ -375,13 +387,22 @@ static const vshCmdOptDef opts_node_list_devices[] = {
     },
     {.name = "cap",
      .type = VSH_OT_STRING,
+     .completer = virshNodeDeviceCapabilityNameCompleter,
      .help = N_("capability names, separated by comma")
+    },
+    {.name = "inactive",
+     .type = VSH_OT_BOOL,
+     .help = N_("list inactive devices")
+    },
+    {.name = "all",
+     .type = VSH_OT_BOOL,
+     .help = N_("list inactive & active devices")
     },
     {.name = NULL}
 };
 
 static bool
-cmdNodeListDevices(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
+cmdNodeListDevices(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
 {
     const char *cap_str = NULL;
     size_t i;
@@ -390,18 +411,26 @@ cmdNodeListDevices(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
     unsigned int flags = 0;
     char **caps = NULL;
     int ncaps = 0;
-    virshNodeDeviceListPtr list = NULL;
+    struct virshNodeDeviceList *list = NULL;
     int cap_type = -1;
+    bool inactive = vshCommandOptBool(cmd, "inactive");
+    bool all = vshCommandOptBool(cmd, "all");
 
     ignore_value(vshCommandOptStringQuiet(ctl, cmd, "cap", &cap_str));
 
     if (cap_str) {
-        if (tree) {
-            vshError(ctl, "%s", _("Options --tree and --cap are incompatible"));
-            return false;
-        }
         if ((ncaps = vshStringToArray(cap_str, &caps)) < 0)
             return false;
+    }
+
+    if (all && inactive) {
+        vshError(ctl, "%s", _("Option --all is incompatible with --inactive"));
+        return false;
+    }
+
+    if (tree && (cap_str || inactive || all)) {
+        vshError(ctl, "%s", _("Option --tree is incompatible with other options"));
+        return false;
     }
 
     for (i = 0; i < ncaps; i++) {
@@ -460,10 +489,30 @@ cmdNodeListDevices(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
         case VIR_NODE_DEV_CAP_CCW_DEV:
             flags |= VIR_CONNECT_LIST_NODE_DEVICES_CAP_CCW_DEV;
             break;
+        case VIR_NODE_DEV_CAP_CSS_DEV:
+            flags |= VIR_CONNECT_LIST_NODE_DEVICES_CAP_CSS_DEV;
+            break;
+        case VIR_NODE_DEV_CAP_VDPA:
+            flags |= VIR_CONNECT_LIST_NODE_DEVICES_CAP_VDPA;
+            break;
+        case VIR_NODE_DEV_CAP_AP_CARD:
+            flags |= VIR_CONNECT_LIST_NODE_DEVICES_CAP_AP_CARD;
+            break;
+        case VIR_NODE_DEV_CAP_AP_QUEUE:
+            flags |= VIR_CONNECT_LIST_NODE_DEVICES_CAP_AP_QUEUE;
+            break;
+        case VIR_NODE_DEV_CAP_AP_MATRIX:
+            flags |= VIR_CONNECT_LIST_NODE_DEVICES_CAP_AP_MATRIX;
+            break;
         case VIR_NODE_DEV_CAP_LAST:
             break;
         }
     }
+
+    if (inactive || all)
+        flags |= VIR_CONNECT_LIST_NODE_DEVICES_INACTIVE;
+    if (!inactive)
+        flags |= VIR_CONNECT_LIST_NODE_DEVICES_ACTIVE;
 
     if (!(list = virshNodeDeviceListCollect(ctl, caps, ncaps, flags))) {
         ret = false;
@@ -471,18 +520,17 @@ cmdNodeListDevices(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
     }
 
     if (tree) {
-        char **parents = vshMalloc(ctl, sizeof(char *) * list->ndevices);
-        char **names = vshMalloc(ctl, sizeof(char *) * list->ndevices);
+        char **parents = g_new0(char *, list->ndevices);
+        char **names = g_new0(char *, list->ndevices);
         struct virshNodeList arrays = { names, parents };
 
         for (i = 0; i < list->ndevices; i++)
-            names[i] = vshStrdup(ctl, virNodeDeviceGetName(list->devices[i]));
+            names[i] = g_strdup(virNodeDeviceGetName(list->devices[i]));
 
         for (i = 0; i < list->ndevices; i++) {
             virNodeDevicePtr dev = list->devices[i];
             if (STRNEQ(names[i], "computer")) {
-                const char *parent = virNodeDeviceGetParent(dev);
-                parents[i] = parent ? vshStrdup(ctl, parent) : NULL;
+                parents[i] = g_strdup(virNodeDeviceGetParent(dev));
             } else {
                 parents[i] = NULL;
             }
@@ -507,7 +555,7 @@ cmdNodeListDevices(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
     }
 
  cleanup:
-    virStringListFree(caps);
+    g_strfreev(caps);
     virshNodeDeviceListFree(list);
     return ret;
 }
@@ -542,33 +590,15 @@ cmdNodeDeviceDumpXML(vshControl *ctl, const vshCmd *cmd)
     virNodeDevicePtr device = NULL;
     char *xml = NULL;
     const char *device_value = NULL;
-    char **arr = NULL;
-    int narr;
     bool ret = false;
-    virshControlPtr priv = ctl->privData;
 
     if (vshCommandOptStringReq(ctl, cmd, "device", &device_value) < 0)
          return false;
 
-    if (strchr(device_value, ',')) {
-        narr = vshStringToArray(device_value, &arr);
-        if (narr != 2) {
-            vshError(ctl, _("Malformed device value '%s'"), device_value);
-            goto cleanup;
-        }
+    device = vshFindNodeDevice(ctl, device_value);
 
-        if (!virValidateWWN(arr[0]) || !virValidateWWN(arr[1]))
-            goto cleanup;
-
-        device = virNodeDeviceLookupSCSIHostByWWN(priv->conn, arr[0], arr[1], 0);
-    } else {
-        device = virNodeDeviceLookupByName(priv->conn, device_value);
-    }
-
-    if (!device) {
-        vshError(ctl, "%s '%s'", _("Could not find matching device"), device_value);
+    if (!device)
         goto cleanup;
-    }
 
     if (!(xml = virNodeDeviceGetXMLDesc(device, 0)))
         goto cleanup;
@@ -577,7 +607,6 @@ cmdNodeDeviceDumpXML(vshControl *ctl, const vshCmd *cmd)
 
     ret = true;
  cleanup:
-    virStringListFree(arr);
     VIR_FREE(xml);
     if (device)
         virNodeDeviceFree(device);
@@ -619,7 +648,7 @@ cmdNodeDeviceDetach(vshControl *ctl, const vshCmd *cmd)
     const char *driverName = NULL;
     virNodeDevicePtr device;
     bool ret = true;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     if (vshCommandOptStringReq(ctl, cmd, "device", &name) < 0)
         return false;
@@ -681,7 +710,7 @@ cmdNodeDeviceReAttach(vshControl *ctl, const vshCmd *cmd)
     const char *name = NULL;
     virNodeDevicePtr device;
     bool ret = true;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     if (vshCommandOptStringReq(ctl, cmd, "device", &name) < 0)
         return false;
@@ -732,7 +761,7 @@ cmdNodeDeviceReset(vshControl *ctl, const vshCmd *cmd)
     const char *name = NULL;
     virNodeDevicePtr device;
     bool ret = true;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     if (vshCommandOptStringReq(ctl, cmd, "device", &name) < 0)
         return false;
@@ -760,7 +789,9 @@ VIR_ENUM_DECL(virshNodeDeviceEvent);
 VIR_ENUM_IMPL(virshNodeDeviceEvent,
               VIR_NODE_DEVICE_EVENT_LAST,
               N_("Created"),
-              N_("Deleted"));
+              N_("Deleted"),
+              N_("Defined"),
+              N_("Undefined"));
 
 static const char *
 virshNodeDeviceEventToString(int event)
@@ -774,15 +805,15 @@ struct virshNodeDeviceEventData {
     bool loop;
     bool timestamp;
     int count;
-    virshNodedevEventCallback *cb;
+    virshNodeDeviceEventCallback *cb;
 };
 typedef struct virshNodeDeviceEventData virshNodeDeviceEventData;
 
 static void
-vshEventLifecyclePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+vshEventLifecyclePrint(virConnectPtr conn G_GNUC_UNUSED,
                        virNodeDevicePtr dev,
                        int event,
-                       int detail ATTRIBUTE_UNUSED,
+                       int detail G_GNUC_UNUSED,
                        void *opaque)
 {
     virshNodeDeviceEventData *data = opaque;
@@ -810,7 +841,7 @@ vshEventLifecyclePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 static void
-vshEventGenericPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+vshEventGenericPrint(virConnectPtr conn G_GNUC_UNUSED,
                      virNodeDevicePtr dev,
                      void *opaque)
 {
@@ -840,12 +871,12 @@ vshEventGenericPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
         vshEventDone(data->ctl);
 }
 
-virshNodedevEventCallback virshNodedevEventCallbacks[] = {
+virshNodeDeviceEventCallback virshNodeDeviceEventCallbacks[] = {
     { "lifecycle",
       VIR_NODE_DEVICE_EVENT_CALLBACK(vshEventLifecyclePrint), },
     { "update", vshEventGenericPrint, }
 };
-verify(VIR_NODE_DEVICE_EVENT_ID_LAST == ARRAY_CARDINALITY(virshNodedevEventCallbacks));
+G_STATIC_ASSERT(VIR_NODE_DEVICE_EVENT_ID_LAST == G_N_ELEMENTS(virshNodeDeviceEventCallbacks));
 
 
 static const vshCmdInfo info_node_device_event[] = {
@@ -866,7 +897,7 @@ static const vshCmdOptDef opts_node_device_event[] = {
     },
     {.name = "event",
      .type = VSH_OT_STRING,
-     .completer = virshNodedevEventNameCompleter,
+     .completer = virshNodeDeviceEventNameCompleter,
      .help = N_("which event type to wait for")
     },
     {.name = "loop",
@@ -899,13 +930,13 @@ cmdNodeDeviceEvent(vshControl *ctl, const vshCmd *cmd)
     const char *eventName = NULL;
     const char *device_value = NULL;
     int event;
-    virshControlPtr priv = ctl->privData;
+    virshControl *priv = ctl->privData;
 
     if (vshCommandOptBool(cmd, "list")) {
         size_t i;
 
         for (i = 0; i < VIR_NODE_DEVICE_EVENT_ID_LAST; i++)
-            vshPrint(ctl, "%s\n", virshNodedevEventCallbacks[i].name);
+            vshPrint(ctl, "%s\n", virshNodeDeviceEventCallbacks[i].name);
         return true;
     }
 
@@ -917,7 +948,7 @@ cmdNodeDeviceEvent(vshControl *ctl, const vshCmd *cmd)
     }
 
     for (event = 0; event < VIR_NODE_DEVICE_EVENT_ID_LAST; event++)
-        if (STREQ(eventName, virshNodedevEventCallbacks[event].name))
+        if (STREQ(eventName, virshNodeDeviceEventCallbacks[event].name))
             break;
     if (event == VIR_NODE_DEVICE_EVENT_ID_LAST) {
         vshError(ctl, _("unknown event type %s"), eventName);
@@ -928,7 +959,7 @@ cmdNodeDeviceEvent(vshControl *ctl, const vshCmd *cmd)
     data.loop = vshCommandOptBool(cmd, "loop");
     data.timestamp = vshCommandOptBool(cmd, "timestamp");
     data.count = 0;
-    data.cb = &virshNodedevEventCallbacks[event];
+    data.cb = &virshNodeDeviceEventCallbacks[event];
     if (vshCommandOptTimeoutToMs(ctl, cmd, &timeout) < 0)
         return false;
     if (vshCommandOptStringReq(ctl, cmd, "device", &device_value) < 0)
@@ -971,6 +1002,162 @@ cmdNodeDeviceEvent(vshControl *ctl, const vshCmd *cmd)
         ret = false;
     if (dev)
         virNodeDeviceFree(dev);
+    return ret;
+}
+
+
+/*
+ * "nodedev-undefine" command
+ */
+static const vshCmdInfo info_node_device_undefine[] = {
+    {.name = "help",
+     .data = N_("Undefine an inactive node device")
+    },
+    {.name = "desc",
+     .data = N_("Undefines the configuration for an inactive node device")
+    },
+    {.name = NULL}
+};
+
+static const vshCmdOptDef opts_node_device_undefine[] = {
+    {.name = "device",
+     .type = VSH_OT_DATA,
+     .flags = VSH_OFLAG_REQ,
+     .help = N_("device name or wwn pair in 'wwnn,wwpn' format"),
+     .completer = virshNodeDeviceNameCompleter,
+    },
+    {.name = NULL}
+};
+
+static bool
+cmdNodeDeviceUndefine(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
+{
+    virNodeDevice *dev = NULL;
+    bool ret = false;
+    const char *device_value = NULL;
+
+    if (vshCommandOptStringReq(ctl, cmd, "device", &device_value) < 0)
+        return false;
+
+    dev = vshFindNodeDevice(ctl, device_value);
+
+    if (!dev)
+        goto cleanup;
+
+    if (virNodeDeviceUndefine(dev, 0) == 0) {
+        vshPrintExtra(ctl, _("Undefined node device '%s'\n"), device_value);
+    } else {
+        vshError(ctl, _("Failed to undefine node device '%s'"), device_value);
+        goto cleanup;
+    }
+
+    ret = true;
+ cleanup:
+    if (dev)
+        virNodeDeviceFree(dev);
+    return ret;
+}
+
+
+/*
+ * "nodedev-define" command
+ */
+static const vshCmdInfo info_node_device_define[] = {
+    {.name = "help",
+     .data = N_("Define a device by an xml file on a node")
+    },
+    {.name = "desc",
+     .data = N_("Defines a persistent device on the node that can be "
+                "assigned to a domain. The device must be started before "
+                "it can be assigned to a domain.")
+    },
+    {.name = NULL}
+};
+
+static const vshCmdOptDef opts_node_device_define[] = {
+    VIRSH_COMMON_OPT_FILE(N_("file containing an XML description "
+                             "of the device")),
+    {.name = NULL}
+};
+
+static bool
+cmdNodeDeviceDefine(vshControl *ctl, const vshCmd *cmd G_GNUC_UNUSED)
+{
+    virNodeDevice *dev = NULL;
+    const char *from = NULL;
+    bool ret = true;
+    char *buffer;
+    virshControl *priv = ctl->privData;
+
+    if (vshCommandOptStringReq(ctl, cmd, "file", &from) < 0)
+        return false;
+
+    if (virFileReadAll(from, VSH_MAX_XML_FILE, &buffer) < 0)
+        return false;
+
+    dev = virNodeDeviceDefineXML(priv->conn, buffer, 0);
+    VIR_FREE(buffer);
+
+    if (dev != NULL) {
+        vshPrintExtra(ctl, _("Node device '%s' defined from '%s'\n"),
+                      virNodeDeviceGetName(dev), from);
+        virNodeDeviceFree(dev);
+    } else {
+        vshError(ctl, _("Failed to define node device from '%s'"), from);
+        ret = false;
+    }
+
+    return ret;
+}
+
+
+/*
+ * "nodedev-start" command
+ */
+static const vshCmdInfo info_node_device_start[] = {
+    {.name = "help",
+     .data = N_("Start an inactive node device")
+    },
+    {.name = "desc",
+     .data = N_("Starts an inactive node device that was previously defined")
+    },
+    {.name = NULL}
+};
+
+static const vshCmdOptDef opts_node_device_start[] = {
+    {.name = "device",
+     .type = VSH_OT_DATA,
+     .flags = VSH_OFLAG_REQ,
+     .help = N_("device name"),
+     .completer = virshNodeDeviceNameCompleter,
+    },
+    {.name = NULL}
+};
+
+static bool
+cmdNodeDeviceStart(vshControl *ctl, const vshCmd *cmd)
+{
+    const char *name = NULL;
+    virNodeDevice *device;
+    bool ret = true;
+    virshControl *priv = ctl->privData;
+
+    if (vshCommandOptStringReq(ctl, cmd, "device", &name) < 0)
+        return false;
+
+    if (!(device = virNodeDeviceLookupByName(priv->conn, name))) {
+        vshError(ctl, _("Could not find matching device '%s'"), name);
+        return false;
+    }
+
+    if (virNodeDeviceCreate(device, 0) == 0) {
+        vshPrintExtra(ctl, _("Device %s started\n"), name);
+    } else {
+        vshError(ctl, _("Failed to start device %s"), name);
+        ret = false;
+    }
+
+    virNodeDeviceFree(device);
     return ret;
 }
 
@@ -1026,6 +1213,24 @@ const vshCmdDef nodedevCmds[] = {
      .handler = cmdNodeDeviceEvent,
      .opts = opts_node_device_event,
      .info = info_node_device_event,
+     .flags = 0
+    },
+    {.name = "nodedev-define",
+     .handler = cmdNodeDeviceDefine,
+     .opts = opts_node_device_define,
+     .info = info_node_device_define,
+     .flags = 0
+    },
+    {.name = "nodedev-undefine",
+     .handler = cmdNodeDeviceUndefine,
+     .opts = opts_node_device_undefine,
+     .info = info_node_device_undefine,
+     .flags = 0
+    },
+    {.name = "nodedev-start",
+     .handler = cmdNodeDeviceStart,
+     .opts = opts_node_device_start,
+     .info = info_node_device_start,
      .flags = 0
     },
     {.name = NULL}

@@ -18,35 +18,33 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_QEMU_FIRMWARE_H
-# define LIBVIRT_QEMU_FIRMWARE_H
+#pragma once
 
-# include "domain_conf.h"
-# include "qemu_conf.h"
-# include "virautoclean.h"
-# include "virarch.h"
+#include "domain_conf.h"
+#include "qemu_conf.h"
+#include "virarch.h"
+#include "virfirmware.h"
 
 typedef struct _qemuFirmware qemuFirmware;
-typedef qemuFirmware *qemuFirmwarePtr;
 
 void
-qemuFirmwareFree(qemuFirmwarePtr fw);
+qemuFirmwareFree(qemuFirmware *fw);
 
-VIR_DEFINE_AUTOPTR_FUNC(qemuFirmware, qemuFirmwareFree);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(qemuFirmware, qemuFirmwareFree);
 
-qemuFirmwarePtr
+qemuFirmware *
 qemuFirmwareParse(const char *path);
 
 char *
-qemuFirmwareFormat(qemuFirmwarePtr fw);
+qemuFirmwareFormat(qemuFirmware *fw);
 
 int
 qemuFirmwareFetchConfigs(char ***firmwares,
                          bool privileged);
 
 int
-qemuFirmwareFillDomain(virQEMUDriverPtr driver,
-                       virDomainObjPtr vm,
+qemuFirmwareFillDomain(virQEMUDriver *driver,
+                       virDomainDef *def,
                        unsigned int flags);
 
 int
@@ -54,8 +52,8 @@ qemuFirmwareGetSupported(const char *machine,
                          virArch arch,
                          bool privileged,
                          uint64_t *supported,
-                         bool *secure);
+                         bool *secure,
+                         virFirmware ***fws,
+                         size_t *nfws);
 
-verify(VIR_DOMAIN_OS_DEF_FIRMWARE_LAST <= 64);
-
-#endif /* LIBVIRT_QEMU_FIRMWARE_H */
+G_STATIC_ASSERT(VIR_DOMAIN_OS_DEF_FIRMWARE_LAST <= 64);

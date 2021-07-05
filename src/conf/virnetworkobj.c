@@ -48,26 +48,28 @@ struct _virNetworkObj {
     bool autostart;
     bool persistent;
 
-    virNetworkDefPtr def; /* The current definition */
-    virNetworkDefPtr newDef; /* New definition to activate at shutdown */
+    virNetworkDef *def; /* The current definition */
+    virNetworkDef *newDef; /* New definition to activate at shutdown */
 
-    virBitmapPtr classIdMap; /* bitmap of class IDs for QoS */
+    virBitmap *classIdMap; /* bitmap of class IDs for QoS */
     unsigned long long floor_sum; /* sum of all 'floor'-s of attached NICs */
 
     unsigned int taint;
 
     /* Immutable pointer, self locking APIs */
-    virMacMapPtr macmap;
+    virMacMap *macmap;
+
+    GHashTable *ports; /* uuid -> virNetworkPortDef **/
 };
 
 struct _virNetworkObjList {
     virObjectRWLockable parent;
 
-    virHashTablePtr objs;
+    GHashTable *objs;
 };
 
-static virClassPtr virNetworkObjClass;
-static virClassPtr virNetworkObjListClass;
+static virClass *virNetworkObjClass;
+static virClass *virNetworkObjListClass;
 static void virNetworkObjDispose(void *obj);
 static void virNetworkObjListDispose(void *obj);
 
@@ -86,10 +88,21 @@ virNetworkObjOnceInit(void)
 
 VIR_ONCE_GLOBAL_INIT(virNetworkObj);
 
-virNetworkObjPtr
+static int
+virNetworkObjLoadAllPorts(virNetworkObj *net,
+                          const char *stateDir);
+
+
+static void
+virNetworkObjPortFree(void *val)
+{
+    virNetworkPortDefFree(val);
+}
+
+virNetworkObj *
 virNetworkObjNew(void)
 {
-    virNetworkObjPtr obj;
+    virNetworkObj *obj;
 
     if (virNetworkObjInitialize() < 0)
         return NULL;
@@ -97,13 +110,15 @@ virNetworkObjNew(void)
     if (!(obj = virObjectLockableNew(virNetworkObjClass)))
         return NULL;
 
-    if (!(obj->classIdMap = virBitmapNew(INIT_CLASS_ID_BITMAP_SIZE)))
-        goto error;
+    obj->classIdMap = virBitmapNew(INIT_CLASS_ID_BITMAP_SIZE);
 
     /* The first three class IDs are already taken */
     if (virBitmapSetBitExpand(obj->classIdMap, 0) < 0 ||
         virBitmapSetBitExpand(obj->classIdMap, 1) < 0 ||
         virBitmapSetBitExpand(obj->classIdMap, 2) < 0)
+        goto error;
+
+    if (!(obj->ports = virHashNew(virNetworkObjPortFree)))
         goto error;
 
     virObjectLock(obj);
@@ -117,7 +132,7 @@ virNetworkObjNew(void)
 
 
 void
-virNetworkObjEndAPI(virNetworkObjPtr *obj)
+virNetworkObjEndAPI(virNetworkObj **obj)
 {
     if (!*obj)
         return;
@@ -128,37 +143,37 @@ virNetworkObjEndAPI(virNetworkObjPtr *obj)
 }
 
 
-virNetworkDefPtr
-virNetworkObjGetDef(virNetworkObjPtr obj)
+virNetworkDef *
+virNetworkObjGetDef(virNetworkObj *obj)
 {
     return obj->def;
 }
 
 
 void
-virNetworkObjSetDef(virNetworkObjPtr obj,
-                    virNetworkDefPtr def)
+virNetworkObjSetDef(virNetworkObj *obj,
+                    virNetworkDef *def)
 {
     obj->def = def;
 }
 
 
-virNetworkDefPtr
-virNetworkObjGetNewDef(virNetworkObjPtr obj)
+virNetworkDef *
+virNetworkObjGetNewDef(virNetworkObj *obj)
 {
     return obj->newDef;
 }
 
 
 bool
-virNetworkObjIsActive(virNetworkObjPtr obj)
+virNetworkObjIsActive(virNetworkObj *obj)
 {
     return obj->active;
 }
 
 
 void
-virNetworkObjSetActive(virNetworkObjPtr obj,
+virNetworkObjSetActive(virNetworkObj *obj,
                        bool active)
 {
     obj->active = active;
@@ -166,21 +181,21 @@ virNetworkObjSetActive(virNetworkObjPtr obj,
 
 
 bool
-virNetworkObjIsPersistent(virNetworkObjPtr obj)
+virNetworkObjIsPersistent(virNetworkObj *obj)
 {
     return obj->persistent;
 }
 
 
 bool
-virNetworkObjIsAutostart(virNetworkObjPtr obj)
+virNetworkObjIsAutostart(virNetworkObj *obj)
 {
     return obj->autostart;
 }
 
 
 void
-virNetworkObjSetAutostart(virNetworkObjPtr obj,
+virNetworkObjSetAutostart(virNetworkObj *obj,
                           bool autostart)
 {
     obj->autostart = autostart;
@@ -188,14 +203,14 @@ virNetworkObjSetAutostart(virNetworkObjPtr obj,
 
 
 pid_t
-virNetworkObjGetDnsmasqPid(virNetworkObjPtr obj)
+virNetworkObjGetDnsmasqPid(virNetworkObj *obj)
 {
     return obj->dnsmasqPid;
 }
 
 
 void
-virNetworkObjSetDnsmasqPid(virNetworkObjPtr obj,
+virNetworkObjSetDnsmasqPid(virNetworkObj *obj,
                            pid_t dnsmasqPid)
 {
     obj->dnsmasqPid = dnsmasqPid;
@@ -203,43 +218,43 @@ virNetworkObjSetDnsmasqPid(virNetworkObjPtr obj,
 
 
 pid_t
-virNetworkObjGetRadvdPid(virNetworkObjPtr obj)
+virNetworkObjGetRadvdPid(virNetworkObj *obj)
 {
     return obj->radvdPid;
 }
 
 
 void
-virNetworkObjSetRadvdPid(virNetworkObjPtr obj,
+virNetworkObjSetRadvdPid(virNetworkObj *obj,
                          pid_t radvdPid)
 {
     obj->radvdPid = radvdPid;
 }
 
 
-virBitmapPtr
-virNetworkObjGetClassIdMap(virNetworkObjPtr obj)
+virBitmap *
+virNetworkObjGetClassIdMap(virNetworkObj *obj)
 {
     return obj->classIdMap;
 }
 
 
-virMacMapPtr
-virNetworkObjGetMacMap(virNetworkObjPtr obj)
+virMacMap *
+virNetworkObjGetMacMap(virNetworkObj *obj)
 {
     return obj->macmap;
 }
 
 
 unsigned long long
-virNetworkObjGetFloorSum(virNetworkObjPtr obj)
+virNetworkObjGetFloorSum(virNetworkObj *obj)
 {
     return obj->floor_sum;
 }
 
 
 void
-virNetworkObjSetFloorSum(virNetworkObjPtr obj,
+virNetworkObjSetFloorSum(virNetworkObj *obj,
                          unsigned long long floor_sum)
 {
     obj->floor_sum = floor_sum;
@@ -247,15 +262,15 @@ virNetworkObjSetFloorSum(virNetworkObjPtr obj,
 
 
 void
-virNetworkObjSetMacMap(virNetworkObjPtr obj,
-                       virMacMapPtr macmap)
+virNetworkObjSetMacMap(virNetworkObj *obj,
+                       virMacMap *macmap)
 {
     obj->macmap = macmap;
 }
 
 
 void
-virNetworkObjUnrefMacMap(virNetworkObjPtr obj)
+virNetworkObjUnrefMacMap(virNetworkObj *obj)
 {
     virObjectUnref(obj->macmap);
     obj->macmap = NULL;
@@ -263,7 +278,7 @@ virNetworkObjUnrefMacMap(virNetworkObjPtr obj)
 
 
 int
-virNetworkObjMacMgrAdd(virNetworkObjPtr obj,
+virNetworkObjMacMgrAdd(virNetworkObj *obj,
                        const char *dnsmasqStateDir,
                        const char *domain,
                        const virMacAddr *mac)
@@ -294,7 +309,7 @@ virNetworkObjMacMgrAdd(virNetworkObjPtr obj,
 
 
 int
-virNetworkObjMacMgrDel(virNetworkObjPtr obj,
+virNetworkObjMacMgrDel(virNetworkObj *obj,
                        const char *dnsmasqStateDir,
                        const char *domain,
                        const virMacAddr *mac)
@@ -324,10 +339,10 @@ virNetworkObjMacMgrDel(virNetworkObjPtr obj,
 }
 
 
-virNetworkObjListPtr
+virNetworkObjList *
 virNetworkObjListNew(void)
 {
-    virNetworkObjListPtr nets;
+    virNetworkObjList *nets;
 
     if (virNetworkObjInitialize() < 0)
         return NULL;
@@ -335,7 +350,7 @@ virNetworkObjListNew(void)
     if (!(nets = virObjectRWLockableNew(virNetworkObjListClass)))
         return NULL;
 
-    if (!(nets->objs = virHashCreate(50, virObjectFreeHashData))) {
+    if (!(nets->objs = virHashNew(virObjectFreeHashData))) {
         virObjectUnref(nets);
         return NULL;
     }
@@ -344,11 +359,11 @@ virNetworkObjListNew(void)
 }
 
 
-static virNetworkObjPtr
-virNetworkObjFindByUUIDLocked(virNetworkObjListPtr nets,
+static virNetworkObj *
+virNetworkObjFindByUUIDLocked(virNetworkObjList *nets,
                               const unsigned char *uuid)
 {
-    virNetworkObjPtr obj = NULL;
+    virNetworkObj *obj = NULL;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
 
     virUUIDFormat(uuid, uuidstr);
@@ -370,11 +385,11 @@ virNetworkObjFindByUUIDLocked(virNetworkObjListPtr nets,
  *
  * Returns: locked and ref'd network object.
  */
-virNetworkObjPtr
-virNetworkObjFindByUUID(virNetworkObjListPtr nets,
+virNetworkObj *
+virNetworkObjFindByUUID(virNetworkObjList *nets,
                         const unsigned char *uuid)
 {
-    virNetworkObjPtr obj;
+    virNetworkObj *obj;
 
     virObjectRWLockRead(nets);
     obj = virNetworkObjFindByUUIDLocked(nets, uuid);
@@ -387,10 +402,10 @@ virNetworkObjFindByUUID(virNetworkObjListPtr nets,
 
 static int
 virNetworkObjSearchName(const void *payload,
-                        const void *name ATTRIBUTE_UNUSED,
+                        const char *name G_GNUC_UNUSED,
                         const void *data)
 {
-    virNetworkObjPtr obj = (virNetworkObjPtr) payload;
+    virNetworkObj *obj = (virNetworkObj *) payload;
     int want = 0;
 
     virObjectLock(obj);
@@ -401,11 +416,11 @@ virNetworkObjSearchName(const void *payload,
 }
 
 
-static virNetworkObjPtr
-virNetworkObjFindByNameLocked(virNetworkObjListPtr nets,
+static virNetworkObj *
+virNetworkObjFindByNameLocked(virNetworkObjList *nets,
                               const char *name)
 {
-    virNetworkObjPtr obj = NULL;
+    virNetworkObj *obj = NULL;
 
     obj = virHashSearch(nets->objs, virNetworkObjSearchName, name, NULL);
     if (obj)
@@ -424,11 +439,11 @@ virNetworkObjFindByNameLocked(virNetworkObjListPtr nets,
  *
  * Returns: locked and ref'd network object.
  */
-virNetworkObjPtr
-virNetworkObjFindByName(virNetworkObjListPtr nets,
+virNetworkObj *
+virNetworkObjFindByName(virNetworkObjList *nets,
                         const char *name)
 {
-    virNetworkObjPtr obj;
+    virNetworkObj *obj;
 
     virObjectRWLockRead(nets);
     obj = virNetworkObjFindByNameLocked(nets, name);
@@ -440,7 +455,7 @@ virNetworkObjFindByName(virNetworkObjListPtr nets,
 
 
 bool
-virNetworkObjTaint(virNetworkObjPtr obj,
+virNetworkObjTaint(virNetworkObj *obj,
                    virNetworkTaintFlags taint)
 {
     unsigned int flag = (1 << taint);
@@ -456,8 +471,9 @@ virNetworkObjTaint(virNetworkObjPtr obj,
 static void
 virNetworkObjDispose(void *opaque)
 {
-    virNetworkObjPtr obj = opaque;
+    virNetworkObj *obj = opaque;
 
+    virHashFree(obj->ports);
     virNetworkDefFree(obj->def);
     virNetworkDefFree(obj->newDef);
     virBitmapFree(obj->classIdMap);
@@ -468,7 +484,7 @@ virNetworkObjDispose(void *opaque)
 static void
 virNetworkObjListDispose(void *opaque)
 {
-    virNetworkObjListPtr nets = opaque;
+    virNetworkObjList *nets = opaque;
 
     virHashFree(nets->objs);
 }
@@ -491,8 +507,8 @@ virNetworkObjListDispose(void *opaque)
  *
  */
 void
-virNetworkObjUpdateAssignDef(virNetworkObjPtr obj,
-                             virNetworkDefPtr def,
+virNetworkObjUpdateAssignDef(virNetworkObj *obj,
+                             virNetworkDef *def,
                              bool live)
 {
     if (live) {
@@ -546,13 +562,13 @@ virNetworkObjUpdateAssignDef(virNetworkObjPtr obj,
  *
  * If flags is zero, network is considered as inactive and persistent.
  */
-static virNetworkObjPtr
-virNetworkObjAssignDefLocked(virNetworkObjListPtr nets,
-                             virNetworkDefPtr def,
+static virNetworkObj *
+virNetworkObjAssignDefLocked(virNetworkObjList *nets,
+                             virNetworkDef *def,
                              unsigned int flags)
 {
-    virNetworkObjPtr obj;
-    virNetworkObjPtr ret = NULL;
+    virNetworkObj *obj;
+    virNetworkObj *ret = NULL;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
 
     /* See if a network with matching UUID already exists */
@@ -602,7 +618,7 @@ virNetworkObjAssignDefLocked(virNetworkObjListPtr nets,
         obj->persistent = !(flags & VIR_NETWORK_OBJ_LIST_ADD_LIVE);
     }
 
-    VIR_STEAL_PTR(ret, obj);
+    ret = g_steal_pointer(&obj);
 
  cleanup:
     virNetworkObjEndAPI(&obj);
@@ -623,14 +639,14 @@ virNetworkObjAssignDefLocked(virNetworkObjListPtr nets,
  *
  * Look at virNetworkObjAssignDefLocked() for @flags description.
  *
- * Returns NULL on error, virNetworkObjPtr on success.
+ * Returns NULL on error, virNetworkObj *on success.
  */
-virNetworkObjPtr
-virNetworkObjAssignDef(virNetworkObjListPtr nets,
-                       virNetworkDefPtr def,
+virNetworkObj *
+virNetworkObjAssignDef(virNetworkObjList *nets,
+                       virNetworkDef *def,
                        unsigned int flags)
 {
-    virNetworkObjPtr obj;
+    virNetworkObj *obj;
 
     virObjectRWLockWrite(nets);
     obj = virNetworkObjAssignDefLocked(nets, def, flags);
@@ -654,8 +670,9 @@ virNetworkObjAssignDef(virNetworkObjListPtr nets,
  * Returns 0 on success, -1 on failure
  */
 int
-virNetworkObjSetDefTransient(virNetworkObjPtr obj,
-                             bool live)
+virNetworkObjSetDefTransient(virNetworkObj *obj,
+                             bool live,
+                             virNetworkXMLOption *xmlopt)
 {
     if (!virNetworkObjIsActive(obj) && !live)
         return 0;
@@ -663,7 +680,9 @@ virNetworkObjSetDefTransient(virNetworkObjPtr obj,
     if (!obj->persistent || obj->newDef)
         return 0;
 
-    obj->newDef = virNetworkDefCopy(obj->def, VIR_NETWORK_XML_INACTIVE);
+    obj->newDef = virNetworkDefCopy(obj->def,
+                                    xmlopt,
+                                    VIR_NETWORK_XML_INACTIVE);
     return obj->newDef ? 0 : -1;
 }
 
@@ -673,12 +692,11 @@ virNetworkObjSetDefTransient(virNetworkObjPtr obj,
  * This *undoes* what virNetworkObjSetDefTransient did.
  */
 void
-virNetworkObjUnsetDefTransient(virNetworkObjPtr obj)
+virNetworkObjUnsetDefTransient(virNetworkObj *obj)
 {
     if (obj->newDef) {
         virNetworkDefFree(obj->def);
-        obj->def = obj->newDef;
-        obj->newDef = NULL;
+        obj->def = g_steal_pointer(&obj->newDef);
     }
 }
 
@@ -690,10 +708,10 @@ virNetworkObjUnsetDefTransient(virNetworkObjPtr obj)
  * Return the persistent network configuration. If network is transient,
  * return the running config.
  *
- * Returns NULL on error, virNetworkDefPtr on success.
+ * Returns NULL on error, virNetworkDef *on success.
  */
-virNetworkDefPtr
-virNetworkObjGetPersistentDef(virNetworkObjPtr obj)
+virNetworkDef *
+virNetworkObjGetPersistentDef(virNetworkObj *obj)
 {
     if (obj->newDef)
         return obj->newDef;
@@ -714,8 +732,8 @@ virNetworkObjGetPersistentDef(virNetworkObjPtr obj)
  * Returns -1 on error, 0 on success
  */
 int
-virNetworkObjReplacePersistentDef(virNetworkObjPtr obj,
-                                  virNetworkDefPtr def)
+virNetworkObjReplacePersistentDef(virNetworkObj *obj,
+                                  virNetworkDef *def)
 {
     if (virNetworkObjIsActive(obj)) {
         virNetworkDefFree(obj->newDef);
@@ -740,18 +758,18 @@ virNetworkObjReplacePersistentDef(virNetworkObjPtr obj,
  * Returns 0 on success, -1 on error.
  */
 static int
-virNetworkObjConfigChangeSetup(virNetworkObjPtr obj,
+virNetworkObjConfigChangeSetup(virNetworkObj *obj,
+                               virNetworkXMLOption *xmlopt,
                                unsigned int flags)
 {
     bool isActive;
-    int ret = -1;
 
     isActive = virNetworkObjIsActive(obj);
 
     if (!isActive && (flags & VIR_NETWORK_UPDATE_AFFECT_LIVE)) {
         virReportError(VIR_ERR_OPERATION_INVALID, "%s",
                        _("network is not running"));
-        goto cleanup;
+        return -1;
     }
 
     if (flags & VIR_NETWORK_UPDATE_AFFECT_CONFIG) {
@@ -759,24 +777,22 @@ virNetworkObjConfigChangeSetup(virNetworkObjPtr obj,
             virReportError(VIR_ERR_OPERATION_INVALID, "%s",
                            _("cannot change persistent config of a "
                              "transient network"));
-            goto cleanup;
+            return -1;
         }
         /* this should already have been done by the driver, but do it
          * anyway just in case.
          */
-        if (isActive && (virNetworkObjSetDefTransient(obj, false) < 0))
-            goto cleanup;
+        if (isActive && (virNetworkObjSetDefTransient(obj, false, xmlopt) < 0))
+            return -1;
     }
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 
 void
-virNetworkObjRemoveInactive(virNetworkObjListPtr nets,
-                            virNetworkObjPtr obj)
+virNetworkObjRemoveInactive(virNetworkObjList *nets,
+                            virNetworkObj *obj)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
 
@@ -792,15 +808,16 @@ virNetworkObjRemoveInactive(virNetworkObjListPtr nets,
 
 
 static char *
-virNetworkObjFormat(virNetworkObjPtr obj,
+virNetworkObjFormat(virNetworkObj *obj,
+                    virNetworkXMLOption *xmlopt,
                     unsigned int flags)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
     char *classIdStr = virBitmapFormat(obj->classIdMap);
     size_t i;
 
     if (!classIdStr)
-        goto error;
+        return NULL;
 
     virBufferAddLit(&buf, "<networkstatus>\n");
     virBufferAdjustIndent(&buf, 2);
@@ -814,32 +831,26 @@ virNetworkObjFormat(virNetworkObjPtr obj,
                               virNetworkTaintTypeToString(i));
     }
 
-    if (virNetworkDefFormatBuf(&buf, obj->def, flags) < 0)
-        goto error;
+    if (virNetworkDefFormatBuf(&buf, obj->def, xmlopt, flags) < 0)
+        return NULL;
 
     virBufferAdjustIndent(&buf, -2);
     virBufferAddLit(&buf, "</networkstatus>");
 
-    if (virBufferCheckError(&buf) < 0)
-        goto error;
-
     return virBufferContentAndReset(&buf);
-
- error:
-    virBufferFreeAndReset(&buf);
-    return NULL;
 }
 
 
 int
 virNetworkObjSaveStatus(const char *statusDir,
-                        virNetworkObjPtr obj)
+                        virNetworkObj *obj,
+                        virNetworkXMLOption *xmlopt)
 {
     int ret = -1;
     int flags = 0;
     char *xml;
 
-    if (!(xml = virNetworkObjFormat(obj, flags)))
+    if (!(xml = virNetworkObjFormat(obj, xmlopt, flags)))
         goto cleanup;
 
     if (virNetworkSaveXML(statusDir, obj->def, xml))
@@ -852,18 +863,19 @@ virNetworkObjSaveStatus(const char *statusDir,
 }
 
 
-static virNetworkObjPtr
-virNetworkLoadState(virNetworkObjListPtr nets,
+static virNetworkObj *
+virNetworkLoadState(virNetworkObjList *nets,
                     const char *stateDir,
-                    const char *name)
+                    const char *name,
+                    virNetworkXMLOption *xmlopt)
 {
     char *configFile = NULL;
-    virNetworkDefPtr def = NULL;
-    virNetworkObjPtr obj = NULL;
+    virNetworkDef *def = NULL;
+    virNetworkObj *obj = NULL;
     xmlDocPtr xml = NULL;
     xmlNodePtr node = NULL, *nodes = NULL;
     xmlXPathContextPtr ctxt = NULL;
-    virBitmapPtr classIdMap = NULL;
+    virBitmap *classIdMap = NULL;
     unsigned long long floor_sum_val = 0;
     unsigned int taint = 0;
     int n;
@@ -884,7 +896,7 @@ virNetworkLoadState(virNetworkObjListPtr nets,
 
     /* parse the definition first */
     ctxt->node = node;
-    if (!(def = virNetworkDefParseXML(ctxt)))
+    if (!(def = virNetworkDefParseXML(ctxt, xmlopt)))
         goto error;
 
     if (STRNEQ(name, def->name)) {
@@ -978,15 +990,17 @@ virNetworkLoadState(virNetworkObjListPtr nets,
 }
 
 
-static virNetworkObjPtr
-virNetworkLoadConfig(virNetworkObjListPtr nets,
+static virNetworkObj *
+virNetworkLoadConfig(virNetworkObjList *nets,
                      const char *configDir,
                      const char *autostartDir,
-                     const char *name)
+                     const char *name,
+                     virNetworkXMLOption *xmlopt)
 {
     char *configFile = NULL, *autostartLink = NULL;
-    virNetworkDefPtr def = NULL;
-    virNetworkObjPtr obj;
+    virNetworkDef *def = NULL;
+    virNetworkObj *obj;
+    bool saveConfig = false;
     int autostart;
 
     if ((configFile = virNetworkConfigFile(configDir, name)) == NULL)
@@ -997,7 +1011,7 @@ virNetworkLoadConfig(virNetworkObjListPtr nets,
     if ((autostart = virFileLinkPointsTo(autostartLink, configFile)) < 0)
         goto error;
 
-    if (!(def = virNetworkDefParseFile(configFile)))
+    if (!(def = virNetworkDefParseFile(configFile, xmlopt)))
         goto error;
 
     if (STRNEQ(name, def->name)) {
@@ -1015,7 +1029,10 @@ virNetworkLoadConfig(virNetworkObjListPtr nets,
     case VIR_NETWORK_FORWARD_OPEN:
         if (!def->mac_specified) {
             virNetworkSetBridgeMacAddr(def);
-            virNetworkSaveConfig(configDir, def);
+            /* We just generated a new MAC address, and we need to persist
+             * the configuration to disk to avoid the network getting a
+             * different one the next time the daemon is started */
+            saveConfig = true;
         }
         break;
 
@@ -1032,6 +1049,17 @@ virNetworkLoadConfig(virNetworkObjListPtr nets,
     case VIR_NETWORK_FORWARD_LAST:
     default:
         virReportEnumRangeError(virNetworkForwardType, def->forward.type);
+        goto error;
+    }
+
+    /* The network didn't have a UUID so we generated a new one, and
+     * we need to persist the configuration to disk to avoid the network
+     * getting a different one the next time the daemon is started */
+    if (!def->uuid_specified)
+        saveConfig = true;
+
+    if (saveConfig &&
+        virNetworkSaveConfig(configDir, def, xmlopt) < 0) {
         goto error;
     }
 
@@ -1054,10 +1082,11 @@ virNetworkLoadConfig(virNetworkObjListPtr nets,
 
 
 int
-virNetworkObjLoadAllState(virNetworkObjListPtr nets,
-                          const char *stateDir)
+virNetworkObjLoadAllState(virNetworkObjList *nets,
+                          const char *stateDir,
+                          virNetworkXMLOption *xmlopt)
 {
-    DIR *dir;
+    g_autoptr(DIR) dir = NULL;
     struct dirent *entry;
     int ret = -1;
     int rc;
@@ -1066,26 +1095,32 @@ virNetworkObjLoadAllState(virNetworkObjListPtr nets,
         return rc;
 
     while ((ret = virDirRead(dir, &entry, stateDir)) > 0) {
-        virNetworkObjPtr obj;
+        virNetworkObj *obj;
 
         if (!virStringStripSuffix(entry->d_name, ".xml"))
             continue;
 
-        obj = virNetworkLoadState(nets, stateDir, entry->d_name);
+        obj = virNetworkLoadState(nets, stateDir, entry->d_name, xmlopt);
+
+        if (obj &&
+            virNetworkObjLoadAllPorts(obj, stateDir) < 0) {
+            virNetworkObjEndAPI(&obj);
+            return -1;
+        }
         virNetworkObjEndAPI(&obj);
     }
 
-    VIR_DIR_CLOSE(dir);
     return ret;
 }
 
 
 int
-virNetworkObjLoadAllConfigs(virNetworkObjListPtr nets,
+virNetworkObjLoadAllConfigs(virNetworkObjList *nets,
                             const char *configDir,
-                            const char *autostartDir)
+                            const char *autostartDir,
+                            virNetworkXMLOption *xmlopt)
 {
-    DIR *dir;
+    g_autoptr(DIR) dir = NULL;
     struct dirent *entry;
     int ret = -1;
     int rc;
@@ -1094,7 +1129,7 @@ virNetworkObjLoadAllConfigs(virNetworkObjListPtr nets,
         return rc;
 
     while ((ret = virDirRead(dir, &entry, configDir)) > 0) {
-        virNetworkObjPtr obj;
+        virNetworkObj *obj;
 
         if (!virStringStripSuffix(entry->d_name, ".xml"))
             continue;
@@ -1104,11 +1139,11 @@ virNetworkObjLoadAllConfigs(virNetworkObjListPtr nets,
         obj = virNetworkLoadConfig(nets,
                                    configDir,
                                    autostartDir,
-                                   entry->d_name);
+                                   entry->d_name,
+                                   xmlopt);
         virNetworkObjEndAPI(&obj);
     }
 
-    VIR_DIR_CLOSE(dir);
     return ret;
 }
 
@@ -1116,7 +1151,7 @@ virNetworkObjLoadAllConfigs(virNetworkObjListPtr nets,
 int
 virNetworkObjDeleteConfig(const char *configDir,
                           const char *autostartDir,
-                          virNetworkObjPtr obj)
+                          virNetworkObj *obj)
 {
     char *configFile = NULL;
     char *autostartLink = NULL;
@@ -1154,11 +1189,11 @@ struct virNetworkObjBridgeInUseHelperData {
 
 static int
 virNetworkObjBridgeInUseHelper(const void *payload,
-                               const void *name ATTRIBUTE_UNUSED,
+                               const char *name G_GNUC_UNUSED,
                                const void *opaque)
 {
     int ret;
-    virNetworkObjPtr obj = (virNetworkObjPtr) payload;
+    virNetworkObj *obj = (virNetworkObj *) payload;
     const struct virNetworkObjBridgeInUseHelperData *data = opaque;
 
     virObjectLock(obj);
@@ -1179,11 +1214,11 @@ virNetworkObjBridgeInUseHelper(const void *payload,
 
 
 bool
-virNetworkObjBridgeInUse(virNetworkObjListPtr nets,
+virNetworkObjBridgeInUse(virNetworkObjList *nets,
                          const char *bridge,
                          const char *skipname)
 {
-    virNetworkObjPtr obj;
+    virNetworkObj *obj;
     struct virNetworkObjBridgeInUseHelperData data = {bridge, skipname};
 
     virObjectRWLockRead(nets);
@@ -1209,25 +1244,27 @@ virNetworkObjBridgeInUse(virNetworkObjListPtr nets,
  * Returns: -1 on error, 0 on success.
  */
 int
-virNetworkObjUpdate(virNetworkObjPtr obj,
+virNetworkObjUpdate(virNetworkObj *obj,
                     unsigned int command, /* virNetworkUpdateCommand */
                     unsigned int section, /* virNetworkUpdateSection */
                     int parentIndex,
                     const char *xml,
+                    virNetworkXMLOption *xmlopt,
                     unsigned int flags)  /* virNetworkUpdateFlags */
 {
     int ret = -1;
-    virNetworkDefPtr livedef = NULL, configdef = NULL;
+    virNetworkDef *livedef = NULL;
+    virNetworkDef *configdef = NULL;
 
     /* normalize config data, and check for common invalid requests. */
-    if (virNetworkObjConfigChangeSetup(obj, flags) < 0)
+    if (virNetworkObjConfigChangeSetup(obj, xmlopt, flags) < 0)
        goto cleanup;
 
     if (flags & VIR_NETWORK_UPDATE_AFFECT_LIVE) {
-        virNetworkDefPtr checkdef;
+        virNetworkDef *checkdef;
 
         /* work on a copy of the def */
-        if (!(livedef = virNetworkDefCopy(obj->def, 0)))
+        if (!(livedef = virNetworkDefCopy(obj->def, xmlopt, 0)))
             goto cleanup;
         if (virNetworkDefUpdateSection(livedef, command, section,
                                        parentIndex, xml, flags) < 0) {
@@ -1236,16 +1273,17 @@ virNetworkObjUpdate(virNetworkObjPtr obj,
         /* run a final format/parse cycle to make sure we didn't
          * add anything illegal to the def
          */
-        if (!(checkdef = virNetworkDefCopy(livedef, 0)))
+        if (!(checkdef = virNetworkDefCopy(livedef, xmlopt, 0)))
             goto cleanup;
         virNetworkDefFree(checkdef);
     }
 
     if (flags & VIR_NETWORK_UPDATE_AFFECT_CONFIG) {
-        virNetworkDefPtr checkdef;
+        virNetworkDef *checkdef;
 
         /* work on a copy of the def */
         if (!(configdef = virNetworkDefCopy(virNetworkObjGetPersistentDef(obj),
+                                            xmlopt,
                                             VIR_NETWORK_XML_INACTIVE))) {
             goto cleanup;
         }
@@ -1254,6 +1292,7 @@ virNetworkObjUpdate(virNetworkObjPtr obj,
             goto cleanup;
         }
         if (!(checkdef = virNetworkDefCopy(configdef,
+                                           xmlopt,
                                            VIR_NETWORK_XML_INACTIVE))) {
             goto cleanup;
         }
@@ -1269,8 +1308,7 @@ virNetworkObjUpdate(virNetworkObjPtr obj,
     if (livedef) {
         /* successfully modified copy, now replace original */
         virNetworkDefFree(obj->def);
-        obj->def = livedef;
-        livedef = NULL;
+        obj->def = g_steal_pointer(&livedef);
     }
 
     ret = 0;
@@ -1283,7 +1321,7 @@ virNetworkObjUpdate(virNetworkObjPtr obj,
 
 #define MATCH(FLAG) (flags & (FLAG))
 static bool
-virNetworkObjMatch(virNetworkObjPtr obj,
+virNetworkObjMatch(virNetworkObj *obj,
                    unsigned int flags)
 {
     /* filter by active state */
@@ -1316,7 +1354,6 @@ virNetworkObjMatch(virNetworkObjPtr obj,
 
 
 typedef struct _virNetworkObjListExportData virNetworkObjListExportData;
-typedef virNetworkObjListExportData *virNetworkObjListExportDataPtr;
 struct _virNetworkObjListExportData {
     virConnectPtr conn;
     virNetworkPtr *nets;
@@ -1328,11 +1365,11 @@ struct _virNetworkObjListExportData {
 
 static int
 virNetworkObjListExportCallback(void *payload,
-                                const void *name ATTRIBUTE_UNUSED,
+                                const char *name G_GNUC_UNUSED,
                                 void *opaque)
 {
-    virNetworkObjListExportDataPtr data = opaque;
-    virNetworkObjPtr obj = payload;
+    virNetworkObjListExportData *data = opaque;
+    virNetworkObj *obj = payload;
     virNetworkPtr net = NULL;
 
     if (data->error)
@@ -1367,7 +1404,7 @@ virNetworkObjListExportCallback(void *payload,
 
 int
 virNetworkObjListExport(virConnectPtr conn,
-                        virNetworkObjListPtr netobjs,
+                        virNetworkObjList *netobjs,
                         virNetworkPtr **nets,
                         virNetworkObjListFilter filter,
                         unsigned int flags)
@@ -1378,8 +1415,8 @@ virNetworkObjListExport(virConnectPtr conn,
         .nnets = 0, .error = false };
 
     virObjectRWLockRead(netobjs);
-    if (nets && VIR_ALLOC_N(data.nets, virHashSize(netobjs->objs) + 1) < 0)
-        goto cleanup;
+    if (nets)
+        data.nets = g_new0(virNetworkPtr, virHashSize(netobjs->objs) + 1);
 
     virHashForEach(netobjs->objs, virNetworkObjListExportCallback, &data);
 
@@ -1388,9 +1425,8 @@ virNetworkObjListExport(virConnectPtr conn,
 
     if (data.nets) {
         /* trim the array to the final size */
-        ignore_value(VIR_REALLOC_N(data.nets, data.nnets + 1));
-        *nets = data.nets;
-        data.nets = NULL;
+        VIR_REALLOC_N(data.nets, data.nnets + 1);
+        *nets = g_steal_pointer(&data.nets);
     }
 
     ret = data.nnets;
@@ -1412,7 +1448,7 @@ struct virNetworkObjListForEachHelperData {
 
 static int
 virNetworkObjListForEachHelper(void *payload,
-                               const void *name ATTRIBUTE_UNUSED,
+                               const char *name G_GNUC_UNUSED,
                                void *opaque)
 {
     struct virNetworkObjListForEachHelperData *data = opaque;
@@ -1437,14 +1473,14 @@ virNetworkObjListForEachHelper(void *payload,
  * Returns: 0 on success, -1 otherwise.
  */
 int
-virNetworkObjListForEach(virNetworkObjListPtr nets,
+virNetworkObjListForEach(virNetworkObjList *nets,
                          virNetworkObjListIterator callback,
                          void *opaque)
 {
     struct virNetworkObjListForEachHelperData data = {
         .callback = callback, .opaque = opaque, .ret = 0};
     virObjectRWLockRead(nets);
-    virHashForEach(nets->objs, virNetworkObjListForEachHelper, &data);
+    virHashForEachSafe(nets->objs, virNetworkObjListForEachHelper, &data);
     virObjectRWUnlock(nets);
     return data.ret;
 }
@@ -1462,11 +1498,11 @@ struct virNetworkObjListGetHelperData {
 
 static int
 virNetworkObjListGetHelper(void *payload,
-                           const void *name ATTRIBUTE_UNUSED,
+                           const char *name G_GNUC_UNUSED,
                            void *opaque)
 {
     struct virNetworkObjListGetHelperData *data = opaque;
-    virNetworkObjPtr obj = payload;
+    virNetworkObj *obj = payload;
 
     if (data->error)
         return 0;
@@ -1483,11 +1519,8 @@ virNetworkObjListGetHelper(void *payload,
 
     if ((data->active && virNetworkObjIsActive(obj)) ||
         (!data->active && !virNetworkObjIsActive(obj))) {
-        if (data->names &&
-            VIR_STRDUP(data->names[data->nnames], obj->def->name) < 0) {
-            data->error = true;
-            goto cleanup;
-        }
+        if (data->names)
+            data->names[data->nnames] = g_strdup(obj->def->name);
         data->nnames++;
     }
 
@@ -1498,7 +1531,7 @@ virNetworkObjListGetHelper(void *payload,
 
 
 int
-virNetworkObjListGetNames(virNetworkObjListPtr nets,
+virNetworkObjListGetNames(virNetworkObjList *nets,
                           bool active,
                           char **names,
                           int maxnames,
@@ -1529,7 +1562,7 @@ virNetworkObjListGetNames(virNetworkObjListPtr nets,
 
 
 int
-virNetworkObjListNumOfNetworks(virNetworkObjListPtr nets,
+virNetworkObjListNumOfNetworks(virNetworkObjList *nets,
                                bool active,
                                virNetworkObjListFilter filter,
                                virConnectPtr conn)
@@ -1552,11 +1585,11 @@ struct virNetworkObjListPruneHelperData {
 
 static int
 virNetworkObjListPruneHelper(const void *payload,
-                             const void *name ATTRIBUTE_UNUSED,
+                             const char *name G_GNUC_UNUSED,
                              const void *opaque)
 {
     const struct virNetworkObjListPruneHelperData *data = opaque;
-    virNetworkObjPtr obj = (virNetworkObjPtr) payload;
+    virNetworkObj *obj = (virNetworkObj *) payload;
     int want = 0;
 
     virObjectLock(obj);
@@ -1575,7 +1608,7 @@ virNetworkObjListPruneHelper(const void *payload,
  * ones from it.
  */
 void
-virNetworkObjListPrune(virNetworkObjListPtr nets,
+virNetworkObjListPrune(virNetworkObjList *nets,
                        unsigned int flags)
 {
     struct virNetworkObjListPruneHelperData data = {flags};
@@ -1583,4 +1616,285 @@ virNetworkObjListPrune(virNetworkObjListPtr nets,
     virObjectRWLockWrite(nets);
     virHashRemoveSet(nets->objs, virNetworkObjListPruneHelper, &data);
     virObjectRWUnlock(nets);
+}
+
+
+char *
+virNetworkObjGetPortStatusDir(virNetworkObj *net,
+                              const char *stateDir)
+{
+    char *ret;
+    ret = g_strdup_printf("%s/%s/ports", stateDir, net->def->name);
+    return ret;
+}
+
+int
+virNetworkObjAddPort(virNetworkObj *net,
+                     virNetworkPortDef *portdef,
+                     const char *stateDir)
+{
+    char uuidstr[VIR_UUID_STRING_BUFLEN];
+    g_autofree char *dir = NULL;
+
+    virUUIDFormat(portdef->uuid, uuidstr);
+
+    if (virHashLookup(net->ports, uuidstr)) {
+        virReportError(VIR_ERR_NETWORK_PORT_EXIST,
+                       _("Network port with UUID %s already exists"),
+                       uuidstr);
+        return -1;
+    }
+
+    if (!(dir = virNetworkObjGetPortStatusDir(net, stateDir)))
+        return -1;
+
+    if (virHashAddEntry(net->ports, uuidstr, portdef) < 0)
+        return -1;
+
+    if (virNetworkPortDefSaveStatus(portdef, dir) < 0) {
+        virHashRemoveEntry(net->ports, uuidstr);
+        return -1;
+    }
+
+    return 0;
+}
+
+
+virNetworkPortDef *
+virNetworkObjLookupPort(virNetworkObj *net,
+                        const unsigned char *uuid)
+{
+    virNetworkPortDef *ret = NULL;
+    char uuidstr[VIR_UUID_STRING_BUFLEN];
+
+    virUUIDFormat(uuid, uuidstr);
+
+    if (!(ret = virHashLookup(net->ports, uuidstr))) {
+        virReportError(VIR_ERR_NO_NETWORK_PORT,
+                       _("Network port with UUID %s does not exist"),
+                       uuidstr);
+        return NULL;
+    }
+
+    return ret;
+}
+
+
+int
+virNetworkObjDeletePort(virNetworkObj *net,
+                        const unsigned char *uuid,
+                        const char *stateDir)
+{
+    char uuidstr[VIR_UUID_STRING_BUFLEN];
+    g_autofree char *dir = NULL;
+    virNetworkPortDef *portdef;
+
+    virUUIDFormat(uuid, uuidstr);
+
+    if (!(portdef = virHashLookup(net->ports, uuidstr))) {
+        virReportError(VIR_ERR_NO_NETWORK_PORT,
+                       _("Network port with UUID %s does not exist"),
+                       uuidstr);
+        return -1;
+    }
+
+    if (!(dir = virNetworkObjGetPortStatusDir(net, stateDir)))
+        return -1;
+
+    if (virNetworkPortDefDeleteStatus(portdef, dir) < 0)
+        return -1;
+
+    if (virHashRemoveEntry(net->ports, uuidstr) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+int
+virNetworkObjDeleteAllPorts(virNetworkObj *net,
+                            const char *stateDir)
+{
+    g_autofree char *dir = NULL;
+    g_autoptr(DIR) dh = NULL;
+    struct dirent *de;
+    int rc;
+
+    if (!(dir = virNetworkObjGetPortStatusDir(net, stateDir)))
+        return -1;
+
+    if ((rc = virDirOpenIfExists(&dh, dir)) <= 0)
+        return rc;
+
+    while ((rc = virDirRead(dh, &de, dir)) > 0) {
+        char *file = NULL;
+
+        if (!virStringStripSuffix(de->d_name, ".xml"))
+            continue;
+
+        file = g_strdup_printf("%s/%s.xml", dir, de->d_name);
+
+        if (unlink(file) < 0 && errno != ENOENT)
+            VIR_WARN("Unable to delete %s", file);
+
+        VIR_FREE(file);
+    }
+
+    virHashRemoveAll(net->ports);
+    return 0;
+}
+
+
+typedef struct _virNetworkObjPortListExportData virNetworkObjPortListExportData;
+struct _virNetworkObjPortListExportData {
+    virNetworkPtr net;
+    virNetworkDef *def;
+    virNetworkPortPtr *ports;
+    virNetworkPortListFilter filter;
+    int nports;
+    bool error;
+};
+
+static int
+virNetworkObjPortListExportCallback(void *payload,
+                                    const char *name G_GNUC_UNUSED,
+                                    void *opaque)
+{
+    virNetworkObjPortListExportData *data = opaque;
+    virNetworkPortDef *def = payload;
+    virNetworkPortPtr port;
+
+    if (data->error)
+        return 0;
+
+    if (data->filter &&
+        !data->filter(data->net->conn, data->def, def))
+        return 0;
+
+    if (!data->ports) {
+        data->nports++;
+        return 0;
+    }
+
+    if (!(port = virGetNetworkPort(data->net, def->uuid))) {
+        data->error = true;
+        return 0;
+    }
+
+    data->ports[data->nports++] = port;
+
+    return 0;
+}
+
+
+int
+virNetworkObjPortListExport(virNetworkPtr net,
+                            virNetworkObj *obj,
+                            virNetworkPortPtr **ports,
+                            virNetworkPortListFilter filter)
+{
+    virNetworkObjPortListExportData data = {
+        net, obj->def, NULL, filter, 0, false,
+    };
+    int ret = -1;
+
+    if (ports) {
+        *ports = NULL;
+
+        data.ports = g_new0(virNetworkPortPtr, virHashSize(obj->ports) + 1);
+    }
+
+    virHashForEach(obj->ports, virNetworkObjPortListExportCallback, &data);
+
+    if (data.error)
+        goto cleanup;
+
+    if (data.ports) {
+        /* trim the array to the final size */
+        VIR_REALLOC_N(data.ports, data.nports + 1);
+        *ports = g_steal_pointer(&data.ports);
+    }
+
+    ret = data.nports;
+ cleanup:
+    while (data.ports && data.nports)
+        virObjectUnref(data.ports[--data.nports]);
+
+    VIR_FREE(data.ports);
+    return ret;
+}
+
+
+typedef struct _virNetworkObjPortListForEachData virNetworkObjPortListForEachData;
+struct _virNetworkObjPortListForEachData {
+    virNetworkPortListIter iter;
+    void *opaque;
+    bool err;
+};
+
+static int
+virNetworkObjPortForEachCallback(void *payload,
+                                 const char *name G_GNUC_UNUSED,
+                                 void *opaque)
+{
+    virNetworkObjPortListForEachData *data = opaque;
+
+    if (!data->iter(payload, data->opaque))
+        data->err = true;
+
+    return 0;
+}
+
+int
+virNetworkObjPortForEach(virNetworkObj *obj,
+                         virNetworkPortListIter iter,
+                         void *opaque)
+{
+    virNetworkObjPortListForEachData data = { iter, opaque, false };
+    virHashForEachSafe(obj->ports, virNetworkObjPortForEachCallback, &data);
+    if (data.err)
+        return -1;
+    return 0;
+}
+
+
+static int
+virNetworkObjLoadAllPorts(virNetworkObj *net,
+                          const char *stateDir)
+{
+    g_autofree char *dir = NULL;
+    g_autoptr(DIR) dh = NULL;
+    struct dirent *de;
+    int rc;
+    char uuidstr[VIR_UUID_STRING_BUFLEN];
+    g_autoptr(virNetworkPortDef) portdef = NULL;
+
+    if (!(dir = virNetworkObjGetPortStatusDir(net, stateDir)))
+        return -1;
+
+    if ((rc = virDirOpenIfExists(&dh, dir)) <= 0)
+        return rc;
+
+    while ((rc = virDirRead(dh, &de, dir)) > 0) {
+        g_autofree char *file = NULL;
+
+        if (!virStringStripSuffix(de->d_name, ".xml"))
+            continue;
+
+        file = g_strdup_printf("%s/%s.xml", dir, de->d_name);
+
+        portdef = virNetworkPortDefParseFile(file);
+        if (!portdef) {
+            VIR_WARN("Cannot parse port %s", file);
+            continue;
+        }
+
+        virUUIDFormat(portdef->uuid, uuidstr);
+        if (virHashAddEntry(net->ports, uuidstr, portdef) < 0)
+            return -1;
+
+        portdef = NULL;
+    }
+
+    return 0;
 }

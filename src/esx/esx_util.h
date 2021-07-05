@@ -19,14 +19,12 @@
  *
  */
 
-#ifndef LIBVIRT_ESX_UTIL_H
-# define LIBVIRT_ESX_UTIL_H
+#pragma once
 
-# include <netdb.h>
-# include "internal.h"
-# include "viruri.h"
+#include "internal.h"
+#include "viruri.h"
 
-# define ESX_VI_CHECK_ARG_LIST(val) \
+#define ESX_VI_CHECK_ARG_LIST(val) \
     do { \
         if (!val || *val) { \
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Invalid argument")); \
@@ -48,7 +46,7 @@ struct _esxUtil_ParsedUri {
     char *path;
 };
 
-int esxUtil_ParseUri(esxUtil_ParsedUri **parsedUri, virURIPtr uri);
+int esxUtil_ParseUri(esxUtil_ParsedUri **parsedUri, virURI *uri);
 
 void esxUtil_FreeParsedUri(esxUtil_ParsedUri **parsedUri);
 
@@ -57,8 +55,7 @@ int esxUtil_ParseVirtualMachineIDString(const char *id_string, int *id);
 int esxUtil_ParseDatastorePath(const char *datastorePath, char **datastoreName,
                                char **directoryName, char **directoryAndFileName);
 
-int esxUtil_ResolveHostname(const char *hostname,
-                            char *ipAddress, size_t ipAddress_length);
+int esxUtil_ResolveHostname(const char *hostname, char **ipAddress);
 
 int esxUtil_ReformatUuid(const char *input, char *output);
 
@@ -69,5 +66,3 @@ void esxUtil_ReplaceSpecialWindowsPathChars(char *string);
 char *esxUtil_EscapeDatastoreItem(const char *string);
 
 char *esxUtil_EscapeForXml(const char *string);
-
-#endif /* LIBVIRT_ESX_UTIL_H */

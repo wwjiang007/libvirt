@@ -26,16 +26,15 @@ static int
 testCompareXMLToXMLHelper(const void *data)
 {
     const struct testInfo *info = data;
-    char *xml_in = NULL;
-    char *xml_out = NULL;
+    g_autofree char *xml_in = NULL;
+    g_autofree char *xml_out = NULL;
     bool is_different = info->flags & FLAG_IS_DIFFERENT;
     int ret = -1;
 
-    if (virAsprintf(&xml_in, "%s/bhyvexml2argvdata/bhyvexml2argv-%s.xml",
-                    abs_srcdir, info->name) < 0 ||
-        virAsprintf(&xml_out, "%s/bhyvexml2xmloutdata/bhyvexml2xmlout-%s.xml",
-                    abs_srcdir, info->name) < 0)
-        goto cleanup;
+    xml_in = g_strdup_printf("%s/bhyvexml2argvdata/bhyvexml2argv-%s.xml",
+                             abs_srcdir, info->name);
+    xml_out = g_strdup_printf("%s/bhyvexml2xmloutdata/bhyvexml2xmlout-%s.xml",
+                              abs_srcdir, info->name);
 
     ret = testCompareDomXML2XMLFiles(driver.caps, driver.xmlopt, xml_in,
                                      is_different ? xml_out : xml_in,
@@ -44,14 +43,11 @@ testCompareXMLToXMLHelper(const void *data)
 
     if ((ret != 0) && (info->flags & FLAG_EXPECT_FAILURE)) {
         ret = 0;
-        VIR_TEST_DEBUG("Got expected error: %s\n",
+        VIR_TEST_DEBUG("Got expected error: %s",
                        virGetLastErrorMessage());
         virResetLastError();
     }
 
- cleanup:
-    VIR_FREE(xml_in);
-    VIR_FREE(xml_out);
     return ret;
 }
 
@@ -92,6 +88,7 @@ mymain(void)
     DO_TEST_DIFFERENT("bhyveload-bootorder4");
     DO_TEST_DIFFERENT("bhyveload-explicitargs");
     DO_TEST_DIFFERENT("console");
+    DO_TEST_DIFFERENT("console-master-slave-not-specified");
     DO_TEST_DIFFERENT("custom-loader");
     DO_TEST_DIFFERENT("disk-cdrom");
     DO_TEST_DIFFERENT("disk-cdrom-grub");
@@ -110,8 +107,13 @@ mymain(void)
     DO_TEST_DIFFERENT("vnc-vgaconf-off");
     DO_TEST_DIFFERENT("vnc-vgaconf-io");
     DO_TEST_DIFFERENT("vnc-autoport");
+    DO_TEST_DIFFERENT("vnc-resolution");
+    DO_TEST_DIFFERENT("vnc-password");
     DO_TEST_DIFFERENT("commandline");
     DO_TEST_DIFFERENT("msrs");
+    DO_TEST_DIFFERENT("sound");
+    DO_TEST_DIFFERENT("isa-controller");
+    DO_TEST_DIFFERENT("fs-9p");
 
     /* Address allocation tests */
     DO_TEST_DIFFERENT("addr-single-sata-disk");
@@ -119,6 +121,8 @@ mymain(void)
     DO_TEST_DIFFERENT("addr-more-than-32-sata-disks");
     DO_TEST_DIFFERENT("addr-single-virtio-disk");
     DO_TEST_DIFFERENT("addr-multiple-virtio-disks");
+    DO_TEST_DIFFERENT("addr-isa-controller-on-slot-1");
+    DO_TEST_DIFFERENT("addr-isa-controller-on-slot-31");
 
     /* The same without 32 devs per controller support */
     driver.bhyvecaps ^= BHYVE_CAP_AHCI32SLOT;
@@ -135,7 +139,7 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/bhyvexml2argvmock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, VIR_TEST_MOCK("bhyvexml2argv"))
 
 #else
 

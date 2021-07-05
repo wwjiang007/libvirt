@@ -18,12 +18,17 @@
 
 #include <config.h>
 
+#define LIBVIRT_VIRIDENTITYPRIV_H_ALLOW
+
 #include "internal.h"
 #include "viralloc.h"
 #include "vircommand.h"
 #include "vircrypto.h"
+#include "viridentitypriv.h"
 #include "virmock.h"
+#include "virlog.h"
 #include "virnetdev.h"
+#include "virnetdevbandwidth.h"
 #include "virnetdevip.h"
 #include "virnetdevtap.h"
 #include "virnetdevopenvswitch.h"
@@ -47,12 +52,14 @@ long virGetSystemPageSize(void)
     return 4096;
 }
 
-time_t time(time_t *t)
+GDateTime *g_date_time_new_now_utc(void)
 {
-    const time_t ret = 1234567890;
-    if (t)
-        *t = ret;
-    return ret;
+    return g_date_time_new_from_unix_utc(1234567890);
+}
+
+GDateTime *g_date_time_new_now_local(void)
+{
+    return g_date_time_new_from_unix_local(1234567890);
 }
 
 bool
@@ -78,7 +85,7 @@ virNumaNodeIsAvailable(int node)
 }
 
 bool
-virNumaNodesetIsAvailable(virBitmapPtr nodeset)
+virNumaNodesetIsAvailable(virBitmap *nodeset)
 {
     ssize_t bit = -1;
 
@@ -89,6 +96,8 @@ virNumaNodesetIsAvailable(virBitmapPtr nodeset)
         if (virNumaNodeIsAvailable(bit))
             continue;
 
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       "Mock: no numa node set is available at bit %zd", bit);
         return false;
     }
 
@@ -101,7 +110,7 @@ virTPMCreateCancelPath(const char *devpath)
     char *path;
     (void)devpath;
 
-    ignore_value(VIR_STRDUP(path, "/sys/class/misc/tpm0/device/cancel"));
+    path = g_strdup("/sys/class/misc/tpm0/device/cancel");
 
     return path;
 }
@@ -111,22 +120,9 @@ virTPMCreateCancelPath(const char *devpath)
  * variables that support it.
  */
 unsigned long long
-virMemoryMaxValue(bool capped ATTRIBUTE_UNUSED)
+virMemoryMaxValue(bool capped G_GNUC_UNUSED)
 {
     return LLONG_MAX;
-}
-
-char *
-virSCSIDeviceGetSgName(const char *sysfs_prefix ATTRIBUTE_UNUSED,
-                       const char *adapter ATTRIBUTE_UNUSED,
-                       unsigned int bus ATTRIBUTE_UNUSED,
-                       unsigned int target ATTRIBUTE_UNUSED,
-                       unsigned long long unit ATTRIBUTE_UNUSED)
-{
-    char *ret;
-
-    ignore_value(VIR_STRDUP(ret, "sg0"));
-    return ret;
 }
 
 int
@@ -139,45 +135,58 @@ virSCSIVHostOpenVhostSCSI(int *vhostfd)
 
 int
 virNetDevTapCreate(char **ifname,
-                   const char *tunpath ATTRIBUTE_UNUSED,
+                   const char *tunpath G_GNUC_UNUSED,
                    int *tapfd,
                    size_t tapfdSize,
-                   unsigned int flags ATTRIBUTE_UNUSED)
+                   unsigned int flags G_GNUC_UNUSED)
 {
     size_t i;
 
     for (i = 0; i < tapfdSize; i++)
         tapfd[i] = STDERR_FILENO + 1 + i;
 
-    VIR_FREE(*ifname);
-    return VIR_STRDUP(*ifname, "vnet0");
+    if (STREQ_NULLABLE(*ifname, "mytap0")) {
+        return 0;
+    } else {
+        VIR_FREE(*ifname);
+        *ifname = g_strdup("vnet0");
+        return 0;
+    }
 }
 
 int
-virNetDevSetMAC(const char *ifname ATTRIBUTE_UNUSED,
-                const virMacAddr *macaddr ATTRIBUTE_UNUSED)
+virNetDevSetMAC(const char *ifname G_GNUC_UNUSED,
+                const virMacAddr *macaddr G_GNUC_UNUSED)
 {
     return 0;
 }
 
-int virNetDevIPAddrAdd(const char *ifname ATTRIBUTE_UNUSED,
-                       virSocketAddr *addr ATTRIBUTE_UNUSED,
-                       virSocketAddr *peer ATTRIBUTE_UNUSED,
-                       unsigned int prefix ATTRIBUTE_UNUSED)
+
+int
+virNetDevExists(const char *ifname)
+{
+    return STREQ(ifname, "mytap0");
+}
+
+
+int virNetDevIPAddrAdd(const char *ifname G_GNUC_UNUSED,
+                       virSocketAddr *addr G_GNUC_UNUSED,
+                       virSocketAddr *peer G_GNUC_UNUSED,
+                       unsigned int prefix G_GNUC_UNUSED)
 {
     return 0;
 }
 
 int
-virNetDevSetOnline(const char *ifname ATTRIBUTE_UNUSED,
-                   bool online ATTRIBUTE_UNUSED)
+virNetDevSetOnline(const char *ifname G_GNUC_UNUSED,
+                   bool online G_GNUC_UNUSED)
 {
     return 0;
 }
 
 int
-virNetDevRunEthernetScript(const char *ifname ATTRIBUTE_UNUSED,
-                           const char *script ATTRIBUTE_UNUSED)
+virNetDevRunEthernetScript(const char *ifname G_GNUC_UNUSED,
+                           const char *script G_GNUC_UNUSED)
 {
     return 0;
 }
@@ -185,24 +194,21 @@ virNetDevRunEthernetScript(const char *ifname ATTRIBUTE_UNUSED,
 char *
 virHostGetDRMRenderNode(void)
 {
-    char *dst = NULL;
-
-    ignore_value(VIR_STRDUP(dst, "/dev/dri/foo"));
-    return dst;
+    return g_strdup("/dev/dri/foo");
 }
 
-static void (*real_virCommandPassFD)(virCommandPtr cmd, int fd, unsigned int flags);
+static void (*real_virCommandPassFD)(virCommand *cmd, int fd, unsigned int flags);
 
-static const int testCommandPassSafeFDs[] = { 1730, 1731 };
+static const int testCommandPassSafeFDs[] = { 1730, 1731, 1732 };
 
 void
-virCommandPassFD(virCommandPtr cmd,
+virCommandPassFD(virCommand *cmd,
                  int fd,
                  unsigned int flags)
 {
     size_t i;
 
-    for (i = 0; i < ARRAY_CARDINALITY(testCommandPassSafeFDs); i++) {
+    for (i = 0; i < G_N_ELEMENTS(testCommandPassSafeFDs); i++) {
         if (testCommandPassSafeFDs[i] == fd) {
             if (!real_virCommandPassFD)
                 VIR_MOCK_REAL_INIT(virCommandPassFD);
@@ -214,15 +220,17 @@ virCommandPassFD(virCommandPtr cmd,
 }
 
 int
-virNetDevOpenvswitchGetVhostuserIfname(const char *path ATTRIBUTE_UNUSED,
+virNetDevOpenvswitchGetVhostuserIfname(const char *path G_GNUC_UNUSED,
+                                       bool server G_GNUC_UNUSED,
                                        char **ifname)
 {
-    return VIR_STRDUP(*ifname, "vhost-user0");
+    *ifname = g_strdup("vhost-user0");
+    return 1;
 }
 
 int
-qemuInterfaceOpenVhostNet(virDomainDefPtr def ATTRIBUTE_UNUSED,
-                          virDomainNetDefPtr net,
+qemuInterfaceOpenVhostNet(virDomainDef *def G_GNUC_UNUSED,
+                          virDomainNetDef *net,
                           int *vhostfd,
                           size_t *vhostfdSize)
 {
@@ -240,7 +248,7 @@ qemuInterfaceOpenVhostNet(virDomainDefPtr def ATTRIBUTE_UNUSED,
 
 
 int
-qemuOpenChrChardevUNIXSocket(const virDomainChrSourceDef *dev ATTRIBUTE_UNUSED)
+qemuOpenChrChardevUNIXSocket(const virDomainChrSourceDef *dev G_GNUC_UNUSED)
 
 {
     /* We need to return an FD number for a UNIX listener socket,
@@ -257,8 +265,8 @@ qemuOpenChrChardevUNIXSocket(const virDomainChrSourceDef *dev ATTRIBUTE_UNUSED)
 
 
 int
-qemuBuildTPMOpenBackendFDs(const char *tpmdev ATTRIBUTE_UNUSED,
-                           const char *cancel_path ATTRIBUTE_UNUSED,
+qemuBuildTPMOpenBackendFDs(const char *tpmdev G_GNUC_UNUSED,
+                           const char *cancel_path G_GNUC_UNUSED,
                            int *tpmfd,
                            int *cancelfd)
 {
@@ -269,4 +277,27 @@ qemuBuildTPMOpenBackendFDs(const char *tpmdev ATTRIBUTE_UNUSED,
     *tpmfd = 1730;
     *cancelfd = 1731;
     return 0;
+}
+
+
+int
+virNetDevBandwidthSetRootQDisc(const char *ifname G_GNUC_UNUSED,
+                               const char *qdisc G_GNUC_UNUSED)
+{
+    return 0;
+}
+
+
+int
+qemuInterfaceVDPAConnect(virDomainNetDef *net G_GNUC_UNUSED)
+{
+    if (fcntl(1732, F_GETFD) != -1)
+        abort();
+    return 1732;
+}
+
+char *
+virIdentityEnsureSystemToken(void)
+{
+    return g_strdup("3de80bcbf22d4833897f1638e01be9b2");
 }

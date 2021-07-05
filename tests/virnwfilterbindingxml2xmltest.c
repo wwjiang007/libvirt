@@ -40,7 +40,7 @@ testCompareXMLToXMLFiles(const char *xml)
 {
     char *actual = NULL;
     int ret = -1;
-    virNWFilterBindingDefPtr dev = NULL;
+    virNWFilterBindingDef *dev = NULL;
 
     virResetLastError();
 
@@ -72,14 +72,11 @@ testCompareXMLToXMLHelper(const void *data)
     const test_parms *tp = data;
     char *xml = NULL;
 
-    if (virAsprintf(&xml, "%s/virnwfilterbindingxml2xmldata/%s.xml",
-                    abs_srcdir, tp->name) < 0) {
-        goto cleanup;
-    }
+    xml = g_strdup_printf("%s/virnwfilterbindingxml2xmldata/%s.xml", abs_srcdir,
+                          tp->name);
 
     result = testCompareXMLToXMLFiles(xml);
 
- cleanup:
     VIR_FREE(xml);
 
     return result;

@@ -18,15 +18,21 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_DRIVER_STATE_H
-# define LIBVIRT_DRIVER_STATE_H
+#pragma once
 
-# ifndef __VIR_DRIVER_H_INCLUDES___
-#  error "Don't include this file directly, only use driver.h"
-# endif
+#ifndef __VIR_DRIVER_H_INCLUDES___
+# error "Don't include this file directly, only use driver.h"
+#endif
 
-typedef int
+typedef enum {
+    VIR_DRV_STATE_INIT_ERROR = -1,
+    VIR_DRV_STATE_INIT_SKIPPED,
+    VIR_DRV_STATE_INIT_COMPLETE,
+} virDrvStateInitResult;
+
+typedef virDrvStateInitResult
 (*virDrvStateInitialize)(bool privileged,
+                         const char *root,
                          virStateInhibitCallback callback,
                          void *opaque);
 
@@ -39,16 +45,20 @@ typedef int
 typedef int
 (*virDrvStateStop)(void);
 
-typedef struct _virStateDriver virStateDriver;
-typedef virStateDriver *virStateDriverPtr;
+typedef int
+(*virDrvStateShutdownPrepare)(void);
 
+typedef int
+(*virDrvStateShutdownWait)(void);
+
+typedef struct _virStateDriver virStateDriver;
 struct _virStateDriver {
     const char *name;
+    bool initialized;
     virDrvStateInitialize stateInitialize;
     virDrvStateCleanup stateCleanup;
     virDrvStateReload stateReload;
     virDrvStateStop stateStop;
+    virDrvStateShutdownPrepare stateShutdownPrepare;
+    virDrvStateShutdownWait stateShutdownWait;
 };
-
-
-#endif /* LIBVIRT_DRIVER_STATE_H */

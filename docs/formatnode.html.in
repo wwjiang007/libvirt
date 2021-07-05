@@ -31,11 +31,30 @@
         name is just the bus type and address, as in
         "pci_0000_00_02_1" or "usb_1_5_3", but some devices are able
         to provide more specific names, such as
-        "net_eth1_00_27_13_6a_fe_00".
+        "net_eth1_00_27_13_6a_fe_00". This is a read-only field that is
+        reported by the device driver. If this element is set when defining a
+        new device, it will be ignored.
+
+      </dd>
+      <dt><code>path</code></dt>
+      <dd>
+        Fully qualified sysfs path to the device. This is a read-only field
+        that is reported by the device driver. If this element is set when
+        defining a new device, it will be ignored.
       </dd>
       <dt><code>parent</code></dt>
-      <dd>If this element is present, it names the parent device (that
-        is, a controller to which this node belongs).
+      <dd>
+        This element identifies the parent node in the device hierarchy. The
+        value of the element will correspond with the device parent's
+        <code>name</code> element or <code>computer</code> if the device does
+        not have any parent.
+      </dd>
+      <dt><code>driver</code></dt>
+      <dd>
+        This elements reports the driver in use for this device. The presence
+        of this element in the output XML depends on whether the underlying
+        device manager (most likely udev) exposes information about the
+        driver.
       </dd>
       <dt><code>devnode</code></dt>
       <dd>This node appears for each associated <code>/dev</code>
@@ -109,7 +128,7 @@
                 exists, it has a mandatory <code>type</code> attribute
                 which will be set to:
                 <dl>
-                  <dt><code>physical_function</code></dt>
+                  <dt><code>phys_function</code></dt>
                   <dd>
                     That means there will be a single <code>address</code>
                     subelement which contains the PCI address of the SRIOV
@@ -117,16 +136,16 @@
                     (and this device is, by implication, an SRIOV Virtual
                     Function (VF)).
                   </dd>
-                  <dt><code>virtual_function</code></dt>
+                  <dt><code>virt_functions</code></dt>
                   <dd>
                     In this case this device is an SRIOV PF, and the capability
                     element will have a list of <code>address</code>
                     subelements, one for each VF on this PF. If the host system
-                    supports reporting it (via the "sriov_maxvfs" file in the
+                    supports reporting it (via the "sriov_totalvfs" file in the
                     device's sysfs directory) the capability element will also
                     have an attribute named <code>maxCount</code> which is the
                     maximum number of SRIOV VFs supported by this device, which
-                    could be higher than the number of VFs that are curently
+                    could be higher than the number of VFs that are currently
                     active <span class="since">since 1.3.0</span>; in this case,
                     even if there are currently no active VFs the
                     virtual_functions capabililty will still be shown.
@@ -138,8 +157,15 @@
                     means such device cannot be used for PCI passthrough.
                     <span class="since">Since 1.3.3</span>
                   </dd>
+                  <dt><code><a id="MDEVTypesCapPCI">mdev_types</a></code></dt>
+                  <dd>
+                    This device is capable of creating mediated devices.
+                    The sub-elements are summarized in
+                    <a href="#MDEVTypesCap">mdev_types capability</a>.
+                 </dd>
                 </dl>
               </dd>
+
               <dt><code>numa</code></dt>
               <dd>
                 This optional element contains information on the PCI device
@@ -329,6 +355,41 @@
               <code>render</code>.</dd>
             </dl>
           </dd>
+          <dt><a id="mdev"><code>mdev</code></a></dt>
+          <dd>Describes a mediated device.  <span class="since">Since
+            3.4.0</span> Sub-elements include:
+            <dl>
+              <dt><code>type</code></dt>
+              <dd>
+                Describes a mediated device type which acts as an abstract
+                template defining a resource allocation for instances
+                of this device type. The element has one attribute
+                <code>id</code> which holds an official vendor-supplied
+                identifier for the type.
+              </dd>
+              <dt><code>iommuGroup</code></dt>
+              <dd>
+                This element supports a single attribute <code>number</code>
+                which holds the IOMMU group number to which the mediated device
+                belongs. This is a read-only field that is reported by the
+                device driver.
+              </dd>
+              <dt><code>attr</code></dt>
+              <dd>
+                This optional element can occur multiple times. It represents a
+                vendor-specific attribute that is used to configure this
+                mediated device. It has two required attributes:
+                <code>name</code> and <code>value</code>. Note that the order
+                in which attributes are set may be important for some devices.
+                The order that they appear in the xml definition determines the
+                order that they will be written to the device.
+              </dd>
+              <dt><code>uuid</code></dt>
+              <dd>
+                This element represents the UUID of the mediated device.
+              </dd>
+            </dl>
+          </dd>
           <dt><code>ccw</code></dt>
           <dd>Describes a Command Channel Word (CCW) device commonly found on
           the S390 architecture. Sub-elements include:
@@ -341,9 +402,127 @@
               <dd>The device number.</dd>
             </dl>
           </dd>
+          <dt><code>css</code></dt>
+          <dd>Describes a subchannel in the Channel SubSystem (CSS) commonly
+          found on the S390 architecture. Sub-elements include:
+            <dl>
+              <dt><code>cssid</code></dt>
+              <dd>The channel subsystem identifier.</dd>
+              <dt><code>ssid</code></dt>
+              <dd>The subchannel-set identifier.</dd>
+              <dt><code>devno</code></dt>
+              <dd>The subchannel number.</dd>
+              <dt><code>capability</code></dt>
+              <dd>
+                This optional element can occur multiple times. If it
+                exists, it has a mandatory <code>type</code> attribute
+                which will be set to:
+                <dl>
+                  <dt><code><a id="MDEVTypesCapCSS">mdev_types</a></code></dt>
+                  <dd>
+                    <span class="since">Since 6.10.0</span>
+                    This device is capable of creating mediated devices.
+                    The sub-elements are summarized in
+                    <a href="#MDevTypesCap">mdev_types capability</a>.
+                  </dd>
+                </dl>
+              </dd>
+            </dl>
+          </dd>
+          <dt><code>vdpa</code></dt>
+          <dd>Describes a virtual datapath acceleration (vDPA) network device.
+          <span class="since">Since 6.9.0</span>. Sub-elements include:
+            <dl>
+              <dt><code>chardev</code></dt>
+              <dd>The path to the character device that is used to access the
+                  device.</dd>
+            </dl>
+          </dd>
+          <dt><code>ap_card</code></dt>
+          <dd>Describes the Adjunct Processor (AP) Card device on a S390 host.
+              Sub-elements include:
+            <dl>
+              <dt><code>ap-adapter</code></dt>
+              <dd>AP Card identifier.</dd>
+            </dl>
+          </dd>
+          <dt><code>ap_queue</code></dt>
+          <dd>Describes the AP queue on a s390 host. An AP queue is
+              an AP domain on an AP adapter which is specified by an
+              adapter identifier and a domain identifier.
+              Sub-elements include:
+            <dl>
+              <dt><code>ap-adapter</code></dt>
+              <dd>The ap-adapter of an AP queue identifies the AP
+                  card to which this AP queue belongs.</dd>
+              <dt><code>ap-domain</code></dt>
+              <dd>The ap-domain of an AP queue identifies the AP
+                  domain to which this AP queue belongs.</dd>
+              <dd>AP Queue identifier.</dd>
+            </dl>
+          </dd>
+          <dt><code>ap_matrix</code></dt>
+          <dd>Describes an AP Matrix device on a S390 architecture providing
+              cryptographic host resources usable for virtualization.
+              Sub-elements include:
+            <dl>
+              <dt><code>capability</code></dt>
+              <dd>
+                This optional element can occur multiple times. If it
+                exists, it has a mandatory <code>type</code> attribute
+                which will be set to:
+                <dl>
+                  <dt><code><a id="MDEVTypesCapAP">mdev_types</a></code></dt>
+                  <dd>
+                    <span class="since">Since 6.10.0</span>
+                    This device is capable of creating mediated devices.
+                    The sub-elements are summarized in
+                    <a href="#MDEVTypesCap">mdev_types capability</a>.
+                  </dd>
+                </dl>
+              </dd>
+            </dl>
+          </dd>
         </dl>
       </dd>
     </dl>
+
+    <h3><a id="MDEVTypesCap">mdev_types capability</a></h3>
+
+    <p>
+      <a href="#MDEVTypesCapPCI">PCI</a>, <a href="#MDEVTypesCapCSS">CSS</a>
+      and <a href="#MDEVTypesCapAP">AP Matrix</a>
+      devices can be capable of creating mediated devices.
+      If they indeed are capable, then the parent <code>capability</code>
+      element for <code>mdev_types</code> type will contain a list of
+      <code>type</code> elements, which list all mdev types supported
+      on the physical device. <span class="since">Since 3.4.0</span>
+      Each <code>type</code> element has a single <code>id</code>
+      attribute that holds an official vendor-supplied identifier
+      for the type. It supports the following sub-elements:
+      <dl>
+        <dt><code>name</code></dt>
+        <dd>
+          The <code>name</code> element holds a vendor-supplied
+          code name for the given mediated device type. This is
+          an optional element.
+        </dd>
+        <dt><code>deviceAPI</code></dt>
+        <dd>
+          The value of this element describes how an instance of
+          the given type will be presented to the guest by the
+          VFIO framework.
+        </dd>
+        <dt><code>availableInstances</code></dt>
+        <dd>
+          This element reports the current state of resource
+          allocation. In other words, how many instances of the
+          given type can still be successfully created on the
+          physical device.
+        </dd>
+      </dl>
+    </p>
+
 
     <h2><a id="nodeExample">Examples</a></h2>
 

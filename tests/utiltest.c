@@ -39,25 +39,20 @@ static const char* diskNamesInvalid[] = {
 };
 
 static int
-testIndexToDiskName(const void *data ATTRIBUTE_UNUSED)
+testIndexToDiskName(const void *data G_GNUC_UNUSED)
 {
     size_t i;
-    char *diskName = NULL;
 
-    for (i = 0; i < ARRAY_CARDINALITY(diskNames); ++i) {
-        VIR_FREE(diskName);
+    for (i = 0; i < G_N_ELEMENTS(diskNames); ++i) {
+        g_autofree char *diskName = NULL;
 
         diskName = virIndexToDiskName(i, "sd");
 
         if (STRNEQ(diskNames[i], diskName)) {
             virTestDifference(stderr, diskNames[i], diskName);
-            VIR_FREE(diskName);
-
             return -1;
         }
     }
-
-    VIR_FREE(diskName);
 
     return 0;
 }
@@ -65,29 +60,23 @@ testIndexToDiskName(const void *data ATTRIBUTE_UNUSED)
 
 
 static int
-testDiskNameToIndex(const void *data ATTRIBUTE_UNUSED)
+testDiskNameToIndex(const void *data G_GNUC_UNUSED)
 {
     size_t i;
     int idx;
-    char *diskName = NULL;
 
     for (i = 0; i < 100000; ++i) {
-        VIR_FREE(diskName);
+        g_autofree char *diskName = NULL;
 
         diskName = virIndexToDiskName(i, "sd");
         idx = virDiskNameToIndex(diskName);
 
         if (idx < 0 || idx != i) {
-            VIR_TEST_DEBUG("\nExpect [%zu]\n", i);
-            VIR_TEST_DEBUG("Actual [%d]\n", idx);
-
-            VIR_FREE(diskName);
-
+            VIR_TEST_DEBUG("\nExpect [%zu]", i);
+            VIR_TEST_DEBUG("Actual [%d]", idx);
             return -1;
         }
     }
-
-    VIR_FREE(diskName);
 
     return 0;
 }
@@ -95,34 +84,34 @@ testDiskNameToIndex(const void *data ATTRIBUTE_UNUSED)
 
 
 static int
-testDiskNameParse(const void *data ATTRIBUTE_UNUSED)
+testDiskNameParse(const void *data G_GNUC_UNUSED)
 {
     size_t i;
     int idx;
     int partition;
     struct testDiskName *disk = NULL;
 
-    for (i = 0; i < ARRAY_CARDINALITY(diskNamesPart); ++i) {
+    for (i = 0; i < G_N_ELEMENTS(diskNamesPart); ++i) {
         disk = &diskNamesPart[i];
         if (virDiskNameParse(disk->name, &idx, &partition))
             return -1;
 
         if (disk->idx != idx) {
-            VIR_TEST_DEBUG("\nExpect [%d]\n", disk->idx);
-            VIR_TEST_DEBUG("Actual [%d]\n", idx);
+            VIR_TEST_DEBUG("\nExpect [%d]", disk->idx);
+            VIR_TEST_DEBUG("Actual [%d]", idx);
             return -1;
         }
 
         if (disk->partition != partition) {
-            VIR_TEST_DEBUG("\nExpect [%d]\n", disk->partition);
-            VIR_TEST_DEBUG("Actual [%d]\n", partition);
+            VIR_TEST_DEBUG("\nExpect [%d]", disk->partition);
+            VIR_TEST_DEBUG("Actual [%d]", partition);
             return -1;
         }
     }
 
-    for (i = 0; i < ARRAY_CARDINALITY(diskNamesInvalid); ++i) {
+    for (i = 0; i < G_N_ELEMENTS(diskNamesInvalid); ++i) {
         if (!virDiskNameParse(diskNamesInvalid[i], &idx, &partition)) {
-            VIR_TEST_DEBUG("Should Fail [%s]\n", diskNamesInvalid[i]);
+            VIR_TEST_DEBUG("Should Fail [%s]", diskNamesInvalid[i]);
             return -1;
         }
     }
@@ -155,20 +144,20 @@ static struct testVersionString versions[] = {
 };
 
 static int
-testParseVersionString(const void *data ATTRIBUTE_UNUSED)
+testParseVersionString(const void *data G_GNUC_UNUSED)
 {
     int result;
     size_t i;
     unsigned long version;
 
-    for (i = 0; i < ARRAY_CARDINALITY(versions); ++i) {
+    for (i = 0; i < G_N_ELEMENTS(versions); ++i) {
         result = virParseVersionString(versions[i].string, &version,
                                        versions[i].allowMissing);
 
         if (result != versions[i].result) {
-            VIR_TEST_DEBUG("\nVersion string [%s]\n", versions[i].string);
-            VIR_TEST_DEBUG("Expect result [%d]\n", versions[i].result);
-            VIR_TEST_DEBUG("Actual result [%d]\n", result);
+            VIR_TEST_DEBUG("\nVersion string [%s]", versions[i].string);
+            VIR_TEST_DEBUG("Expect result [%d]", versions[i].result);
+            VIR_TEST_DEBUG("Actual result [%d]", result);
 
             return -1;
         }
@@ -177,9 +166,9 @@ testParseVersionString(const void *data ATTRIBUTE_UNUSED)
             continue;
 
         if (version != versions[i].version) {
-            VIR_TEST_DEBUG("\nVersion string [%s]\n", versions[i].string);
-            VIR_TEST_DEBUG("Expect version [%lu]\n", versions[i].version);
-            VIR_TEST_DEBUG("Actual version [%lu]\n", version);
+            VIR_TEST_DEBUG("\nVersion string [%s]", versions[i].string);
+            VIR_TEST_DEBUG("Expect version [%lu]", versions[i].version);
+            VIR_TEST_DEBUG("Actual version [%lu]", version);
 
             return -1;
         }
@@ -205,17 +194,17 @@ static struct testRoundData roundData[] = {
 };
 
 static int
-testRoundValueToPowerOfTwo(const void *data ATTRIBUTE_UNUSED)
+testRoundValueToPowerOfTwo(const void *data G_GNUC_UNUSED)
 {
     unsigned int result;
     size_t i;
 
-    for (i = 0; i < ARRAY_CARDINALITY(roundData); i++) {
+    for (i = 0; i < G_N_ELEMENTS(roundData); i++) {
         result = VIR_ROUND_UP_POWER_OF_TWO(roundData[i].input);
         if (roundData[i].output != result) {
-            VIR_TEST_DEBUG("\nInput number [%u]\n", roundData[i].input);
-            VIR_TEST_DEBUG("Expected number [%u]\n", roundData[i].output);
-            VIR_TEST_DEBUG("Actual number [%u]\n", result);
+            VIR_TEST_DEBUG("\nInput number [%u]", roundData[i].input);
+            VIR_TEST_DEBUG("Expected number [%u]", roundData[i].output);
+            VIR_TEST_DEBUG("Actual number [%u]", result);
 
             return -1;
         }
@@ -234,7 +223,7 @@ testRoundValueToPowerOfTwo(const void *data ATTRIBUTE_UNUSED)
     }
 
 static int
-testOverflowCheckMacro(const void *data ATTRIBUTE_UNUSED)
+testOverflowCheckMacro(const void *data G_GNUC_UNUSED)
 {
     long long tmp;
     uint8_t luchar;
@@ -254,6 +243,140 @@ testOverflowCheckMacro(const void *data ATTRIBUTE_UNUSED)
 }
 
 
+struct testKernelCmdlineNextParamData
+{
+    const char *cmdline;
+    const char *param;
+    const char *val;
+    const char *next;
+};
+
+static struct testKernelCmdlineNextParamData kEntries[] = {
+    { "arg1 arg2 arg3=val1",                        "arg1",              NULL,                  " arg2 arg3=val1"      },
+    { "arg1=val1 arg2 arg3=val3 arg4",              "arg1",              "val1",                " arg2 arg3=val3 arg4" },
+    { "arg1=sub1=val1,sub2=val2 arg3=val3 arg4",    "arg1",              "sub1=val1,sub2=val2", " arg3=val3 arg4"      },
+    { "arg3=val3 ",                                 "arg3",              "val3",                " "                    },
+    { "arg3=val3",                                  "arg3",              "val3",                ""                     },
+    { "arg-3=val3 arg4",                            "arg-3",             "val3",                " arg4"                },
+    { " arg_3=val3 arg4",                           "arg_3",             "val3",                " arg4"                },
+    { "arg2=\"value with space\" arg3=val3",        "arg2",              "value with space",    " arg3=val3"           },
+    { " arg2=\"value with space\"   arg3=val3",     "arg2",              "value with space",    "   arg3=val3"         },
+    { "  \"arg2=value with space\" arg3=val3",      "arg2",              "value with space",    " arg3=val3"           },
+    { "arg2=\"val\"ue arg3",                        "arg2",              "val\"ue",             " arg3"                },
+    { "arg2=value\" long\" arg3",                   "arg2",              "value\" long\"",      " arg3"                },
+    { " \"arg2 with space=value with space\" arg3", "arg2 with space",   "value with space",    " arg3"                },
+    { " arg2\" with space=val2\" arg3",             "arg2\" with space", "val2\"",              " arg3"                },
+    { " arg2longer=someval\" long\" arg2=val2",     "arg2longer",        "someval\" long\"",    " arg2=val2"           },
+    { "=val1 arg2=val2",                            "=val1",             NULL,                  " arg2=val2"           },
+    { " ",                                          NULL,                NULL,                  ""                     },
+    { "",                                           NULL,                NULL,                  ""                     },
+};
+
+static int
+testKernelCmdlineNextParam(const void *data G_GNUC_UNUSED)
+{
+    const char *next;
+    size_t i;
+
+    for (i = 0; i < G_N_ELEMENTS(kEntries); ++i) {
+        g_autofree char * param = NULL;
+        g_autofree char * val = NULL;
+
+        next = virKernelCmdlineNextParam(kEntries[i].cmdline, &param, &val);
+
+        if (STRNEQ_NULLABLE(param, kEntries[i].param) ||
+            STRNEQ_NULLABLE(val, kEntries[i].val) ||
+            STRNEQ(next, kEntries[i].next)) {
+            VIR_TEST_DEBUG("\nKernel cmdline [%s]", kEntries[i].cmdline);
+            VIR_TEST_DEBUG("Expect param [%s]", kEntries[i].param);
+            VIR_TEST_DEBUG("Actual param [%s]", param);
+            VIR_TEST_DEBUG("Expect value [%s]", kEntries[i].val);
+            VIR_TEST_DEBUG("Actual value [%s]", val);
+            VIR_TEST_DEBUG("Expect next [%s]", kEntries[i].next);
+            VIR_TEST_DEBUG("Actual next [%s]", next);
+
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+
+struct testKernelCmdlineMatchData
+{
+    const char *cmdline;
+    const char *arg;
+    const char *values[2];
+    virKernelCmdlineFlags flags;
+    bool result;
+};
+
+static struct testKernelCmdlineMatchData kMatchEntries[] = {
+    {"arg1 myarg=no arg2=val2 myarg=yes arg4=val4 myarg=no arg5", "myarg",  {"1", "y"},          VIR_KERNEL_CMDLINE_FLAGS_SEARCH_FIRST | VIR_KERNEL_CMDLINE_FLAGS_CMP_EQ,     false },
+    {"arg1 myarg=no arg2=val2 myarg=yes arg4=val4 myarg=no arg5", "myarg",  {"on", "yes"},       VIR_KERNEL_CMDLINE_FLAGS_SEARCH_FIRST | VIR_KERNEL_CMDLINE_FLAGS_CMP_EQ,     true  },
+    {"arg1 myarg=no arg2=val2 myarg=yes arg4=val4 myarg=no arg5", "myarg",  {"1", "y"},          VIR_KERNEL_CMDLINE_FLAGS_SEARCH_FIRST | VIR_KERNEL_CMDLINE_FLAGS_CMP_PREFIX, true  },
+    {"arg1 myarg=no arg2=val2 myarg=yes arg4=val4 myarg=no arg5", "myarg",  {"a", "b"},          VIR_KERNEL_CMDLINE_FLAGS_SEARCH_FIRST | VIR_KERNEL_CMDLINE_FLAGS_CMP_PREFIX, false },
+    {"arg1 myarg=no arg2=val2 myarg=yes arg4=val4 myarg=no arg5", "myarg",  {"on", "yes"},       VIR_KERNEL_CMDLINE_FLAGS_SEARCH_LAST | VIR_KERNEL_CMDLINE_FLAGS_CMP_EQ,      false },
+    {"arg1 myarg=no arg2=val2 myarg=yes arg4=val4 myarg=no arg5", "myarg",  {"1", "y"},          VIR_KERNEL_CMDLINE_FLAGS_SEARCH_LAST | VIR_KERNEL_CMDLINE_FLAGS_CMP_PREFIX,  false },
+    {"arg1 myarg=no arg2=val2 arg4=val4 myarg=yes arg5",          "myarg",  {"on", "yes"},       VIR_KERNEL_CMDLINE_FLAGS_SEARCH_LAST | VIR_KERNEL_CMDLINE_FLAGS_CMP_EQ,      true  },
+    {"arg1 myarg=no arg2=val2 arg4=val4 myarg=yes arg5",          "myarg",  {"1", "y"},          VIR_KERNEL_CMDLINE_FLAGS_SEARCH_LAST | VIR_KERNEL_CMDLINE_FLAGS_CMP_PREFIX,  true  },
+    {"arg1 myarg=no arg2=val2 arg4=val4 myarg arg5",              "myarg",  {NULL, NULL},        VIR_KERNEL_CMDLINE_FLAGS_SEARCH_LAST,                                        true  },
+    {"arg1 myarg arg2=val2 arg4=val4 myarg=yes arg5",             "myarg",  {NULL, NULL},        VIR_KERNEL_CMDLINE_FLAGS_SEARCH_FIRST,                                       true  },
+    {"arg1 myarg arg2=val2 arg4=val4 myarg=yes arg5",             "myarg",  {NULL, NULL},        VIR_KERNEL_CMDLINE_FLAGS_SEARCH_LAST,                                        false },
+    {"arg1 my-arg=no arg2=val2 arg4=val4 my_arg=yes arg5",        "my-arg", {"on", "yes"},       VIR_KERNEL_CMDLINE_FLAGS_SEARCH_LAST,                                        true  },
+    {"arg1 my-arg=no arg2=val2 arg4=val4 my_arg=yes arg5 ",       "my-arg", {"on", "yes"},       VIR_KERNEL_CMDLINE_FLAGS_SEARCH_LAST | VIR_KERNEL_CMDLINE_FLAGS_CMP_EQ,      true  },
+    {"arg1 my-arg arg2=val2 arg4=val4 my_arg=yes arg5",           "my_arg", {NULL, NULL},        VIR_KERNEL_CMDLINE_FLAGS_SEARCH_FIRST,                                       true  },
+    {"arg1 my-arg arg2=val2 arg4=val4 my-arg=yes arg5",           "my_arg", {NULL, NULL},        VIR_KERNEL_CMDLINE_FLAGS_SEARCH_FIRST,                                       true  },
+    {"=arg1 my-arg arg2=val2 arg4=val4 my-arg=yes arg5",          "my_arg", {NULL, NULL},        VIR_KERNEL_CMDLINE_FLAGS_SEARCH_FIRST,                                       true  },
+    {"my-arg =arg1 arg2=val2 arg4=val4 my-arg=yes arg5",          "=arg1",  {NULL, NULL},        VIR_KERNEL_CMDLINE_FLAGS_SEARCH_LAST,                                        true  },
+    {"arg1 arg2=val2 myarg=sub1=val1 arg5",                       "myarg",  {"sub1=val1", NULL}, VIR_KERNEL_CMDLINE_FLAGS_SEARCH_LAST,                                        true  },
+    {"arg1 arg2=",                                                "arg2",   {"", ""},            VIR_KERNEL_CMDLINE_FLAGS_SEARCH_LAST | VIR_KERNEL_CMDLINE_FLAGS_CMP_EQ,      true  },
+    {" ",                                                         "myarg",  {NULL, NULL},        VIR_KERNEL_CMDLINE_FLAGS_SEARCH_LAST,                                        false },
+    {"",                                                          "",       {NULL, NULL},        VIR_KERNEL_CMDLINE_FLAGS_SEARCH_LAST,                                        false },
+};
+
+
+static int
+testKernelCmdlineMatchParam(const void *data G_GNUC_UNUSED)
+{
+    bool result;
+    size_t i, lenValues;
+
+    for (i = 0; i < G_N_ELEMENTS(kMatchEntries); ++i) {
+        if (kMatchEntries[i].values[0] == NULL)
+            lenValues = 0;
+        else
+            lenValues = G_N_ELEMENTS(kMatchEntries[i].values);
+
+        result = virKernelCmdlineMatchParam(kMatchEntries[i].cmdline,
+                                            kMatchEntries[i].arg,
+                                            kMatchEntries[i].values,
+                                            lenValues,
+                                            kMatchEntries[i].flags);
+
+        if (result != kMatchEntries[i].result) {
+            VIR_TEST_DEBUG("\nKernel cmdline [%s]", kMatchEntries[i].cmdline);
+            VIR_TEST_DEBUG("Kernel argument [%s]", kMatchEntries[i].arg);
+            VIR_TEST_DEBUG("Kernel values [%s] [%s]", kMatchEntries[i].values[0],
+                           kMatchEntries[i].values[1]);
+            if (kMatchEntries[i].flags & VIR_KERNEL_CMDLINE_FLAGS_CMP_PREFIX)
+                VIR_TEST_DEBUG("Flag [VIR_KERNEL_CMDLINE_FLAGS_CMP_PREFIX]");
+            if (kMatchEntries[i].flags & VIR_KERNEL_CMDLINE_FLAGS_CMP_EQ)
+                VIR_TEST_DEBUG("Flag [VIR_KERNEL_CMDLINE_FLAGS_CMP_EQ]");
+            if (kMatchEntries[i].flags & VIR_KERNEL_CMDLINE_FLAGS_SEARCH_FIRST)
+                VIR_TEST_DEBUG("Flag [VIR_KERNEL_CMDLINE_FLAGS_SEARCH_FIRST]");
+            if (kMatchEntries[i].flags & VIR_KERNEL_CMDLINE_FLAGS_SEARCH_LAST)
+                VIR_TEST_DEBUG("Flag [VIR_KERNEL_CMDLINE_FLAGS_SEARCH_LAST]");
+            VIR_TEST_DEBUG("Expect result [%d]", kMatchEntries[i].result);
+            VIR_TEST_DEBUG("Actual result [%d]", result);
+
+            return -1;
+        }
+    }
+
+    return 0;
+}
 
 
 static int
@@ -277,6 +400,8 @@ mymain(void)
     DO_TEST(ParseVersionString);
     DO_TEST(RoundValueToPowerOfTwo);
     DO_TEST(OverflowCheckMacro);
+    DO_TEST(KernelCmdlineNextParam);
+    DO_TEST(KernelCmdlineMatchParam);
 
     return result == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

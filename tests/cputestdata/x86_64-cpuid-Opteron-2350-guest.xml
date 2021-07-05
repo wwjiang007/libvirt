@@ -3,6 +3,7 @@
   <vendor>AMD</vendor>
   <feature policy='require' name='vme'/>
   <feature policy='require' name='ht'/>
+  <feature policy='require' name='monitor'/>
   <feature policy='require' name='mmxext'/>
   <feature policy='require' name='fxsr_opt'/>
   <feature policy='require' name='pdpe1gb'/>
@@ -15,4 +16,7 @@
   <feature policy='require' name='osvw'/>
   <feature policy='require' name='ibs'/>
   <feature policy='require' name='invtsc'/>
+  <feature policy='require' name='npt'/>
+  <feature policy='require' name='lbrv'/>
+  <feature policy='require' name='svm-lock'/>
 </cpu>

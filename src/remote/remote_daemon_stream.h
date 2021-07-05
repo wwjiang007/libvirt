@@ -18,30 +18,27 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_REMOTE_DAEMON_STREAM_H
-# define LIBVIRT_REMOTE_DAEMON_STREAM_H
+#pragma once
 
-# include "remote_daemon.h"
+#include "remote_daemon.h"
 
 daemonClientStream *
-daemonCreateClientStream(virNetServerClientPtr client,
+daemonCreateClientStream(virNetServerClient *client,
                          virStreamPtr st,
-                         virNetServerProgramPtr prog,
-                         virNetMessageHeaderPtr hdr,
+                         virNetServerProgram *prog,
+                         struct virNetMessageHeader *hdr,
                          bool allowSkip);
 
-int daemonFreeClientStream(virNetServerClientPtr client,
+int daemonFreeClientStream(virNetServerClient *client,
                            daemonClientStream *stream);
 
-int daemonAddClientStream(virNetServerClientPtr client,
+int daemonAddClientStream(virNetServerClient *client,
                           daemonClientStream *stream,
                           bool transmit);
 
 int
-daemonRemoveClientStream(virNetServerClientPtr client,
+daemonRemoveClientStream(virNetServerClient *client,
                          daemonClientStream *stream);
 
 void
 daemonRemoveAllClientStreams(daemonClientStream *stream);
-
-#endif /* LIBVIRT_REMOTE_DAEMON_STREAM_H */

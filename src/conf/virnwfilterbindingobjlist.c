@@ -32,7 +32,7 @@
 
 VIR_LOG_INIT("conf.virnwfilterbindingobjlist");
 
-static virClassPtr virNWFilterBindingObjListClass;
+static virClass *virNWFilterBindingObjListClass;
 static void virNWFilterBindingObjListDispose(void *obj);
 
 struct _virNWFilterBindingObjList {
@@ -40,7 +40,7 @@ struct _virNWFilterBindingObjList {
 
     /* port dev name -> virNWFilterBindingObj  mapping
      * for O(1), lockless lookup-by-port dev */
-    virHashTable *objs;
+    GHashTable *objs;
 };
 
 
@@ -55,10 +55,10 @@ static int virNWFilterBindingObjListOnceInit(void)
 VIR_ONCE_GLOBAL_INIT(virNWFilterBindingObjList);
 
 
-virNWFilterBindingObjListPtr
+virNWFilterBindingObjList *
 virNWFilterBindingObjListNew(void)
 {
-    virNWFilterBindingObjListPtr bindings;
+    virNWFilterBindingObjList *bindings;
 
     if (virNWFilterBindingObjListInitialize() < 0)
         return NULL;
@@ -66,7 +66,7 @@ virNWFilterBindingObjListNew(void)
     if (!(bindings = virObjectRWLockableNew(virNWFilterBindingObjListClass)))
         return NULL;
 
-    if (!(bindings->objs = virHashCreate(50, virObjectFreeHashData))) {
+    if (!(bindings->objs = virHashNew(virObjectFreeHashData))) {
         virObjectUnref(bindings);
         return NULL;
     }
@@ -78,17 +78,17 @@ virNWFilterBindingObjListNew(void)
 static void
 virNWFilterBindingObjListDispose(void *obj)
 {
-    virNWFilterBindingObjListPtr bindings = obj;
+    virNWFilterBindingObjList *bindings = obj;
 
     virHashFree(bindings->objs);
 }
 
 
-static virNWFilterBindingObjPtr
-virNWFilterBindingObjListFindByPortDevLocked(virNWFilterBindingObjListPtr bindings,
+static virNWFilterBindingObj *
+virNWFilterBindingObjListFindByPortDevLocked(virNWFilterBindingObjList *bindings,
                                              const char *name)
 {
-    virNWFilterBindingObjPtr obj;
+    virNWFilterBindingObj *obj;
 
     obj = virHashLookup(bindings->objs, name);
     if (obj) {
@@ -107,11 +107,11 @@ virNWFilterBindingObjListFindByPortDevLocked(virNWFilterBindingObjListPtr bindin
  * locked and ref counted binding object if found. Caller is expected
  * to use the virNWFilterBindingObjEndAPI when done with the object.
  */
-virNWFilterBindingObjPtr
-virNWFilterBindingObjListFindByPortDev(virNWFilterBindingObjListPtr bindings,
+virNWFilterBindingObj *
+virNWFilterBindingObjListFindByPortDev(virNWFilterBindingObjList *bindings,
                                        const char *name)
 {
-    virNWFilterBindingObjPtr obj;
+    virNWFilterBindingObj *obj;
 
     virObjectRWLockRead(bindings);
     obj = virNWFilterBindingObjListFindByPortDevLocked(bindings, name);
@@ -144,10 +144,10 @@ virNWFilterBindingObjListFindByPortDev(virNWFilterBindingObjListPtr bindings,
  *        -1 on failure with 1 reference and locked
  */
 static int
-virNWFilterBindingObjListAddObjLocked(virNWFilterBindingObjListPtr bindings,
-                                      virNWFilterBindingObjPtr binding)
+virNWFilterBindingObjListAddObjLocked(virNWFilterBindingObjList *bindings,
+                                      virNWFilterBindingObj *binding)
 {
-    virNWFilterBindingDefPtr def = virNWFilterBindingObjGetDef(binding);
+    virNWFilterBindingDef *def = virNWFilterBindingObjGetDef(binding);
     if (virHashAddEntry(bindings->objs, def->portdevname, binding) < 0)
         return -1;
     virObjectRef(binding);
@@ -163,11 +163,11 @@ virNWFilterBindingObjListAddObjLocked(virNWFilterBindingObjListPtr bindings,
  * counted. The caller is expected to use virNWFilterBindingObjEndAPI
  * when it completes usage.
  */
-static virNWFilterBindingObjPtr
-virNWFilterBindingObjListAddLocked(virNWFilterBindingObjListPtr bindings,
-                                   virNWFilterBindingDefPtr def)
+static virNWFilterBindingObj *
+virNWFilterBindingObjListAddLocked(virNWFilterBindingObjList *bindings,
+                                   virNWFilterBindingDef *def)
 {
-    virNWFilterBindingObjPtr binding;
+    virNWFilterBindingObj *binding;
     bool stealDef = false;
 
     /* See if a binding with matching portdev already exists */
@@ -204,11 +204,11 @@ virNWFilterBindingObjListAddLocked(virNWFilterBindingObjListPtr bindings,
 }
 
 
-virNWFilterBindingObjPtr
-virNWFilterBindingObjListAdd(virNWFilterBindingObjListPtr bindings,
-                             virNWFilterBindingDefPtr def)
+virNWFilterBindingObj *
+virNWFilterBindingObjListAdd(virNWFilterBindingObjList *bindings,
+                             virNWFilterBindingDef *def)
 {
-    virNWFilterBindingObjPtr ret;
+    virNWFilterBindingObj *ret;
 
     virObjectRWLockWrite(bindings);
     ret = virNWFilterBindingObjListAddLocked(bindings, def);
@@ -224,10 +224,10 @@ virNWFilterBindingObjListAdd(virNWFilterBindingObjListPtr bindings,
  * virNWFilterBindingObjListForEach
  */
 static void
-virNWFilterBindingObjListRemoveLocked(virNWFilterBindingObjListPtr bindings,
-                                      virNWFilterBindingObjPtr binding)
+virNWFilterBindingObjListRemoveLocked(virNWFilterBindingObjList *bindings,
+                                      virNWFilterBindingObj *binding)
 {
-    virNWFilterBindingDefPtr def = virNWFilterBindingObjGetDef(binding);
+    virNWFilterBindingDef *def = virNWFilterBindingObjGetDef(binding);
     virHashRemoveEntry(bindings->objs, def->portdevname);
 }
 
@@ -246,8 +246,8 @@ virNWFilterBindingObjListRemoveLocked(virNWFilterBindingObjListPtr bindings,
  * tables and returned with lock and refcnt that was present upon entry.
  */
 void
-virNWFilterBindingObjListRemove(virNWFilterBindingObjListPtr bindings,
-                                virNWFilterBindingObjPtr binding)
+virNWFilterBindingObjListRemove(virNWFilterBindingObjList *bindings,
+                                virNWFilterBindingObj *binding)
 {
     virNWFilterBindingObjSetRemoving(binding, true);
     virObjectRef(binding);
@@ -260,14 +260,14 @@ virNWFilterBindingObjListRemove(virNWFilterBindingObjListPtr bindings,
 }
 
 
-static virNWFilterBindingObjPtr
-virNWFilterBindingObjListLoadStatus(virNWFilterBindingObjListPtr bindings,
+static virNWFilterBindingObj *
+virNWFilterBindingObjListLoadStatus(virNWFilterBindingObjList *bindings,
                                     const char *statusDir,
                                     const char *name)
 {
     char *statusFile = NULL;
-    virNWFilterBindingObjPtr obj = NULL;
-    virNWFilterBindingDefPtr def;
+    virNWFilterBindingObj *obj = NULL;
+    virNWFilterBindingDef *def;
 
     if ((statusFile = virNWFilterBindingObjConfigFile(statusDir, name)) == NULL)
         goto error;
@@ -297,10 +297,10 @@ virNWFilterBindingObjListLoadStatus(virNWFilterBindingObjListPtr bindings,
 
 
 int
-virNWFilterBindingObjListLoadAllConfigs(virNWFilterBindingObjListPtr bindings,
+virNWFilterBindingObjListLoadAllConfigs(virNWFilterBindingObjList *bindings,
                                         const char *configDir)
 {
-    DIR *dir;
+    g_autoptr(DIR) dir = NULL;
     struct dirent *entry;
     int ret = -1;
     int rc;
@@ -313,7 +313,7 @@ virNWFilterBindingObjListLoadAllConfigs(virNWFilterBindingObjListPtr bindings,
     virObjectRWLockWrite(bindings);
 
     while ((ret = virDirRead(dir, &entry, configDir)) > 0) {
-        virNWFilterBindingObjPtr binding;
+        virNWFilterBindingObj *binding;
 
         if (!virStringStripSuffix(entry->d_name, ".xml"))
             continue;
@@ -330,7 +330,6 @@ virNWFilterBindingObjListLoadAllConfigs(virNWFilterBindingObjListPtr bindings,
             VIR_ERROR(_("Failed to load config for binding '%s'"), entry->d_name);
     }
 
-    VIR_DIR_CLOSE(dir);
     virObjectRWUnlock(bindings);
     return ret;
 }
@@ -345,7 +344,7 @@ struct virNWFilterBindingListIterData {
 
 static int
 virNWFilterBindingObjListHelper(void *payload,
-                                const void *name ATTRIBUTE_UNUSED,
+                                const char *name G_GNUC_UNUSED,
                                 void *opaque)
 {
     struct virNWFilterBindingListIterData *data = opaque;
@@ -357,7 +356,7 @@ virNWFilterBindingObjListHelper(void *payload,
 
 
 int
-virNWFilterBindingObjListForEach(virNWFilterBindingObjListPtr bindings,
+virNWFilterBindingObjListForEach(virNWFilterBindingObjList *bindings,
                                  virNWFilterBindingObjListIterator callback,
                                  void *opaque)
 {
@@ -365,21 +364,21 @@ virNWFilterBindingObjListForEach(virNWFilterBindingObjListPtr bindings,
         callback, opaque, 0,
     };
     virObjectRWLockRead(bindings);
-    virHashForEach(bindings->objs, virNWFilterBindingObjListHelper, &data);
+    virHashForEachSafe(bindings->objs, virNWFilterBindingObjListHelper, &data);
     virObjectRWUnlock(bindings);
     return data.ret;
 }
 
 
 struct virNWFilterBindingListData {
-    virNWFilterBindingObjPtr *bindings;
+    virNWFilterBindingObj **bindings;
     size_t nbindings;
 };
 
 
 static int
 virNWFilterBindingObjListCollectIterator(void *payload,
-                                         const void *name ATTRIBUTE_UNUSED,
+                                         const char *name G_GNUC_UNUSED,
                                          void *opaque)
 {
     struct virNWFilterBindingListData *data = opaque;
@@ -390,7 +389,7 @@ virNWFilterBindingObjListCollectIterator(void *payload,
 
 
 static void
-virNWFilterBindingObjListFilter(virNWFilterBindingObjPtr **list,
+virNWFilterBindingObjListFilter(virNWFilterBindingObj ***list,
                                 size_t *nbindings,
                                 virConnectPtr conn,
                                 virNWFilterBindingObjListACLFilter filter)
@@ -398,8 +397,8 @@ virNWFilterBindingObjListFilter(virNWFilterBindingObjPtr **list,
     size_t i = 0;
 
     while (i < *nbindings) {
-        virNWFilterBindingObjPtr binding = (*list)[i];
-        virNWFilterBindingDefPtr def;
+        virNWFilterBindingObj *binding = (*list)[i];
+        virNWFilterBindingDef *def;
 
         virObjectLock(binding);
 
@@ -424,20 +423,16 @@ virNWFilterBindingObjListFilter(virNWFilterBindingObjPtr **list,
 
 
 static int
-virNWFilterBindingObjListCollect(virNWFilterBindingObjListPtr domlist,
+virNWFilterBindingObjListCollect(virNWFilterBindingObjList *domlist,
                                  virConnectPtr conn,
-                                 virNWFilterBindingObjPtr **bindings,
+                                 virNWFilterBindingObj ***bindings,
                                  size_t *nbindings,
                                  virNWFilterBindingObjListACLFilter filter)
 {
     struct virNWFilterBindingListData data = { NULL, 0 };
 
     virObjectRWLockRead(domlist);
-    sa_assert(domlist->objs);
-    if (VIR_ALLOC_N(data.bindings, virHashSize(domlist->objs)) < 0) {
-        virObjectRWUnlock(domlist);
-        return -1;
-    }
+    data.bindings = g_new0(virNWFilterBindingObj *, virHashSize(domlist->objs));
 
     virHashForEach(domlist->objs, virNWFilterBindingObjListCollectIterator, &data);
     virObjectRWUnlock(domlist);
@@ -452,12 +447,12 @@ virNWFilterBindingObjListCollect(virNWFilterBindingObjListPtr domlist,
 
 
 int
-virNWFilterBindingObjListExport(virNWFilterBindingObjListPtr bindings,
+virNWFilterBindingObjListExport(virNWFilterBindingObjList *bindings,
                                 virConnectPtr conn,
                                 virNWFilterBindingPtr **bindinglist,
                                 virNWFilterBindingObjListACLFilter filter)
 {
-    virNWFilterBindingObjPtr *bindingobjs = NULL;
+    virNWFilterBindingObj **bindingobjs = NULL;
     size_t nbindings = 0;
     size_t i;
     int ret = -1;
@@ -467,12 +462,11 @@ virNWFilterBindingObjListExport(virNWFilterBindingObjListPtr bindings,
         return -1;
 
     if (bindinglist) {
-        if (VIR_ALLOC_N(*bindinglist, nbindings + 1) < 0)
-            goto cleanup;
+        *bindinglist = g_new0(virNWFilterBindingPtr, nbindings + 1);
 
         for (i = 0; i < nbindings; i++) {
-            virNWFilterBindingObjPtr binding = bindingobjs[i];
-            virNWFilterBindingDefPtr def = virNWFilterBindingObjGetDef(binding);
+            virNWFilterBindingObj *binding = bindingobjs[i];
+            virNWFilterBindingDef *def = virNWFilterBindingObjGetDef(binding);
 
             virObjectLock(binding);
             (*bindinglist)[i] = virGetNWFilterBinding(conn, def->portdevname,

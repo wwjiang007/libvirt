@@ -23,88 +23,106 @@
 # error "qemu_capspriv.h may only be included by qemu_capabilities.c or test suites"
 #endif /* LIBVIRT_QEMU_CAPSPRIV_H_ALLOW */
 
-#ifndef LIBVIRT_QEMU_CAPSPRIV_H
-# define LIBVIRT_QEMU_CAPSPRIV_H
+#pragma once
 
-virQEMUCapsPtr virQEMUCapsNewCopy(virQEMUCapsPtr qemuCaps);
+virQEMUCaps *virQEMUCapsNewCopy(virQEMUCaps *qemuCaps);
 
-virQEMUCapsPtr
+virQEMUCaps *
 virQEMUCapsNewForBinaryInternal(virArch hostArch,
                                 const char *binary,
                                 const char *libDir,
                                 uid_t runUid,
                                 gid_t runGid,
+                                const char *hostCPUSignature,
                                 unsigned int microcodeVersion,
                                 const char *kernelVersion);
 
 int virQEMUCapsLoadCache(virArch hostArch,
-                         virQEMUCapsPtr qemuCaps,
-                         const char *filename);
-char *virQEMUCapsFormatCache(virQEMUCapsPtr qemuCaps);
+                         virQEMUCaps *qemuCaps,
+                         const char *filename,
+                         bool skipInvalidation);
+char *virQEMUCapsFormatCache(virQEMUCaps *qemuCaps);
 
 int
-virQEMUCapsInitQMPMonitor(virQEMUCapsPtr qemuCaps,
-                          qemuMonitorPtr mon);
+virQEMUCapsInitQMPMonitor(virQEMUCaps *qemuCaps,
+                          qemuMonitor *mon);
 
 int
-virQEMUCapsInitQMPMonitorTCG(virQEMUCapsPtr qemuCaps,
-                             qemuMonitorPtr mon);
+virQEMUCapsInitQMPMonitorTCG(virQEMUCaps *qemuCaps,
+                             qemuMonitor *mon);
 
 void
-virQEMUCapsSetArch(virQEMUCapsPtr qemuCaps,
+virQEMUCapsSetArch(virQEMUCaps *qemuCaps,
                    virArch arch);
 
 void
-virQEMUCapsInitHostCPUModel(virQEMUCapsPtr qemuCaps,
+virQEMUCapsInitHostCPUModel(virQEMUCaps *qemuCaps,
                             virArch hostArch,
                             virDomainVirtType type);
 
+void
+virQEMUCapsUpdateHostCPUModel(virQEMUCaps *qemuCaps,
+                            virArch hostArch,
+                            virDomainVirtType type);
 int
-virQEMUCapsInitCPUModel(virQEMUCapsPtr qemuCaps,
+virQEMUCapsInitCPUModel(virQEMUCaps *qemuCaps,
                         virDomainVirtType type,
-                        virCPUDefPtr cpu,
+                        virCPUDef *cpu,
                         bool migratable);
 
 void
-virQEMUCapsInitQMPBasicArch(virQEMUCapsPtr qemuCaps);
+virQEMUCapsInitQMPBasicArch(virQEMUCaps *qemuCaps);
 
-qemuMonitorCPUModelInfoPtr
-virQEMUCapsGetCPUModelInfo(virQEMUCapsPtr qemuCaps,
+qemuMonitorCPUModelInfo *
+virQEMUCapsGetCPUModelInfo(virQEMUCaps *qemuCaps,
                            virDomainVirtType type);
 
 void
-virQEMUCapsSetCPUModelInfo(virQEMUCapsPtr qemuCaps,
+virQEMUCapsSetCPUModelInfo(virQEMUCaps *qemuCaps,
                            virDomainVirtType type,
-                           qemuMonitorCPUModelInfoPtr modelInfo);
+                           qemuMonitorCPUModelInfo *modelInfo);
 
-virCPUDataPtr
-virQEMUCapsGetCPUModelX86Data(qemuMonitorCPUModelInfoPtr model,
+virCPUData *
+virQEMUCapsGetCPUModelX86Data(virQEMUCaps *qemuCaps,
+                              qemuMonitorCPUModelInfo *model,
                               bool migratable);
 
-virCPUDefPtr
-virQEMUCapsProbeHostCPUForEmulator(virArch hostArch,
-                                   virQEMUCapsPtr qemuCaps,
-                                   virDomainVirtType type) ATTRIBUTE_NOINLINE;
+virCPUDef *
+virQEMUCapsProbeHostCPU(virArch hostArch,
+                        virDomainCapsCPUModels *models) G_GNUC_NO_INLINE;
 
 void
-virQEMUCapsSetGICCapabilities(virQEMUCapsPtr qemuCaps,
+virQEMUCapsSetGICCapabilities(virQEMUCaps *qemuCaps,
                               virGICCapability *capabilities,
                               size_t ncapabilities);
 
 void
-virQEMUCapsSetSEVCapabilities(virQEMUCapsPtr qemuCaps,
+virQEMUCapsSetSEVCapabilities(virQEMUCaps *qemuCaps,
                               virSEVCapability *capabilities);
 
 int
-virQEMUCapsProbeQMPCPUDefinitions(virQEMUCapsPtr qemuCaps,
-                                  qemuMonitorPtr mon,
-                                  bool tcg);
+virQEMUCapsProbeCPUDefinitionsTest(virQEMUCaps *qemuCaps,
+                                   qemuMonitor *mon);
 
 void
-virQEMUCapsSetMicrocodeVersion(virQEMUCapsPtr qemuCaps,
+virQEMUCapsSetMicrocodeVersion(virQEMUCaps *qemuCaps,
                                unsigned int microcodeVersion);
 
 void
-virQEMUCapsStripMachineAliases(virQEMUCapsPtr qemuCaps);
+virQEMUCapsStripMachineAliases(virQEMUCaps *qemuCaps);
 
-#endif /* LIBVIRT_QEMU_CAPSPRIV_H */
+bool
+virQEMUCapsHasMachines(virQEMUCaps *qemuCaps);
+
+void
+virQEMUCapsAddMachine(virQEMUCaps *qemuCaps,
+                      virDomainVirtType virtType,
+                      const char *name,
+                      const char *alias,
+                      const char *defaultCPU,
+                      int maxCpus,
+                      bool hotplugCpus,
+                      bool isDefault,
+                      bool numaMemSupported,
+                      const char *defaultRAMid,
+                      bool deprecated);

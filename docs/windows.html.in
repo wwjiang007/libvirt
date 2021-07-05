@@ -16,8 +16,8 @@
 
     <p>
       Users who need pre-built Windows DLLs of libvirt are advised
-      to use the <a href="http://virt-manager.org">Virt Viewer</a>
-      pre-compiled <a href="http://virt-manager.org/download/">Windows MSI packages</a>
+      to use the <a href="https://virt-manager.org">Virt Viewer</a>
+      pre-compiled <a href="https://virt-manager.org/download/">Windows MSI packages</a>
     </p>
 
     <p>
@@ -93,7 +93,7 @@
       Information on generating TLS certificates can be found here:
     </p>
 
-    <a href="http://wiki.libvirt.org/page/TLSSetup">http://wiki.libvirt.org/page/TLSSetup</a>
+    <a href="https://wiki.libvirt.org/page/TLSSetup">https://wiki.libvirt.org/page/TLSSetup</a>
 
     <p>
       These instructions are for *nix, and have not yet been adapted for
@@ -180,16 +180,14 @@
     </p>
 
 <pre>
-./configure \
-  --without-sasl \
-  --without-avahi \
-  --without-polkit \
-  --without-python \
-  --without-libxl \
-  --without-qemu \
-  --without-lxc \
-  --without-openvz \
-  --without-libvirtd
+meson build \
+  -Dsasl=disabled \
+  -Dpolkit=disabled \
+  -Ddriver_libxl=disabled \
+  -Ddriver_qemu=disabled \
+  -Ddriver_lxc=disabled \
+  -Ddriver_openvz=disabled \
+  -Ddriver_libvirtd=disabled
 </pre>
 
   </body>

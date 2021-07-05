@@ -18,20 +18,16 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRMACADDR_H
-# define LIBVIRT_VIRMACADDR_H
+#pragma once
 
-# include "internal.h"
-# include "virautoclean.h"
+#include "internal.h"
 
-# define VIR_MAC_BUFLEN 6
-# define VIR_MAC_HEXLEN (VIR_MAC_BUFLEN * 2)
-# define VIR_MAC_PREFIX_BUFLEN 3
-# define VIR_MAC_STRING_BUFLEN (VIR_MAC_BUFLEN * 3)
+#define VIR_MAC_BUFLEN 6
+#define VIR_MAC_HEXLEN (VIR_MAC_BUFLEN * 2)
+#define VIR_MAC_PREFIX_BUFLEN 3
+#define VIR_MAC_STRING_BUFLEN (VIR_MAC_BUFLEN * 3)
 
 typedef struct _virMacAddr virMacAddr;
-typedef virMacAddr *virMacAddrPtr;
-
 struct _virMacAddr {
     unsigned char addr[VIR_MAC_BUFLEN];
 };
@@ -40,30 +36,28 @@ struct _virMacAddr {
  * must not have any extra members added - it must remain exactly
  * 6 bytes in length.
  */
-verify(sizeof(struct _virMacAddr) == 6);
+G_STATIC_ASSERT(sizeof(struct _virMacAddr) == 6);
 
 
 int virMacAddrCompare(const char *mac1, const char *mac2);
 int virMacAddrCmp(const virMacAddr *mac1, const virMacAddr *mac2);
 int virMacAddrCmpRaw(const virMacAddr *mac1,
                      const unsigned char s[VIR_MAC_BUFLEN]);
-void virMacAddrSet(virMacAddrPtr dst, const virMacAddr *src);
-void virMacAddrSetRaw(virMacAddrPtr dst, const unsigned char s[VIR_MAC_BUFLEN]);
+void virMacAddrSet(virMacAddr *dst, const virMacAddr *src);
+void virMacAddrSetRaw(virMacAddr *dst, const unsigned char s[VIR_MAC_BUFLEN]);
 void virMacAddrGetRaw(const virMacAddr *src, unsigned char dst[VIR_MAC_BUFLEN]);
 const char *virMacAddrFormat(const virMacAddr *addr,
                              char *str);
 void virMacAddrGenerate(const unsigned char prefix[VIR_MAC_PREFIX_BUFLEN],
-                        virMacAddrPtr addr) ATTRIBUTE_NOINLINE;
+                        virMacAddr *addr) G_GNUC_NO_INLINE;
 int virMacAddrParse(const char* str,
-                    virMacAddrPtr addr) ATTRIBUTE_RETURN_CHECK;
+                    virMacAddr *addr) G_GNUC_WARN_UNUSED_RESULT;
 int virMacAddrParseHex(const char* str,
-                       virMacAddrPtr addr)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
+                       virMacAddr *addr)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
 bool virMacAddrIsUnicast(const virMacAddr *addr);
 bool virMacAddrIsMulticast(const virMacAddr *addr);
 bool virMacAddrIsBroadcastRaw(const unsigned char s[VIR_MAC_BUFLEN]);
-void virMacAddrFree(virMacAddrPtr addr);
+void virMacAddrFree(virMacAddr *addr);
 
-VIR_DEFINE_AUTOPTR_FUNC(virMacAddr, virMacAddrFree);
-
-#endif /* LIBVIRT_VIRMACADDR_H */
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virMacAddr, virMacAddrFree);

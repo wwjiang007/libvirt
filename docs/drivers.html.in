@@ -8,6 +8,7 @@
       <li><a href="#hypervisor">Hypervisor drivers</a></li>
       <li><a href="storage.html">Storage drivers</a></li>
       <li><a href="drvnodedev.html">Node device driver</a></li>
+      <li><a href="drvsecret.html">Secret driver</a></li>
     </ul>
 
     <p>
@@ -34,9 +35,9 @@
       <li><strong><a href="drvvmware.html">VMware Workstation/Player</a></strong></li>
       <li><strong><a href="drvxen.html">Xen</a></strong></li>
       <li><strong><a href="drvhyperv.html">Microsoft Hyper-V</a></strong></li>
-      <li><strong><a href="drvphyp.html">IBM PowerVM (phyp)</a></strong></li>
       <li><strong><a href="drvvirtuozzo.html">Virtuozzo</a></strong></li>
       <li><strong><a href="drvbhyve.html">Bhyve</a></strong> - The BSD Hypervisor</li>
+      <li><strong><a href="drvch.html">Cloud Hypervisor</a></strong></li>
     </ul>
 
   </body>

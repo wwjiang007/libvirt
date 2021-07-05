@@ -27,8 +27,8 @@
 #include "virerror.h"
 #include "viralloc.h"
 #include "internal.h"
-#include "virstoragefile.h"
 #include "storage_backend.h"
+#include "storage_source_conf.h"
 #include "virlog.h"
 #include "virmodule.h"
 #include "virfile.h"
@@ -77,7 +77,7 @@ VIR_LOG_INIT("storage.storage_backend");
 
 #define VIR_STORAGE_BACKENDS_MAX 20
 
-static virStorageBackendPtr virStorageBackends[VIR_STORAGE_BACKENDS_MAX];
+static virStorageBackend *virStorageBackends[VIR_STORAGE_BACKENDS_MAX];
 static size_t virStorageBackendsCount;
 
 #define STORAGE_BACKEND_MODULE_DIR LIBDIR "/libvirt/storage-backend"
@@ -87,12 +87,12 @@ virStorageDriverLoadBackendModule(const char *name,
                                   const char *regfunc,
                                   bool forceload)
 {
-    VIR_AUTOFREE(char *) modfile = NULL;
+    g_autofree char *modfile = NULL;
 
     if (!(modfile = virFileFindResourceFull(name,
                                             "libvirt_storage_backend_",
-                                            ".so",
-                                            abs_top_builddir "/src/.libs",
+                                            VIR_FILE_MODULE_EXT,
+                                            abs_top_builddir "/src",
                                             STORAGE_BACKEND_MODULE_DIR,
                                             "LIBVIRT_STORAGE_BACKEND_DIR")))
         return -1;
@@ -106,7 +106,7 @@ virStorageDriverLoadBackendModule(const char *name,
         return -1
 
 int
-virStorageBackendDriversRegister(bool allbackends ATTRIBUTE_UNUSED)
+virStorageBackendDriversRegister(bool allbackends G_GNUC_UNUSED)
 {
 #if WITH_STORAGE_DIR || WITH_STORAGE_FS
     VIR_STORAGE_BACKEND_REGISTER(virStorageBackendFsRegister, "fs");
@@ -151,7 +151,7 @@ virStorageBackendDriversRegister(bool allbackends ATTRIBUTE_UNUSED)
 
 
 int
-virStorageBackendRegister(virStorageBackendPtr backend)
+virStorageBackendRegister(virStorageBackend *backend)
 {
     VIR_DEBUG("Registering storage backend '%s'",
               virStoragePoolTypeToString(backend->type));
@@ -169,7 +169,7 @@ virStorageBackendRegister(virStorageBackendPtr backend)
 }
 
 
-virStorageBackendPtr
+virStorageBackend *
 virStorageBackendForType(int type)
 {
     size_t i;
@@ -184,10 +184,10 @@ virStorageBackendForType(int type)
 }
 
 
-virCapsPtr
+virCaps *
 virStorageBackendGetCapabilities(void)
 {
-    virCapsPtr caps;
+    virCaps *caps;
     size_t i;
 
     if (!(caps = virCapabilitiesNew(VIR_ARCH_NONE, false, false)))

@@ -16,45 +16,27 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_NETDEV_BANDWIDTH_CONF_H
-# define LIBVIRT_NETDEV_BANDWIDTH_CONF_H
+#pragma once
 
-# include "internal.h"
-# include "virnetdevbandwidth.h"
-# include "virbuffer.h"
-# include "virxml.h"
-# include "domain_conf.h"
+#include "internal.h"
+#include "virnetdevbandwidth.h"
+#include "virbuffer.h"
+#include "virxml.h"
+#include "domain_conf.h"
+#include "network_conf.h"
 
-int virNetDevBandwidthParse(virNetDevBandwidthPtr *bandwidth,
+int virNetDevBandwidthParse(virNetDevBandwidth **bandwidth,
+                            unsigned int *class_id,
                             xmlNodePtr node,
                             bool allowFloor)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
-int virNetDevBandwidthFormat(virNetDevBandwidthPtr def,
-                             virBufferPtr buf);
+    ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
+int virNetDevBandwidthFormat(const virNetDevBandwidth *def,
+                             unsigned int class_id,
+                             virBuffer *buf);
 
-void virDomainClearNetBandwidth(virDomainObjPtr vm)
+void virDomainClearNetBandwidth(virDomainDef *def)
     ATTRIBUTE_NONNULL(1);
 
-static inline bool virNetDevSupportBandwidth(virDomainNetType type)
-{
-    switch (type) {
-    case VIR_DOMAIN_NET_TYPE_BRIDGE:
-    case VIR_DOMAIN_NET_TYPE_NETWORK:
-    case VIR_DOMAIN_NET_TYPE_DIRECT:
-    case VIR_DOMAIN_NET_TYPE_ETHERNET:
-        return true;
-    case VIR_DOMAIN_NET_TYPE_USER:
-    case VIR_DOMAIN_NET_TYPE_VHOSTUSER:
-    case VIR_DOMAIN_NET_TYPE_SERVER:
-    case VIR_DOMAIN_NET_TYPE_CLIENT:
-    case VIR_DOMAIN_NET_TYPE_MCAST:
-    case VIR_DOMAIN_NET_TYPE_UDP:
-    case VIR_DOMAIN_NET_TYPE_INTERNAL:
-    case VIR_DOMAIN_NET_TYPE_HOSTDEV:
-    case VIR_DOMAIN_NET_TYPE_LAST:
-        break;
-    }
-    return false;
-}
-
-#endif /* LIBVIRT_NETDEV_BANDWIDTH_CONF_H */
+bool virNetDevSupportsBandwidth(virDomainNetType type);
+bool virNetDevBandwidthHasFloor(const virNetDevBandwidth *b);
+bool virNetDevBandwidthSupportsFloor(virNetworkForwardType type);

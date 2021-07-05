@@ -51,13 +51,64 @@ VIR_LOG_INIT("libvirt.host");
 int
 virConnectRef(virConnectPtr conn)
 {
-    VIR_DEBUG("conn=%p refs=%d", conn, conn ? conn->parent.parent.u.s.refs : 0);
+    VIR_DEBUG("conn=%p", conn);
 
     virResetLastError();
 
     virCheckConnectReturn(conn, -1);
     virObjectRef(conn);
     return 0;
+}
+
+
+/**
+ * virConnectSetIdentity:
+ * @conn: pointer to the hypervisor connection
+ * @params: parameters containing the identity attributes
+ * @nparams: size of @params array
+ * @flags: currently unused, pass 0
+ *
+ * Override the default identity information associated with
+ * the connection. When connecting to a stateful driver over
+ * a UNIX socket, the daemon will interrogate the remote end
+ * of the UNIX socket to acquire the application's identity.
+ * This identity is used for the fine grained access control
+ * checks on API calls.
+ *
+ * There may be times when application is operating on behalf
+ * of a variety of users, and thus the identity that the
+ * application runs as is not appropriate for access control
+ * checks. In this case, if the application is considered
+ * trustworthy, it can supply alternative identity information.
+ *
+ * The driver may reject the request to change the identity
+ * on a connection if the application is not trustworthy.
+ *
+ * Returns: 0 if the identity change was accepted, -1 on error
+ */
+int
+virConnectSetIdentity(virConnectPtr conn,
+                      virTypedParameterPtr params,
+                      int nparams,
+                      unsigned int flags)
+{
+    VIR_DEBUG("conn=%p params=%p nparams=%d flags=0x%x", conn, params, nparams, flags);
+    VIR_TYPED_PARAMS_DEBUG(params, nparams);
+
+    virResetLastError();
+
+    if (conn->driver->connectSetIdentity) {
+        int ret = conn->driver->connectSetIdentity(conn, params, nparams, flags);
+        if (ret < 0)
+            goto error;
+        return ret;
+    }
+
+    virReportUnsupportedError();
+
+ error:
+    virDispatchError(conn);
+    return -1;
 }
 
 
@@ -98,9 +149,6 @@ virConnectSupportsFeature(virConnectPtr conn, int feature)
  * hypervisor, use virConnectGetCapabilities().
  *
  * Returns NULL in case of error, a static zero terminated string otherwise.
- *
- * See also:
- * http://www.redhat.com/archives/libvir-list/2007-February/msg00096.html
  */
 const char *
 virConnectGetType(virConnectPtr conn)
@@ -350,6 +398,22 @@ virConnectGetMaxVcpus(virConnectPtr conn,
  * @info: pointer to a virNodeInfo structure allocated by the user
  *
  * Extract hardware information about the node.
+ *
+ * Use of this API is strongly discouraged as the information provided
+ * is not guaranteed to be accurate on all hardware platforms.
+ *
+ * The mHZ value merely reflects the speed that the first CPU in the
+ * machine is currently running at. This speed may vary across CPUs
+ * and changes continually as the host OS throttles.
+ *
+ * The nodes/sockets/cores/threads data is potentially inaccurate as
+ * it assumes a symmetric installation. If one NUMA node has more
+ * sockets populated that another NUMA node this information will be
+ * wrong. It is also not able to report about CPU dies.
+ *
+ * Applications are recommended to use the virConnectGetCapabilities()
+ * call instead, which provides all the information except CPU mHZ,
+ * in a more accurate representation.
  *
  * Returns 0 in case of success and -1 in case of failure.
  */
@@ -708,6 +772,8 @@ virNodeGetMemoryParameters(virConnectPtr conn,
                            int *nparams,
                            unsigned int flags)
 {
+    int rc;
+
     VIR_DEBUG("conn=%p, params=%p, nparams=%p, flags=0x%x",
               conn, params, nparams, flags);
 
@@ -719,8 +785,11 @@ virNodeGetMemoryParameters(virConnectPtr conn,
     if (*nparams != 0)
         virCheckNonNullArgGoto(params, error);
 
-    if (VIR_DRV_SUPPORTS_FEATURE(conn->driver, conn,
-                                 VIR_DRV_FEATURE_TYPED_PARAM_STRING))
+    rc = VIR_DRV_SUPPORTS_FEATURE(conn->driver, conn,
+                                  VIR_DRV_FEATURE_TYPED_PARAM_STRING);
+    if (rc < 0)
+        goto error;
+    if (rc)
         flags |= VIR_TYPED_PARAM_STRING_OKAY;
 
     if (conn->driver->nodeGetMemoryParameters) {
@@ -862,7 +931,7 @@ virNodeGetCellsFreeMemory(virConnectPtr conn, unsigned long long *freeMems,
     virResetLastError();
 
     virCheckConnectReturn(conn, -1);
-    virCheckNonNullArgGoto(freeMems, error);
+    virCheckNonNullArrayArgGoto(freeMems, maxCells, error);
     virCheckPositiveArgGoto(maxCells, error);
     virCheckNonNegativeArgGoto(startCell, error);
 
@@ -1041,6 +1110,7 @@ virConnectCompareHypervisorCPU(virConnectPtr conn,
 
     virCheckConnectReturn(conn, VIR_CPU_COMPARE_ERROR);
     virCheckNonNullArgGoto(xmlCPU, error);
+    virCheckReadOnlyGoto(conn->flags, error);
 
     if (conn->driver->connectCompareHypervisorCPU) {
         int ret;
@@ -1234,6 +1304,7 @@ virConnectBaselineHypervisorCPU(virConnectPtr conn,
 
     virCheckConnectReturn(conn, NULL);
     virCheckNonNullArgGoto(xmlCPUs, error);
+    virCheckReadOnlyGoto(conn->flags, error);
 
     if (conn->driver->connectBaselineHypervisorCPU) {
         char *cpu;
@@ -1286,8 +1357,6 @@ virConnectSetKeepAlive(virConnectPtr conn,
                        int interval,
                        unsigned int count)
 {
-    int ret = -1;
-
     VIR_DEBUG("conn=%p, interval=%d, count=%u", conn, interval, count);
 
     virResetLastError();
@@ -1295,7 +1364,7 @@ virConnectSetKeepAlive(virConnectPtr conn,
     virCheckConnectReturn(conn, -1);
 
     if (conn->driver->connectSetKeepAlive) {
-        ret = conn->driver->connectSetKeepAlive(conn, interval, count);
+        int ret = conn->driver->connectSetKeepAlive(conn, interval, count);
         if (ret < 0)
             goto error;
         return ret;
@@ -1501,7 +1570,7 @@ virNodeGetCPUMap(virConnectPtr conn,
  * Example how to use this API:
  *
  *   unsigned int pages[] = { 4, 2048, 1048576}
- *   unsigned int npages = ARRAY_CARDINALITY(pages);
+ *   unsigned int npages = G_N_ELEMENTS(pages);
  *   int startcell = 0;
  *   unsigned int cellcount = 2;
  *
@@ -1660,6 +1729,8 @@ virNodeGetSEVInfo(virConnectPtr conn,
                   int *nparams,
                   unsigned int flags)
 {
+    int rc;
+
     VIR_DEBUG("conn=%p, params=%p, nparams=%p, flags=0x%x",
               conn, params, nparams, flags);
 
@@ -1670,8 +1741,11 @@ virNodeGetSEVInfo(virConnectPtr conn,
     virCheckNonNegativeArgGoto(*nparams, error);
     virCheckReadOnlyGoto(conn->flags, error);
 
-    if (VIR_DRV_SUPPORTS_FEATURE(conn->driver, conn,
-                                 VIR_DRV_FEATURE_TYPED_PARAM_STRING))
+    rc = VIR_DRV_SUPPORTS_FEATURE(conn->driver, conn,
+                                  VIR_DRV_FEATURE_TYPED_PARAM_STRING);
+    if (rc < 0)
+        goto error;
+    if (rc)
         flags |= VIR_TYPED_PARAM_STRING_OKAY;
 
     if (conn->driver->nodeGetSEVInfo) {

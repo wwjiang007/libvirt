@@ -25,6 +25,7 @@
 #include "virerror.h"
 #include "viralloc.h"
 #include "virrandom.h"
+#include "virsecureerase.h"
 
 #include <gnutls/gnutls.h>
 #include <gnutls/crypto.h>
@@ -47,7 +48,7 @@ struct virHashInfo {
 };
 
 
-verify(ARRAY_CARDINALITY(hashinfo) == VIR_CRYPTO_HASH_LAST);
+G_STATIC_ASSERT(G_N_ELEMENTS(hashinfo) == VIR_CRYPTO_HASH_LAST);
 
 ssize_t
 virCryptoHashBuf(virCryptoHash hash,
@@ -88,8 +89,7 @@ virCryptoHashString(virCryptoHash hash,
 
     hashstrlen = (rc * 2) + 1;
 
-    if (VIR_ALLOC_N(*output, hashstrlen) < 0)
-        return -1;
+    *output = g_new0(char, hashstrlen);
 
     for (i = 0; i < rc; i++) {
         (*output)[i * 2] = hex[(buf[i] >> 4) & 0xf];
@@ -167,8 +167,7 @@ virCryptoEncryptDataAESgnutls(gnutls_cipher_algorithm_t gnutls_enc_alg,
      * data from non-padded data. Hence datalen + 1
      */
     ciphertextlen = VIR_ROUND_UP(datalen + 1, 16);
-    if (VIR_ALLOC_N(ciphertext, ciphertextlen) < 0)
-        return -1;
+    ciphertext = g_new0(uint8_t, ciphertextlen);
     memcpy(ciphertext, data, datalen);
 
      /* Fill in the padding of the buffer with the size of the padding
@@ -194,8 +193,8 @@ virCryptoEncryptDataAESgnutls(gnutls_cipher_algorithm_t gnutls_enc_alg,
     /* Encrypt the data and free the memory for cipher operations */
     rc = gnutls_cipher_encrypt(handle, ciphertext, ciphertextlen);
     gnutls_cipher_deinit(handle);
-    memset(&enc_key, 0, sizeof(gnutls_datum_t));
-    memset(&iv_buf, 0, sizeof(gnutls_datum_t));
+    virSecureErase(&enc_key, sizeof(gnutls_datum_t));
+    virSecureErase(&iv_buf, sizeof(gnutls_datum_t));
     if (rc < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("failed to encrypt the data: '%s'"),
@@ -208,9 +207,10 @@ virCryptoEncryptDataAESgnutls(gnutls_cipher_algorithm_t gnutls_enc_alg,
     return 0;
 
  error:
-    VIR_DISPOSE_N(ciphertext, ciphertextlen);
-    memset(&enc_key, 0, sizeof(gnutls_datum_t));
-    memset(&iv_buf, 0, sizeof(gnutls_datum_t));
+    virSecureErase(ciphertext, ciphertextlen);
+    g_free(ciphertext);
+    virSecureErase(&enc_key, sizeof(gnutls_datum_t));
+    virSecureErase(&iv_buf, sizeof(gnutls_datum_t));
     return -1;
 }
 

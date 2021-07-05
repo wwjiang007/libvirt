@@ -21,6 +21,9 @@
 #include <config.h>
 
 #include <locale.h>
+#ifdef WITH_XLOCALE_H
+# include <xlocale.h>
+#endif
 
 #include "configmake.h"
 #include "internal.h"
@@ -36,7 +39,7 @@
 int
 virGettextInitialize(void)
 {
-#if HAVE_LIBINTL_H
+#if WITH_LIBINTL_H
     if (!setlocale(LC_ALL, "")) {
         perror("setlocale");
         /* failure to setup locale is not fatal */
@@ -51,6 +54,6 @@ virGettextInitialize(void)
         perror("textdomain");
         return -1;
     }
-#endif /* HAVE_LIBINTL_H */
+#endif /* WITH_LIBINTL_H */
     return 0;
 }

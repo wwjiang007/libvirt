@@ -19,23 +19,19 @@
  *
  */
 
-#ifndef LIBVIRT_BHYVE_CONF_H
-# define LIBVIRT_BHYVE_CONF_H
+#pragma once
 
-# include "bhyve_utils.h"
+#include "bhyve_utils.h"
 
-virBhyveDriverConfigPtr virBhyveDriverConfigNew(void);
-virBhyveDriverConfigPtr virBhyveDriverGetConfig(bhyveConnPtr driver);
-int virBhyveLoadDriverConfig(virBhyveDriverConfigPtr cfg,
+struct _virBhyveDriverConfig *virBhyveDriverConfigNew(void);
+struct _virBhyveDriverConfig *virBhyveDriverGetConfig(struct _bhyveConn *driver);
+int virBhyveLoadDriverConfig(struct _virBhyveDriverConfig *cfg,
                              const char *filename);
 
 typedef struct _bhyveDomainCmdlineDef bhyveDomainCmdlineDef;
-typedef bhyveDomainCmdlineDef *bhyveDomainCmdlineDefPtr;
 struct _bhyveDomainCmdlineDef {
     size_t num_args;
     char **args;
 };
 
-void bhyveDomainCmdlineDefFree(bhyveDomainCmdlineDefPtr def);
-
-#endif /* LIBVIRT_BHYVE_CONF_H */
+void bhyveDomainCmdlineDefFree(bhyveDomainCmdlineDef *def);

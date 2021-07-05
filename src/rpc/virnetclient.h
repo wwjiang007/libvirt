@@ -18,41 +18,56 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRNETCLIENT_H
-# define LIBVIRT_VIRNETCLIENT_H
+#pragma once
 
-# ifdef WITH_GNUTLS
-#  include "virnettlscontext.h"
-# endif
-# include "virnetmessage.h"
-# ifdef WITH_SASL
-#  include "virnetsaslcontext.h"
-# endif
-# include "virnetclientprogram.h"
-# include "virnetclientstream.h"
-# include "virobject.h"
-# include "viruri.h"
+#include "virnettlscontext.h"
+#include "virnetmessage.h"
+#ifdef WITH_SASL
+# include "virnetsaslcontext.h"
+#endif
+#include "virnetclientprogram.h"
+#include "virnetclientstream.h"
+#include "virobject.h"
+#include "viruri.h"
 
+typedef enum {
+    VIR_NET_CLIENT_PROXY_AUTO,
+    VIR_NET_CLIENT_PROXY_NETCAT,
+    VIR_NET_CLIENT_PROXY_NATIVE,
 
-virNetClientPtr virNetClientNewUNIX(const char *path,
-                                    bool spawnDaemon,
-                                    const char *binary);
+    VIR_NET_CLIENT_PROXY_LAST,
+} virNetClientProxy;
 
-virNetClientPtr virNetClientNewTCP(const char *nodename,
+VIR_ENUM_DECL(virNetClientProxy);
+
+char *
+virNetClientSSHHelperCommand(virNetClientProxy proxy,
+                             const char *netcatPath,
+                             const char *socketPath,
+                             const char *driverURI,
+                             bool readonly);
+
+virNetClient *virNetClientNewUNIX(const char *path,
+                                  const char *spawnDaemonPath);
+
+virNetClient *virNetClientNewTCP(const char *nodename,
                                    const char *service,
                                    int family);
 
-virNetClientPtr virNetClientNewSSH(const char *nodename,
+virNetClient *virNetClientNewSSH(const char *nodename,
                                    const char *service,
                                    const char *binary,
                                    const char *username,
                                    bool noTTY,
                                    bool noVerify,
-                                   const char *netcat,
                                    const char *keyfile,
-                                   const char *path);
+                                   virNetClientProxy proxy,
+                                   const char *netcatPath,
+                                   const char *socketPath,
+                                   const char *driverURI,
+                                   bool readonly);
 
-virNetClientPtr virNetClientNewLibSSH2(const char *host,
+virNetClient *virNetClientNewLibSSH2(const char *host,
                                        const char *port,
                                        int family,
                                        const char *username,
@@ -60,12 +75,15 @@ virNetClientPtr virNetClientNewLibSSH2(const char *host,
                                        const char *knownHostsPath,
                                        const char *knownHostsVerify,
                                        const char *authMethods,
+                                       virNetClientProxy proxy,
                                        const char *netcatPath,
                                        const char *socketPath,
+                                       const char *driverURI,
+                                       bool readonly,
                                        virConnectAuthPtr authPtr,
-                                       virURIPtr uri);
+                                       virURI *uri);
 
-virNetClientPtr virNetClientNewLibssh(const char *host,
+virNetClient *virNetClientNewLibssh(const char *host,
                                       const char *port,
                                       int family,
                                       const char *username,
@@ -73,76 +91,73 @@ virNetClientPtr virNetClientNewLibssh(const char *host,
                                       const char *knownHostsPath,
                                       const char *knownHostsVerify,
                                       const char *authMethods,
+                                      virNetClientProxy proxy,
                                       const char *netcatPath,
                                       const char *socketPath,
+                                      const char *driverURI,
+                                      bool readonly,
                                       virConnectAuthPtr authPtr,
-                                      virURIPtr uri);
+                                      virURI *uri);
 
-virNetClientPtr virNetClientNewExternal(const char **cmdargv);
+virNetClient *virNetClientNewExternal(const char **cmdargv);
 
-int virNetClientRegisterAsyncIO(virNetClientPtr client);
-int virNetClientRegisterKeepAlive(virNetClientPtr client);
+int virNetClientRegisterAsyncIO(virNetClient *client);
+int virNetClientRegisterKeepAlive(virNetClient *client);
 
-typedef void (*virNetClientCloseFunc)(virNetClientPtr client,
+typedef void (*virNetClientCloseFunc)(virNetClient *client,
                                       int reason,
                                       void *opaque);
 
-void virNetClientSetCloseCallback(virNetClientPtr client,
+void virNetClientSetCloseCallback(virNetClient *client,
                                   virNetClientCloseFunc cb,
                                   void *opaque,
                                   virFreeCallback ff);
 
-int virNetClientGetFD(virNetClientPtr client);
-int virNetClientDupFD(virNetClientPtr client, bool cloexec);
+int virNetClientGetFD(virNetClient *client);
+int virNetClientDupFD(virNetClient *client, bool cloexec);
 
-bool virNetClientHasPassFD(virNetClientPtr client);
+bool virNetClientHasPassFD(virNetClient *client);
 
-int virNetClientAddProgram(virNetClientPtr client,
-                           virNetClientProgramPtr prog);
+int virNetClientAddProgram(virNetClient *client,
+                           virNetClientProgram *prog);
 
-int virNetClientAddStream(virNetClientPtr client,
-                          virNetClientStreamPtr st);
+int virNetClientAddStream(virNetClient *client,
+                          virNetClientStream *st);
 
-void virNetClientRemoveStream(virNetClientPtr client,
-                              virNetClientStreamPtr st);
+void virNetClientRemoveStream(virNetClient *client,
+                              virNetClientStream *st);
 
-int virNetClientSendWithReply(virNetClientPtr client,
-                              virNetMessagePtr msg);
+int virNetClientSendWithReply(virNetClient *client,
+                              virNetMessage *msg);
 
-int virNetClientSendNonBlock(virNetClientPtr client,
-                             virNetMessagePtr msg);
+int virNetClientSendNonBlock(virNetClient *client,
+                             virNetMessage *msg);
 
-int virNetClientSendStream(virNetClientPtr client,
-                           virNetMessagePtr msg,
-                           virNetClientStreamPtr st);
+int virNetClientSendStream(virNetClient *client,
+                           virNetMessage *msg,
+                           virNetClientStream *st);
 
-# ifdef WITH_SASL
-void virNetClientSetSASLSession(virNetClientPtr client,
-                                virNetSASLSessionPtr sasl);
-# endif
+#ifdef WITH_SASL
+void virNetClientSetSASLSession(virNetClient *client,
+                                virNetSASLSession *sasl);
+#endif
 
-# ifdef WITH_GNUTLS
-int virNetClientSetTLSSession(virNetClientPtr client,
-                              virNetTLSContextPtr tls);
-# endif
+int virNetClientSetTLSSession(virNetClient *client,
+                              virNetTLSContext *tls);
 
-bool virNetClientIsEncrypted(virNetClientPtr client);
-bool virNetClientIsOpen(virNetClientPtr client);
+bool virNetClientIsEncrypted(virNetClient *client);
+bool virNetClientIsOpen(virNetClient *client);
 
-const char *virNetClientLocalAddrStringSASL(virNetClientPtr client);
-const char *virNetClientRemoteAddrStringSASL(virNetClientPtr client);
+const char *virNetClientLocalAddrStringSASL(virNetClient *client);
+const char *virNetClientRemoteAddrStringSASL(virNetClient *client);
 
-# ifdef WITH_GNUTLS
-int virNetClientGetTLSKeySize(virNetClientPtr client);
-# endif
+int virNetClientGetTLSKeySize(virNetClient *client);
 
-void virNetClientClose(virNetClientPtr client);
+void virNetClientClose(virNetClient *client);
 
-bool virNetClientKeepAliveIsSupported(virNetClientPtr client);
-int virNetClientKeepAliveStart(virNetClientPtr client,
+bool virNetClientKeepAliveIsSupported(virNetClient *client);
+int virNetClientKeepAliveStart(virNetClient *client,
                                int interval,
                                unsigned int count);
 
-void virNetClientKeepAliveStop(virNetClientPtr client);
-
-#endif /* LIBVIRT_VIRNETCLIENT_H */
+void virNetClientKeepAliveStop(virNetClient *client);

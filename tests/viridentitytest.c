@@ -25,7 +25,9 @@
 
 #include "testutils.h"
 
-#include "viridentity.h"
+#define LIBVIRT_VIRIDENTITYPRIV_H_ALLOW
+
+#include "viridentitypriv.h"
 #include "virerror.h"
 #include "viralloc.h"
 #include "virlog.h"
@@ -36,178 +38,104 @@
 
 VIR_LOG_INIT("tests.identitytest");
 
-static int testIdentityAttrs(const void *data ATTRIBUTE_UNUSED)
+char *
+virIdentityEnsureSystemToken(void)
 {
-    int ret = -1;
-    virIdentityPtr ident;
+    return g_strdup("3de80bcbf22d4833897f1638e01be9b2");
+}
+
+
+static int testIdentityAttrs(const void *data G_GNUC_UNUSED)
+{
+    g_autoptr(virIdentity) ident = virIdentityNew();
     const char *val;
+    int rc;
 
-    if (!(ident = virIdentityNew()))
-        goto cleanup;
+    if (virIdentitySetUserName(ident, "fred") < 0)
+        return -1;
 
-    if (virIdentitySetAttr(ident,
-                           VIR_IDENTITY_ATTR_UNIX_USER_NAME,
-                           "fred") < 0)
-        goto cleanup;
+    if ((rc = virIdentityGetUserName(ident, &val)) < 0)
+        return -1;
 
-    if (virIdentityGetAttr(ident,
-                           VIR_IDENTITY_ATTR_UNIX_USER_NAME,
-                           &val) < 0)
-        goto cleanup;
-
-    if (STRNEQ_NULLABLE(val, "fred")) {
+    if (STRNEQ_NULLABLE(val, "fred") || rc != 1) {
         VIR_DEBUG("Expected 'fred' got '%s'", NULLSTR(val));
-        goto cleanup;
+        return -1;
     }
 
-    if (virIdentityGetAttr(ident,
-                           VIR_IDENTITY_ATTR_UNIX_GROUP_NAME,
-                           &val) < 0)
-        goto cleanup;
+    if ((rc = virIdentityGetGroupName(ident, &val)) < 0)
+        return -1;
 
-    if (val != NULL) {
+    if (val != NULL || rc != 0) {
         VIR_DEBUG("Unexpected groupname attribute");
-        goto cleanup;
+        return -1;
     }
 
-    if (virIdentitySetAttr(ident,
-                           VIR_IDENTITY_ATTR_UNIX_USER_NAME,
-                           "joe") != -1) {
+    if (virIdentitySetUserName(ident, "joe") >= 0) {
         VIR_DEBUG("Unexpectedly overwrote attribute");
-        goto cleanup;
+        return -1;
     }
 
-    if (virIdentityGetAttr(ident,
-                           VIR_IDENTITY_ATTR_UNIX_USER_NAME,
-                           &val) < 0)
-        goto cleanup;
+    if ((rc = virIdentityGetUserName(ident, &val)) < 0)
+        return -1;
 
-    if (STRNEQ_NULLABLE(val, "fred")) {
+    if (STRNEQ_NULLABLE(val, "fred") || rc != 1) {
         VIR_DEBUG("Expected 'fred' got '%s'", NULLSTR(val));
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
- cleanup:
-    virObjectUnref(ident);
-    return ret;
+    return 0;
 }
 
-
-static int testIdentityEqual(const void *data ATTRIBUTE_UNUSED)
-{
-    int ret = -1;
-    virIdentityPtr identa = NULL;
-    virIdentityPtr identb = NULL;
-
-    if (!(identa = virIdentityNew()))
-        goto cleanup;
-    if (!(identb = virIdentityNew()))
-        goto cleanup;
-
-    if (!virIdentityIsEqual(identa, identb)) {
-        VIR_DEBUG("Empty identities were not equal");
-        goto cleanup;
-    }
-
-    if (virIdentitySetAttr(identa,
-                           VIR_IDENTITY_ATTR_UNIX_USER_NAME,
-                           "fred") < 0)
-        goto cleanup;
-
-    if (virIdentityIsEqual(identa, identb)) {
-        VIR_DEBUG("Mis-matched identities should not be equal");
-        goto cleanup;
-    }
-
-    if (virIdentitySetAttr(identb,
-                           VIR_IDENTITY_ATTR_UNIX_USER_NAME,
-                           "fred") < 0)
-        goto cleanup;
-
-    if (!virIdentityIsEqual(identa, identb)) {
-        VIR_DEBUG("Matched identities were not equal");
-        goto cleanup;
-    }
-
-    if (virIdentitySetAttr(identa,
-                           VIR_IDENTITY_ATTR_UNIX_GROUP_NAME,
-                           "flintstone") < 0)
-        goto cleanup;
-    if (virIdentitySetAttr(identb,
-                           VIR_IDENTITY_ATTR_UNIX_GROUP_NAME,
-                           "flintstone") < 0)
-        goto cleanup;
-
-    if (!virIdentityIsEqual(identa, identb)) {
-        VIR_DEBUG("Matched identities were not equal");
-        goto cleanup;
-    }
-
-    if (virIdentitySetAttr(identb,
-                           VIR_IDENTITY_ATTR_SASL_USER_NAME,
-                           "fred@FLINTSTONE.COM") < 0)
-        goto cleanup;
-
-    if (virIdentityIsEqual(identa, identb)) {
-        VIR_DEBUG("Mis-matched identities should not be equal");
-        goto cleanup;
-    }
-
-    ret = 0;
- cleanup:
-    virObjectUnref(identa);
-    virObjectUnref(identb);
-    return ret;
-}
 
 static int testIdentityGetSystem(const void *data)
 {
     const char *context = data;
-    int ret = -1;
-    virIdentityPtr ident = NULL;
+    g_autoptr(virIdentity) ident = NULL;
     const char *val;
+    int rc;
 
 #if !WITH_SELINUX
     if (context) {
         VIR_DEBUG("libvirt not compiled with SELinux, skipping this test");
-        ret = EXIT_AM_SKIP;
-        goto cleanup;
+        return EXIT_AM_SKIP;
     }
 #endif
 
     if (!(ident = virIdentityGetSystem())) {
         VIR_DEBUG("Unable to get system identity");
-        goto cleanup;
+        return -1;
     }
 
-    if (virIdentityGetAttr(ident,
-                           VIR_IDENTITY_ATTR_SELINUX_CONTEXT,
-                           &val) < 0)
-        goto cleanup;
+    if ((rc = virIdentityGetSELinuxContext(ident, &val)) < 0)
+        return -1;
 
-    if (STRNEQ_NULLABLE(val, context)) {
-        VIR_DEBUG("Unexpected SELinux context attribute");
-        goto cleanup;
+    if (context == NULL) {
+        if (val != NULL || rc != 0) {
+            VIR_DEBUG("Unexpected SELinux context %s", NULLSTR(val));
+            return -1;
+        }
+    } else {
+        if (STRNEQ_NULLABLE(val, context) || rc != 1) {
+            VIR_DEBUG("Want SELinux context '%s' got '%s'",
+                      context, val);
+            return -1;
+        }
     }
 
-    ret = 0;
- cleanup:
-    virObjectUnref(ident);
-    return ret;
+    return 0;
 }
 
-static int testSetFakeSELinuxContext(const void *data ATTRIBUTE_UNUSED)
+static int testSetFakeSELinuxContext(const void *data G_GNUC_UNUSED)
 {
 #if WITH_SELINUX
-    return setcon_raw((security_context_t)data);
+    return setcon_raw(data);
 #else
     VIR_DEBUG("libvirt not compiled with SELinux, skipping this test");
     return EXIT_AM_SKIP;
 #endif
 }
 
-static int testDisableFakeSELinux(const void *data ATTRIBUTE_UNUSED)
+static int testDisableFakeSELinux(const void *data G_GNUC_UNUSED)
 {
 #if WITH_SELINUX
     return security_disable();
@@ -225,8 +153,6 @@ mymain(void)
 
     if (virTestRun("Identity attributes ", testIdentityAttrs, NULL) < 0)
         ret = -1;
-    if (virTestRun("Identity equality ", testIdentityEqual, NULL) < 0)
-        ret = -1;
     if (virTestRun("Setting fake SELinux context ", testSetFakeSELinuxContext, context) < 0)
         ret = -1;
     if (virTestRun("System identity (fake SELinux enabled) ", testIdentityGetSystem, context) < 0)
@@ -240,7 +166,7 @@ mymain(void)
 }
 
 #if WITH_SELINUX
-VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/libsecurityselinuxhelper.so")
+VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/libsecurityselinuxhelper.so")
 #else
 VIR_TEST_MAIN(mymain)
 #endif

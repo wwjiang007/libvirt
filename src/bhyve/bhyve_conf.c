@@ -32,7 +32,7 @@
 
 VIR_LOG_INIT("bhyve.bhyve_conf");
 
-static virClassPtr virBhyveDriverConfigClass;
+static virClass *virBhyveDriverConfigClass;
 static void virBhyveDriverConfigDispose(void *obj);
 
 static int virBhyveConfigOnceInit(void)
@@ -45,10 +45,10 @@ static int virBhyveConfigOnceInit(void)
 
 VIR_ONCE_GLOBAL_INIT(virBhyveConfig);
 
-virBhyveDriverConfigPtr
+struct _virBhyveDriverConfig *
 virBhyveDriverConfigNew(void)
 {
-    virBhyveDriverConfigPtr cfg;
+    struct _virBhyveDriverConfig *cfg;
 
     if (virBhyveConfigInitialize() < 0)
         return NULL;
@@ -56,22 +56,16 @@ virBhyveDriverConfigNew(void)
     if (!(cfg = virObjectNew(virBhyveDriverConfigClass)))
         return NULL;
 
-    if (VIR_STRDUP(cfg->firmwareDir, DATADIR "/uefi-firmware") < 0)
-        goto error;
+    cfg->firmwareDir = g_strdup(DATADIR "/uefi-firmware");
 
     return cfg;
-
- error:
-    virObjectUnref(cfg);
-    return NULL;
 }
 
 int
-virBhyveLoadDriverConfig(virBhyveDriverConfigPtr cfg,
+virBhyveLoadDriverConfig(struct _virBhyveDriverConfig *cfg,
                          const char *filename)
 {
-    virConfPtr conf;
-    int ret = -1;
+    g_autoptr(virConf) conf = NULL;
 
     if (access(filename, R_OK) == -1) {
         VIR_INFO("Could not read bhyve config file %s", filename);
@@ -83,18 +77,15 @@ virBhyveLoadDriverConfig(virBhyveDriverConfigPtr cfg,
 
     if (virConfGetValueString(conf, "firmware_dir",
                               &cfg->firmwareDir) < 0)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
- cleanup:
-    virConfFree(conf);
-    return ret;
+    return 0;
 }
 
-virBhyveDriverConfigPtr
-virBhyveDriverGetConfig(bhyveConnPtr driver)
+struct _virBhyveDriverConfig *
+virBhyveDriverGetConfig(struct _bhyveConn *driver)
 {
-    virBhyveDriverConfigPtr cfg;
+    struct _virBhyveDriverConfig *cfg;
     bhyveDriverLock(driver);
     cfg = virObjectRef(driver->config);
     bhyveDriverUnlock(driver);
@@ -104,13 +95,13 @@ virBhyveDriverGetConfig(bhyveConnPtr driver)
 static void
 virBhyveDriverConfigDispose(void *obj)
 {
-    virBhyveDriverConfigPtr cfg = obj;
+    struct _virBhyveDriverConfig *cfg = obj;
 
-    VIR_FREE(cfg->firmwareDir);
+    g_free(cfg->firmwareDir);
 }
 
 void
-bhyveDomainCmdlineDefFree(bhyveDomainCmdlineDefPtr def)
+bhyveDomainCmdlineDefFree(bhyveDomainCmdlineDef *def)
 {
     size_t i;
 
@@ -118,8 +109,8 @@ bhyveDomainCmdlineDefFree(bhyveDomainCmdlineDefPtr def)
         return;
 
     for (i = 0; i < def->num_args; i++)
-        VIR_FREE(def->args[i]);
+        g_free(def->args[i]);
 
-    VIR_FREE(def->args);
-    VIR_FREE(def);
+    g_free(def->args);
+    g_free(def);
 }

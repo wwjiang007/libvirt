@@ -18,23 +18,20 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_ADMIN_SERVER_DISPATCH_H
-# define LIBVIRT_ADMIN_SERVER_DISPATCH_H
+#pragma once
 
-# include "rpc/virnetserverprogram.h"
-# include "rpc/virnetserverclient.h"
-# include "admin/admin_protocol.h"
+#include "rpc/virnetserverprogram.h"
+#include "rpc/virnetserverclient.h"
+#include "admin/admin_protocol.h"
 
 
 extern virNetServerProgramProc adminProcs[];
 extern size_t adminNProcs;
 
 void remoteAdmClientFree(void *data);
-void *remoteAdmClientNew(virNetServerClientPtr client, void *opaque);
-void *remoteAdmClientNewPostExecRestart(virNetServerClientPtr client,
-                                        virJSONValuePtr object,
+void *remoteAdmClientNew(virNetServerClient *client, void *opaque);
+void *remoteAdmClientNewPostExecRestart(virNetServerClient *client,
+                                        virJSONValue *object,
                                         void *opaque);
-virJSONValuePtr remoteAdmClientPreExecRestart(virNetServerClientPtr client,
+virJSONValue *remoteAdmClientPreExecRestart(virNetServerClient *client,
                                               void *data);
-
-#endif /* LIBVIRT_ADMIN_SERVER_DISPATCH_H */

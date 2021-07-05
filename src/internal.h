@@ -18,135 +18,98 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_INTERNAL_H
-# define LIBVIRT_INTERNAL_H
+#pragma once
 
-# include <errno.h>
-# include <limits.h>
-# include <verify.h>
-# include <stdbool.h>
-# include <stdint.h>
-# include <stdio.h>
-# include <string.h>
+#include <errno.h>
+#include <limits.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include "glibcompat.h"
 
-# if STATIC_ANALYSIS
-#  undef NDEBUG /* Don't let a prior NDEBUG definition cause trouble.  */
-#  include <assert.h>
-#  define sa_assert(expr) assert (expr)
-# else
-#  define sa_assert(expr) /* empty */
-# endif
+#if defined __clang_analyzer__ || defined __COVERITY__
+# define STATIC_ANALYSIS 1
+#endif
+
+#if STATIC_ANALYSIS
+# undef NDEBUG /* Don't let a prior NDEBUG definition cause trouble.  */
+# include <assert.h>
+# define sa_assert(expr) assert (expr)
+#else
+# define sa_assert(expr) /* empty */
+#endif
+
+#define VIR_INT_MULTIPLY_OVERFLOW(a,b) (G_UNLIKELY ((b) > 0 && (a) > G_MAXINT / (b)))
 
 /* The library itself is allowed to use deprecated functions /
  * variables, so effectively undefine the deprecated attribute
  * which would otherwise be defined in libvirt.h.
  */
-# undef VIR_DEPRECATED
-# define VIR_DEPRECATED /*empty*/
+#undef VIR_DEPRECATED
+#define VIR_DEPRECATED /*empty*/
 
 /* The library itself needs to know enum sizes.  */
-# define VIR_ENUM_SENTINELS
+#define VIR_ENUM_SENTINELS
 
-# ifdef HAVE_LIBINTL_H
-#  define DEFAULT_TEXT_DOMAIN PACKAGE
-#  include <libintl.h>
-#  define _(str) dgettext(PACKAGE, str)
-# else /* HAVE_LIBINTL_H */
-#  define _(str) str
-# endif /* HAVE_LIBINTL_H */
-# define N_(str) str
+#ifdef WITH_LIBINTL_H
+# define DEFAULT_TEXT_DOMAIN PACKAGE
+# include <libintl.h>
+# define _(str) dgettext(PACKAGE, str)
+#else /* WITH_LIBINTL_H */
+# define _(str) str
+#endif /* WITH_LIBINTL_H */
+#define N_(str) str
 
-# include "libvirt/libvirt.h"
-# include "libvirt/libvirt-lxc.h"
-# include "libvirt/libvirt-qemu.h"
-# include "libvirt/libvirt-admin.h"
-# include "libvirt/virterror.h"
+#include "libvirt/libvirt.h"
+#include "libvirt/libvirt-lxc.h"
+#include "libvirt/libvirt-qemu.h"
+#include "libvirt/libvirt-admin.h"
+#include "libvirt/virterror.h"
 
-# include "c-strcase.h"
-# include "ignore-value.h"
-# include "count-leading-zeros.h"
+/* Merely casting to (void) is not sufficient since the
+ * introduction of the "warn_unused_result" attribute
+ */
+#define ignore_value(x) \
+    (__extension__ ({ __typeof__ (x) __x = (x); (void) __x; }))
+
 
 /* String equality tests, suggested by Jim Meyering. */
-# define STREQ(a, b) (strcmp(a, b) == 0)
-# define STRCASEEQ(a, b) (c_strcasecmp(a, b) == 0)
-# define STRNEQ(a, b) (strcmp(a, b) != 0)
-# define STRCASENEQ(a, b) (c_strcasecmp(a, b) != 0)
-# define STREQLEN(a, b, n) (strncmp(a, b, n) == 0)
-# define STRCASEEQLEN(a, b, n) (c_strncasecmp(a, b, n) == 0)
-# define STRNEQLEN(a, b, n) (strncmp(a, b, n) != 0)
-# define STRCASENEQLEN(a, b, n) (c_strncasecmp(a, b, n) != 0)
-# define STRPREFIX(a, b) (strncmp(a, b, strlen(b)) == 0)
-# define STRCASEPREFIX(a, b) (c_strncasecmp(a, b, strlen(b)) == 0)
-# define STRSKIP(a, b) (STRPREFIX(a, b) ? (a) + strlen(b) : NULL)
+#define STREQ(a, b) (strcmp(a, b) == 0)
+#define STRCASEEQ(a, b) (g_ascii_strcasecmp(a, b) == 0)
+#define STRNEQ(a, b) (strcmp(a, b) != 0)
+#define STRCASENEQ(a, b) (g_ascii_strcasecmp(a, b) != 0)
+#define STREQLEN(a, b, n) (strncmp(a, b, n) == 0)
+#define STRCASEEQLEN(a, b, n) (g_ascii_strncasecmp(a, b, n) == 0)
+#define STRNEQLEN(a, b, n) (strncmp(a, b, n) != 0)
+#define STRCASENEQLEN(a, b, n) (g_ascii_strncasecmp(a, b, n) != 0)
+#define STRPREFIX(a, b) (strncmp(a, b, strlen(b)) == 0)
+#define STRCASEPREFIX(a, b) (g_ascii_strncasecmp(a, b, strlen(b)) == 0)
+#define STRSKIP(a, b) (STRPREFIX(a, b) ? (a) + strlen(b) : NULL)
 
-# define STREQ_NULLABLE(a, b) \
-    ((a) ? (b) && STREQ((a), (b)) : !(b))
-# define STRNEQ_NULLABLE(a, b) \
-    ((a) ? !(b) || STRNEQ((a), (b)) : !!(b))
+#define STREQ_NULLABLE(a, b) (g_strcmp0(a, b) == 0)
+#define STRNEQ_NULLABLE(a, b) (g_strcmp0(a, b) != 0)
 
-# define NUL_TERMINATE(buf) do { (buf)[sizeof(buf)-1] = '\0'; } while (0)
-# define ARRAY_CARDINALITY(Array) (sizeof(Array) / sizeof(*(Array)))
+#define NUL_TERMINATE(buf) do { (buf)[sizeof(buf)-1] = '\0'; } while (0)
 
-/**
- * ATTRIBUTE_UNUSED:
- *
- * Macro to flag consciously unused parameters to functions
- */
-# ifndef ATTRIBUTE_UNUSED
-#  define ATTRIBUTE_UNUSED __attribute__((__unused__))
+#ifdef WIN32
+# ifndef O_CLOEXEC
+#  define O_CLOEXEC _O_NOINHERIT
 # endif
+#endif
 
 /**
- * ATTRIBUTE_NORETURN:
- *
- * Macro to indicate that a function won't return to the caller
- */
-# ifndef ATTRIBUTE_NORETURN
-#  define ATTRIBUTE_NORETURN __attribute__((__noreturn__))
-# endif
-
-/**
- * ATTRIBUTE_SENTINEL:
- *
- * Macro to check for NULL-terminated varargs lists
- */
-# ifndef ATTRIBUTE_SENTINEL
-#  define ATTRIBUTE_SENTINEL __attribute__((__sentinel__))
-# endif
-
-/**
- * ATTRIBUTE_NOINLINE:
+ * G_GNUC_NO_INLINE:
  *
  * Force compiler not to inline a method. Should be used if
  * the method need to be overridable by test mocks.
- */
-# ifndef ATTRIBUTE_NOINLINE
-#  define ATTRIBUTE_NOINLINE __attribute__((__noinline__))
-# endif
-
-/**
- * ATTRIBUTE_FMT_PRINTF
  *
- * Macro used to check printf like functions, if compiling
- * with gcc.
- *
- * We use gnulib which guarantees we always have GNU style
- * printf format specifiers even on broken Win32 platforms
- * hence we have to force 'gnu_printf' for new GCC
+ * TODO: Remove after upgrading to GLib >= 2.58
  */
-# ifndef ATTRIBUTE_FMT_PRINTF
-#  ifndef __clang__
-#   define ATTRIBUTE_FMT_PRINTF(fmtpos, argpos) \
-       __attribute__((__format__ (__gnu_printf__, fmtpos, argpos)))
-#  else
-#   define ATTRIBUTE_FMT_PRINTF(fmtpos, argpos) \
-       __attribute__((__format__ (__printf__, fmtpos, argpos)))
-#  endif
-# endif
-
-# ifndef ATTRIBUTE_RETURN_CHECK
-#  define ATTRIBUTE_RETURN_CHECK __attribute__((__warn_unused_result__))
-# endif
+#ifndef G_GNUC_NO_INLINE
+# define G_GNUC_NO_INLINE __attribute__((__noinline__))
+#endif
 
 /**
  * ATTRIBUTE_PACKED
@@ -157,9 +120,9 @@
  * ethernet packets.
  * Others compiler than gcc may use something different e.g. #pragma pack(1)
  */
-# ifndef ATTRIBUTE_PACKED
-#  define ATTRIBUTE_PACKED __attribute__((packed))
-# endif
+#ifndef ATTRIBUTE_PACKED
+# define ATTRIBUTE_PACKED __attribute__((packed))
+#endif
 
 /* gcc's handling of attribute nonnull is less than stellar - it does
  * NOT improve diagnostics, and merely allows gcc to optimize away
@@ -169,130 +132,120 @@
  * whether a parameter is nonnull.  Make this attribute conditional
  * based on whether we are compiling for real or for analysis, while
  * still requiring correct gcc syntax when it is turned off.  See also
- * http://gcc.gnu.org/bugzilla/show_bug.cgi?id=17308 */
-# ifndef ATTRIBUTE_NONNULL
-#  if STATIC_ANALYSIS
-#   define ATTRIBUTE_NONNULL(m) __attribute__((__nonnull__(m)))
-#  else
-#   define ATTRIBUTE_NONNULL(m) __attribute__(())
-#  endif
+ * https://gcc.gnu.org/bugzilla/show_bug.cgi?id=17308 */
+#ifndef ATTRIBUTE_NONNULL
+# if STATIC_ANALYSIS
+#  define ATTRIBUTE_NONNULL(m) __attribute__((__nonnull__(m)))
+# else
+#  define ATTRIBUTE_NONNULL(m) __attribute__(())
 # endif
+#endif
 
-# ifndef ATTRIBUTE_FALLTHROUGH
-#  if __GNUC_PREREQ (7, 0)
-#   define ATTRIBUTE_FALLTHROUGH __attribute__((fallthrough))
-#  else
-#   define ATTRIBUTE_FALLTHROUGH do {} while(0)
-#  endif
+/**
+ *
+ * G_GNUC_FALLTHROUGH
+ *
+ * silence the compiler warning when falling through a switch case
+ *
+ * TODO: Remove after upgrading to GLib >= 2.60
+ */
+#ifndef G_GNUC_FALLTHROUGH
+# if __GNUC_PREREQ (7, 0)
+#  define G_GNUC_FALLTHROUGH __attribute__((fallthrough))
+# else
+#  define G_GNUC_FALLTHROUGH do {} while(0)
 # endif
+#endif
 
-# if WORKING_PRAGMA_PUSH
-#  define VIR_WARNINGS_NO_CAST_ALIGN \
+#define VIR_WARNINGS_NO_CAST_ALIGN \
     _Pragma ("GCC diagnostic push") \
     _Pragma ("GCC diagnostic ignored \"-Wcast-align\"")
 
-#  define VIR_WARNINGS_NO_DEPRECATED \
+#define VIR_WARNINGS_NO_DEPRECATED \
     _Pragma ("GCC diagnostic push") \
     _Pragma ("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
 
-#  if HAVE_SUGGEST_ATTRIBUTE_FORMAT
-#   define VIR_WARNINGS_NO_PRINTF \
+#define VIR_WARNINGS_NO_POINTER_SIGN \
+    _Pragma ("GCC diagnostic push") \
+    _Pragma ("GCC diagnostic ignored \"-Wpointer-sign\"")
+
+#if WITH_SUGGEST_ATTRIBUTE_FORMAT
+# define VIR_WARNINGS_NO_PRINTF \
     _Pragma ("GCC diagnostic push") \
     _Pragma ("GCC diagnostic ignored \"-Wsuggest-attribute=format\"")
-#  else
-#   define VIR_WARNINGS_NO_PRINTF \
+#else
+# define VIR_WARNINGS_NO_PRINTF \
     _Pragma ("GCC diagnostic push")
-#  endif
+#endif
+
+#define VIR_WARNINGS_NO_UNUSED_FUNCTION \
+    _Pragma ("GCC diagnostic push") \
+    _Pragma ("GCC diagnostic ignored \"-Wunused-function\"")
 
 /* Workaround bogus GCC 6.0 for logical 'or' equal expression warnings.
  * (GCC bz 69602) */
-#  if BROKEN_GCC_WLOGICALOP_EQUAL_EXPR
-#   define VIR_WARNINGS_NO_WLOGICALOP_EQUAL_EXPR \
+#if BROKEN_GCC_WLOGICALOP_EQUAL_EXPR
+# define VIR_WARNINGS_NO_WLOGICALOP_EQUAL_EXPR \
      _Pragma ("GCC diagnostic push") \
      _Pragma ("GCC diagnostic ignored \"-Wlogical-op\"")
-#  else
-#   define VIR_WARNINGS_NO_WLOGICALOP_EQUAL_EXPR \
+#else
+# define VIR_WARNINGS_NO_WLOGICALOP_EQUAL_EXPR \
      _Pragma ("GCC diagnostic push")
-#  endif
+#endif
 
-#  define VIR_WARNINGS_RESET \
+/* Where ignore_value cannot be used because it's a statement */
+#define VIR_WARNINGS_NO_UNUSED_VARIABLE \
+    _Pragma ("GCC diagnostic push") \
+    _Pragma ("GCC diagnostic ignored \"-Wunused-variable\"")
+
+#define VIR_WARNINGS_NO_DECLARATION_AFTER_STATEMENT \
+    _Pragma ("GCC diagnostic push") \
+    _Pragma ("GCC diagnostic ignored \"-Wdeclaration-after-statement\"")
+
+#define VIR_WARNINGS_RESET \
     _Pragma ("GCC diagnostic pop")
-# else
-#  define VIR_WARNINGS_NO_CAST_ALIGN
-#  define VIR_WARNINGS_NO_DEPRECATED
-#  define VIR_WARNINGS_NO_PRINTF
-#  define VIR_WARNINGS_NO_WLOGICALOP_EQUAL_EXPR
-#  define VIR_WARNINGS_RESET
-# endif
-
-/* Workaround bogus GCC < 4.6 that produces false -Wlogical-op warnings for
- * strchr(). Those old GCCs don't support push/pop. */
-# if BROKEN_GCC_WLOGICALOP_STRCHR
-#  define VIR_WARNINGS_NO_WLOGICALOP_STRCHR \
-    _Pragma ("GCC diagnostic ignored \"-Wlogical-op\"")
-# else
-#  define VIR_WARNINGS_NO_WLOGICALOP_STRCHR
-# endif
-
 
 /*
  * Use this when passing possibly-NULL strings to printf-a-likes.
  */
-# define NULLSTR(s) ((s) ? (s) : "<null>")
+#define NULLSTR(s) ((s) ? (s) : "<null>")
 
 /*
  * Turn a NULL string into an empty string
  */
-# define NULLSTR_EMPTY(s) ((s) ? (s) : "")
+#define NULLSTR_EMPTY(s) ((s) ? (s) : "")
 
 /*
  * Turn a NULL string into a star
  */
-# define NULLSTR_STAR(s) ((s) ? (s) : "*")
+#define NULLSTR_STAR(s) ((s) ? (s) : "*")
 
 /*
  * Turn a NULL string into a minus sign
  */
-# define NULLSTR_MINUS(s) ((s) ? (s) : "-")
+#define NULLSTR_MINUS(s) ((s) ? (s) : "-")
 
 /**
  * SWAP:
  *
  * In place exchange of two values
  */
-# define SWAP(a, b) \
+#define SWAP(a, b) \
     do { \
         (a) = (a) ^ (b); \
         (b) = (a) ^ (b); \
         (a) = (a) ^ (b); \
     } while (0)
 
-/**
- * VIR_STEAL_PTR:
- *
- * Steals pointer passed as second argument into the first argument. Second
- * argument must not have side effects.
- */
-# define VIR_STEAL_PTR(a, b) \
-    do { \
-        (a) = (b); \
-        (b) = NULL; \
-    } while (0)
 
 /**
- * VIR_RETURN_PTR:
- * @ret: pointer to return
+ * VIR_IS_POW2:
  *
- * Returns value of @ret while clearing @ret. This ensures that pointers
- * freed by using VIR_AUTOPTR can be easily passed back to the caller without
- * any temporary variable. @ptr is evaluated more than once.
+ * Returns true if given number is a power of two
  */
-# define VIR_RETURN_PTR(ptr) \
-    do { \
-        typeof(ptr) virTemporaryReturnPointer = (ptr); \
-        (ptr) = NULL; \
-        return virTemporaryReturnPointer; \
-    } while (0)
+#define VIR_IS_POW2(x) \
+    ((x) && !((x) & ((x) - 1)))
+
 
 /**
  * virCheckFlags:
@@ -305,7 +258,7 @@
  * Returns nothing. Exits the caller function if unsupported flags were
  * passed to it.
  */
-# define virCheckFlags(supported, retval) \
+#define virCheckFlags(supported, retval) \
     do { \
         unsigned long __unsuppflags = flags & ~(supported); \
         if (__unsuppflags) { \
@@ -327,7 +280,7 @@
  * Returns nothing. Jumps to a label if unsupported flags were
  * passed to it.
  */
-# define virCheckFlagsGoto(supported, label) \
+#define virCheckFlagsGoto(supported, label) \
     do { \
         unsigned long __unsuppflags = flags & ~(supported); \
         if (__unsuppflags) { \
@@ -353,7 +306,7 @@
  * This helper does an early return and therefore it has to be called
  * before anything that would require cleanup.
  */
-# define VIR_EXCLUSIVE_FLAGS_RET(FLAG1, FLAG2, RET) \
+#define VIR_EXCLUSIVE_FLAGS_RET(FLAG1, FLAG2, RET) \
     do { \
         if ((flags & FLAG1) && (flags & FLAG2)) { \
             virReportInvalidArg(ctl, \
@@ -377,7 +330,7 @@
  * Returns nothing.  Jumps to a label if unsupported flags were
  * passed to it.
  */
-# define VIR_EXCLUSIVE_FLAGS_GOTO(FLAG1, FLAG2, LABEL) \
+#define VIR_EXCLUSIVE_FLAGS_GOTO(FLAG1, FLAG2, LABEL) \
     do { \
         if ((flags & FLAG1) && (flags & FLAG2)) { \
             virReportInvalidArg(ctl, \
@@ -403,7 +356,7 @@
  * This helper does an early return and therefore it has to be called
  * before anything that would require cleanup.
  */
-# define VIR_REQUIRE_FLAG_RET(FLAG1, FLAG2, RET) \
+#define VIR_REQUIRE_FLAG_RET(FLAG1, FLAG2, RET) \
     do { \
         if ((flags & FLAG1) && !(flags & FLAG2)) { \
             virReportInvalidArg(ctl, \
@@ -425,7 +378,7 @@
  *
  * Returns nothing.  Jumps to a label if required flag is not set.
  */
-# define VIR_REQUIRE_FLAG_GOTO(FLAG1, FLAG2, LABEL) \
+#define VIR_REQUIRE_FLAG_GOTO(FLAG1, FLAG2, LABEL) \
     do { \
         if ((flags & FLAG1) && !(flags & FLAG2)) { \
             virReportInvalidArg(ctl, \
@@ -435,28 +388,28 @@
         } \
     } while (0)
 
-# define virCheckNonNullArgReturn(argname, retval) \
+#define virCheckNonNullArgReturn(argname, retval) \
     do { \
         if (argname == NULL) { \
             virReportInvalidNonNullArg(argname); \
             return retval; \
         } \
     } while (0)
-# define virCheckNullArgGoto(argname, label) \
+#define virCheckNullArgGoto(argname, label) \
     do { \
         if (argname != NULL) { \
             virReportInvalidNullArg(argname); \
             goto label; \
         } \
     } while (0)
-# define virCheckNonNullArgGoto(argname, label) \
+#define virCheckNonNullArgGoto(argname, label) \
     do { \
         if (argname == NULL) { \
             virReportInvalidNonNullArg(argname); \
             goto label; \
         } \
     } while (0)
-# define virCheckNonEmptyStringArgGoto(argname, label) \
+#define virCheckNonEmptyStringArgGoto(argname, label) \
     do { \
         if (argname == NULL) { \
             virReportInvalidNonNullArg(argname); \
@@ -467,42 +420,42 @@
             goto label; \
         } \
     } while (0)
-# define virCheckPositiveArgGoto(argname, label) \
+#define virCheckPositiveArgGoto(argname, label) \
     do { \
         if (argname <= 0) { \
             virReportInvalidPositiveArg(argname); \
             goto label; \
         } \
     } while (0)
-# define virCheckPositiveArgReturn(argname, retval) \
+#define virCheckPositiveArgReturn(argname, retval) \
     do { \
         if (argname <= 0) { \
             virReportInvalidPositiveArg(argname); \
             return retval; \
         } \
     } while (0)
-# define virCheckNonZeroArgGoto(argname, label) \
+#define virCheckNonZeroArgGoto(argname, label) \
     do { \
         if (argname == 0) { \
             virReportInvalidNonZeroArg(argname); \
             goto label; \
         } \
     } while (0)
-# define virCheckZeroArgGoto(argname, label) \
+#define virCheckZeroArgGoto(argname, label) \
     do { \
         if (argname != 0) { \
             virReportInvalidNonZeroArg(argname); \
             goto label; \
         } \
     } while (0)
-# define virCheckNonNegativeArgGoto(argname, label) \
+#define virCheckNonNegativeArgGoto(argname, label) \
     do { \
         if (argname < 0) { \
             virReportInvalidNonNegativeArg(argname); \
             goto label; \
         } \
     } while (0)
-# define virCheckReadOnlyGoto(flags, label) \
+#define virCheckReadOnlyGoto(flags, label) \
     do { \
         if ((flags) & VIR_CONNECT_RO) { \
             virReportRestrictedError(_("read only access prevents %s"), \
@@ -511,19 +464,38 @@
         } \
     } while (0)
 
+/* This check is intended to be used with legacy APIs only which expect the
+ * caller to pre-allocate the target buffer.
+ * We want to allow callers pass NULL arrays if the size is declared as 0 and
+ * still succeed in calling the API.
+ */
+#define virCheckNonNullArrayArgGoto(argname, argsize, label) \
+    do { \
+        if (!argname && argsize > 0) { \
+            virReportInvalidNonNullArg(argname); \
+            goto label; \
+        } \
+    } while (0)
 
+
+/* Count leading zeros in an unsigned int.
+ *
+ * Wrapper needed as __builtin_clz is undefined if value is zero
+ */
+#define VIR_CLZ(value) \
+    (value ? __builtin_clz(value) : (8 * sizeof(unsigned)))
 
 /* divide value by size, rounding up */
-# define VIR_DIV_UP(value, size) (((value) + (size) - 1) / (size))
+#define VIR_DIV_UP(value, size) (((value) + (size) - 1) / (size))
 
 /* round up value to the closest multiple of size */
-# define VIR_ROUND_UP(value, size) (VIR_DIV_UP(value, size) * (size))
+#define VIR_ROUND_UP(value, size) (VIR_DIV_UP(value, size) * (size))
 
 /* Round up to the next closest power of 2. It will return rounded number or 0
  * for 0 or number more than 2^31 (for 32bit unsigned int). */
-# define VIR_ROUND_UP_POWER_OF_TWO(value) \
+#define VIR_ROUND_UP_POWER_OF_TWO(value) \
     ((value) > 0 && (value) <= 1U << (sizeof(unsigned int) * 8 - 1) ? \
-     1U << (sizeof(unsigned int) * 8 - count_leading_zeros((value) - 1)) : 0)
+     1U << (sizeof(unsigned int) * 8 - VIR_CLZ((value) - 1)) : 0)
 
 
 /* Specific error values for use in forwarding programs such as
@@ -534,8 +506,26 @@ enum {
     EXIT_ENOENT = 127, /* Could not find program to exec */
 };
 
-# ifndef ENODATA
-#  define ENODATA EIO
-# endif
+#ifndef ENODATA
+# define ENODATA EIO
+#endif
 
-#endif /* LIBVIRT_INTERNAL_H */
+#ifdef WIN32
+# ifndef ENOMSG
+#  define ENOMSG 122
+# endif
+#endif
+
+/* Ideally callers would use the g_*printf
+ * functions directly but there are a lot to
+ * convert, so until then...
+ */
+#ifndef VIR_NO_GLIB_STDIO
+
+# undef printf
+# define printf(...) g_printf(__VA_ARGS__)
+
+# undef fprintf
+# define fprintf(fh, ...) g_fprintf(fh, __VA_ARGS__)
+
+#endif /* VIR_NO_GLIB_STDIO */

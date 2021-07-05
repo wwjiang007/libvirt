@@ -56,8 +56,8 @@ VIR_LOG_INIT("security.security_apparmor");
 
 /* Data structure to pass to *FileIterate so we have everything we need */
 struct SDPDOP {
-    virSecurityManagerPtr mgr;
-    virDomainDefPtr def;
+    virSecurityManager *mgr;
+    virDomainDef *def;
 };
 
 /*
@@ -76,15 +76,11 @@ profile_status(const char *str, const int check_enforcing)
     int rc = -2;
 
     /* create string that is '<str> \0' for accurate matching */
-    if (virAsprintf(&tmp, "%s ", str) == -1)
-        return rc;
+    tmp = g_strdup_printf("%s ", str);
 
     if (check_enforcing != 0) {
         /* create string that is '<str> (enforce)\0' for accurate matching */
-        if (virAsprintf(&etmp, "%s (enforce)", str) == -1) {
-            VIR_FREE(tmp);
-            return rc;
-        }
+        etmp = g_strdup_printf("%s (enforce)", str);
     }
 
     if (virFileReadAll(APPARMOR_PROFILES_PATH, MAX_FILE_LEN, &content) < 0) {
@@ -130,8 +126,7 @@ profile_status_file(const char *str)
     int rc = -1;
     int len;
 
-    if (virAsprintf(&profile, "%s/%s", APPARMOR_DIR "/libvirt", str) == -1)
-        return rc;
+    profile = g_strdup_printf("%s/%s", APPARMOR_DIR "/libvirt", str);
 
     if (!virFileExists(profile))
         goto failed;
@@ -143,8 +138,7 @@ profile_status_file(const char *str)
     }
 
     /* create string that is ' <str> flags=(complain)\0' */
-    if (virAsprintf(&tmp, " %s flags=(complain)", str) == -1)
-        goto failed;
+    tmp = g_strdup_printf(" %s flags=(complain)", str);
 
     if (strstr(content, tmp) != NULL)
         rc = 0;
@@ -163,16 +157,16 @@ profile_status_file(const char *str)
  * load (add) a profile. Will create one if necessary
  */
 static int
-load_profile(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
+load_profile(virSecurityManager *mgr G_GNUC_UNUSED,
              const char *profile,
-             virDomainDefPtr def,
+             virDomainDef *def,
              const char *fn,
              bool append)
 {
     int rc = -1;
     bool create = true;
     char *xml = NULL;
-    virCommandPtr cmd = NULL;
+    virCommand *cmd = NULL;
 
     xml = virDomainDefFormat(def, NULL, VIR_DOMAIN_DEF_FORMAT_SECURE);
     if (!xml)
@@ -209,28 +203,19 @@ load_profile(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
 static int
 remove_profile(const char *profile)
 {
-    int rc = -1;
-    const char * const argv[] = {
-        VIRT_AA_HELPER, "-D", "-u", profile, NULL
-    };
+    g_autoptr(virCommand) cmd = virCommandNewArgList(VIRT_AA_HELPER, "-D", "-u",
+                                                     profile, NULL);
 
-    if (virRun(argv, NULL) == 0)
-        rc = 0;
-
-    return rc;
+    return virCommandRun(cmd, NULL);
 }
 
 static char *
-get_profile_name(virDomainDefPtr def)
+get_profile_name(virDomainDef *def)
 {
     char uuidstr[VIR_UUID_STRING_BUFLEN];
-    char *name = NULL;
 
     virUUIDFormat(def->uuid, uuidstr);
-    if (virAsprintf(&name, "%s%s", AA_PREFIX, uuidstr) < 0)
-        return NULL;
-
-    return name;
+    return g_strdup_printf("%s%s", AA_PREFIX, uuidstr);
 }
 
 /* returns -1 on error or profile for libvirtd is unconfined, 0 if complain
@@ -263,7 +248,7 @@ use_apparmor(void)
     rc = profile_status(libvirt_daemon, 1);
     if (rc < 0) {
         rc = profile_status("libvirtd", 1);
-        /* Error or unconfined should all result in -1*/
+        /* Error or unconfined should all result in -1 */
         if (rc < 0)
             rc = -1;
     }
@@ -277,21 +262,16 @@ use_apparmor(void)
  * NULL.
  */
 static int
-reload_profile(virSecurityManagerPtr mgr,
-               virDomainDefPtr def,
+reload_profile(virSecurityManager *mgr,
+               virDomainDef *def,
                const char *fn,
                bool append)
 {
-    int rc = -1;
-    char *profile_name = NULL;
-    virSecurityLabelDefPtr secdef = virDomainDefGetSecurityLabelDef(
+    virSecurityLabelDef *secdef = virDomainDefGetSecurityLabelDef(
                                                 def, SECURITY_APPARMOR_NAME);
 
     if (!secdef || !secdef->relabel)
         return 0;
-
-    if ((profile_name = get_profile_name(def)) == NULL)
-        return rc;
 
     /* Update the profile only if it is loaded */
     if (profile_loaded(secdef->imagelabel) >= 0) {
@@ -300,49 +280,44 @@ reload_profile(virSecurityManagerPtr mgr,
                            _("cannot update AppArmor profile "
                              "\'%s\'"),
                            secdef->imagelabel);
-            goto cleanup;
+            return -1;
         }
     }
-
-    rc = 0;
- cleanup:
-    VIR_FREE(profile_name);
-
-    return rc;
+    return 0;
 }
 
 static int
 AppArmorSetSecurityHostdevLabelHelper(const char *file, void *opaque)
 {
     struct SDPDOP *ptr = opaque;
-    virDomainDefPtr def = ptr->def;
+    virDomainDef *def = ptr->def;
 
     return reload_profile(ptr->mgr, def, file, true);
 }
 
 static int
-AppArmorSetSecurityUSBLabel(virUSBDevicePtr dev ATTRIBUTE_UNUSED,
+AppArmorSetSecurityUSBLabel(virUSBDevice *dev G_GNUC_UNUSED,
                             const char *file, void *opaque)
 {
     return AppArmorSetSecurityHostdevLabelHelper(file, opaque);
 }
 
 static int
-AppArmorSetSecurityPCILabel(virPCIDevicePtr dev ATTRIBUTE_UNUSED,
+AppArmorSetSecurityPCILabel(virPCIDevice *dev G_GNUC_UNUSED,
                             const char *file, void *opaque)
 {
     return AppArmorSetSecurityHostdevLabelHelper(file, opaque);
 }
 
 static int
-AppArmorSetSecuritySCSILabel(virSCSIDevicePtr dev ATTRIBUTE_UNUSED,
+AppArmorSetSecuritySCSILabel(virSCSIDevice *dev G_GNUC_UNUSED,
                              const char *file, void *opaque)
 {
     return AppArmorSetSecurityHostdevLabelHelper(file, opaque);
 }
 
 static int
-AppArmorSetSecurityHostLabel(virSCSIVHostDevicePtr dev ATTRIBUTE_UNUSED,
+AppArmorSetSecurityHostLabel(virSCSIVHostDevice *dev G_GNUC_UNUSED,
                              const char *file, void *opaque)
 {
     return AppArmorSetSecurityHostdevLabelHelper(file, opaque);
@@ -350,7 +325,7 @@ AppArmorSetSecurityHostLabel(virSCSIVHostDevicePtr dev ATTRIBUTE_UNUSED,
 
 /* Called on libvirtd startup to see if AppArmor is available */
 static int
-AppArmorSecurityManagerProbe(const char *virtDriver ATTRIBUTE_UNUSED)
+AppArmorSecurityManagerProbe(const char *virtDriver G_GNUC_UNUSED)
 {
     char *template_qemu = NULL;
     char *template_lxc = NULL;
@@ -360,13 +335,8 @@ AppArmorSecurityManagerProbe(const char *virtDriver ATTRIBUTE_UNUSED)
         return rc;
 
     /* see if template file exists */
-    if (virAsprintf(&template_qemu, "%s/TEMPLATE.qemu",
-                               APPARMOR_DIR "/libvirt") == -1)
-        return rc;
-
-    if (virAsprintf(&template_lxc, "%s/TEMPLATE.lxc",
-                               APPARMOR_DIR "/libvirt") == -1)
-        goto cleanup;
+    template_qemu = g_strdup_printf("%s/TEMPLATE.qemu", APPARMOR_DIR "/libvirt");
+    template_lxc = g_strdup_printf("%s/TEMPLATE.lxc", APPARMOR_DIR "/libvirt");
 
     if (!virFileExists(template_qemu)) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -391,25 +361,25 @@ AppArmorSecurityManagerProbe(const char *virtDriver ATTRIBUTE_UNUSED)
  * currently not used.
  */
 static int
-AppArmorSecurityManagerOpen(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED)
+AppArmorSecurityManagerOpen(virSecurityManager *mgr G_GNUC_UNUSED)
 {
     return 0;
 }
 
 static int
-AppArmorSecurityManagerClose(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED)
+AppArmorSecurityManagerClose(virSecurityManager *mgr G_GNUC_UNUSED)
 {
     return 0;
 }
 
 static const char *
-AppArmorSecurityManagerGetModel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED)
+AppArmorSecurityManagerGetModel(virSecurityManager *mgr G_GNUC_UNUSED)
 {
     return SECURITY_APPARMOR_NAME;
 }
 
 static const char *
-AppArmorSecurityManagerGetDOI(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED)
+AppArmorSecurityManagerGetDOI(virSecurityManager *mgr G_GNUC_UNUSED)
 {
     return SECURITY_APPARMOR_VOID_DOI;
 }
@@ -421,12 +391,12 @@ AppArmorSecurityManagerGetDOI(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED)
  * called on shutdown.
 */
 static int
-AppArmorGenSecurityLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
-                         virDomainDefPtr def)
+AppArmorGenSecurityLabel(virSecurityManager *mgr G_GNUC_UNUSED,
+                         virDomainDef *def)
 {
     int rc = -1;
     char *profile_name = NULL;
-    virSecurityLabelDefPtr secdef = virDomainDefGetSecurityLabelDef(def,
+    virSecurityLabelDef *secdef = virDomainDefGetSecurityLabelDef(def,
                                                 SECURITY_APPARMOR_NAME);
 
     if (!secdef)
@@ -452,15 +422,13 @@ AppArmorGenSecurityLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
     if ((profile_name = get_profile_name(def)) == NULL)
         return rc;
 
-    if (VIR_STRDUP(secdef->label, profile_name) < 0)
-        goto cleanup;
+    secdef->label = g_strdup(profile_name);
 
     /* set imagelabel the same as label (but we won't use it) */
-    if (VIR_STRDUP(secdef->imagelabel, profile_name) < 0)
-        goto err;
+    secdef->imagelabel = g_strdup(profile_name);
 
-    if (!secdef->model && VIR_STRDUP(secdef->model, SECURITY_APPARMOR_NAME) < 0)
-        goto err;
+    if (!secdef->model)
+        secdef->model = g_strdup(SECURITY_APPARMOR_NAME);
 
     /* Now that we have a label, load the profile into the kernel. */
     if (load_profile(mgr, secdef->label, def, NULL, false) < 0) {
@@ -485,20 +453,21 @@ AppArmorGenSecurityLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
 }
 
 static int
-AppArmorSetSecurityAllLabel(virSecurityManagerPtr mgr,
-                            virDomainDefPtr def,
-                            const char *stdin_path,
-                            bool chardevStdioLogd ATTRIBUTE_UNUSED)
+AppArmorSetSecurityAllLabel(virSecurityManager *mgr,
+                            virDomainDef *def,
+                            const char *incomingPath,
+                            bool chardevStdioLogd G_GNUC_UNUSED,
+                            bool migrated G_GNUC_UNUSED)
 {
-    virSecurityLabelDefPtr secdef = virDomainDefGetSecurityLabelDef(def,
+    virSecurityLabelDef *secdef = virDomainDefGetSecurityLabelDef(def,
                                                     SECURITY_APPARMOR_NAME);
     if (!secdef || !secdef->relabel)
         return 0;
 
-    /* Reload the profile if stdin_path is specified. Note that
+    /* Reload the profile if incomingPath is specified. Note that
        GenSecurityLabel() will have already been run. */
-    if (stdin_path)
-        return reload_profile(mgr, def, stdin_path, true);
+    if (incomingPath)
+        return reload_profile(mgr, def, incomingPath, true);
 
     return 0;
 }
@@ -507,9 +476,9 @@ AppArmorSetSecurityAllLabel(virSecurityManagerPtr mgr,
  * running.
  */
 static int
-AppArmorGetSecurityProcessLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
-                                virDomainDefPtr def,
-                                pid_t pid ATTRIBUTE_UNUSED,
+AppArmorGetSecurityProcessLabel(virSecurityManager *mgr G_GNUC_UNUSED,
+                                virDomainDef *def,
+                                pid_t pid G_GNUC_UNUSED,
                                 virSecurityLabelPtr sec)
 {
     int rc = -1;
@@ -525,14 +494,13 @@ AppArmorGetSecurityProcessLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
                        "%s", _("error getting profile status"));
         goto cleanup;
     } else if (status == -1) {
-        profile_name[0] = '\0';
-    }
-
-    if (virStrcpy(sec->label, profile_name,
-        VIR_SECURITY_LABEL_BUFLEN) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       "%s", _("error copying profile name"));
-        goto cleanup;
+        sec->label[0] = '\0';
+    } else {
+        if (virStrcpy(sec->label, profile_name, VIR_SECURITY_LABEL_BUFLEN) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           "%s", _("error copying profile name"));
+            goto cleanup;
+        }
     }
 
     sec->enforcing = status == 1;
@@ -548,10 +516,10 @@ AppArmorGetSecurityProcessLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
  * more details. Currently called via qemudShutdownVMDaemon.
  */
 static int
-AppArmorReleaseSecurityLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
-                             virDomainDefPtr def)
+AppArmorReleaseSecurityLabel(virSecurityManager *mgr G_GNUC_UNUSED,
+                             virDomainDef *def)
 {
-    virSecurityLabelDefPtr secdef = virDomainDefGetSecurityLabelDef(def,
+    virSecurityLabelDef *secdef = virDomainDefGetSecurityLabelDef(def,
                                                         SECURITY_APPARMOR_NAME);
     if (secdef) {
         VIR_FREE(secdef->model);
@@ -564,13 +532,13 @@ AppArmorReleaseSecurityLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
 
 
 static int
-AppArmorRestoreSecurityAllLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
-                                virDomainDefPtr def,
-                                bool migrated ATTRIBUTE_UNUSED,
-                                bool chardevStdioLogd ATTRIBUTE_UNUSED)
+AppArmorRestoreSecurityAllLabel(virSecurityManager *mgr G_GNUC_UNUSED,
+                                virDomainDef *def,
+                                bool migrated G_GNUC_UNUSED,
+                                bool chardevStdioLogd G_GNUC_UNUSED)
 {
     int rc = 0;
-    virSecurityLabelDefPtr secdef =
+    virSecurityLabelDef *secdef =
         virDomainDefGetSecurityLabelDef(def, SECURITY_APPARMOR_NAME);
 
     if (!secdef)
@@ -590,12 +558,12 @@ AppArmorRestoreSecurityAllLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
  * LOCALSTATEDIR/log/libvirt/qemu/<vm name>.log
  */
 static int
-AppArmorSetSecurityProcessLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
-                                virDomainDefPtr def)
+AppArmorSetSecurityProcessLabel(virSecurityManager *mgr G_GNUC_UNUSED,
+                                virDomainDef *def)
 {
     int rc = -1;
     char *profile_name = NULL;
-    virSecurityLabelDefPtr secdef =
+    virSecurityLabelDef *secdef =
         virDomainDefGetSecurityLabelDef(def, SECURITY_APPARMOR_NAME);
 
     if (!secdef || !secdef->label)
@@ -634,14 +602,14 @@ AppArmorSetSecurityProcessLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
  * process*.
  */
 static int
-AppArmorSetSecurityChildProcessLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
-                                     virDomainDefPtr def,
-                                     virCommandPtr cmd)
+AppArmorSetSecurityChildProcessLabel(virSecurityManager *mgr G_GNUC_UNUSED,
+                                     virDomainDef *def,
+                                     virCommand *cmd)
 {
     int rc = -1;
     char *profile_name = NULL;
     char *cmd_str = NULL;
-    virSecurityLabelDefPtr secdef =
+    virSecurityLabelDef *secdef =
         virDomainDefGetSecurityLabelDef(def, SECURITY_APPARMOR_NAME);
 
     if (!secdef || !secdef->label)
@@ -672,22 +640,22 @@ AppArmorSetSecurityChildProcessLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
 }
 
 static int
-AppArmorSetSecurityDaemonSocketLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
-                                     virDomainDefPtr vm ATTRIBUTE_UNUSED)
+AppArmorSetSecurityDaemonSocketLabel(virSecurityManager *mgr G_GNUC_UNUSED,
+                                     virDomainDef *vm G_GNUC_UNUSED)
 {
     return 0;
 }
 
 static int
-AppArmorSetSecuritySocketLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
-                               virDomainDefPtr def ATTRIBUTE_UNUSED)
+AppArmorSetSecuritySocketLabel(virSecurityManager *mgr G_GNUC_UNUSED,
+                               virDomainDef *def G_GNUC_UNUSED)
 {
     return 0;
 }
 
 static int
-AppArmorClearSecuritySocketLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
-                                 virDomainDefPtr def ATTRIBUTE_UNUSED)
+AppArmorClearSecuritySocketLabel(virSecurityManager *mgr G_GNUC_UNUSED,
+                                 virDomainDef *def G_GNUC_UNUSED)
 {
     return 0;
 }
@@ -695,10 +663,10 @@ AppArmorClearSecuritySocketLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
 
 /* Called when hotplugging */
 static int
-AppArmorRestoreSecurityImageLabel(virSecurityManagerPtr mgr,
-                                  virDomainDefPtr def,
-                                  virStorageSourcePtr src,
-                                  virSecurityDomainImageLabelFlags flags ATTRIBUTE_UNUSED)
+AppArmorRestoreSecurityImageLabel(virSecurityManager *mgr,
+                                  virDomainDef *def,
+                                  virStorageSource *src,
+                                  virSecurityDomainImageLabelFlags flags G_GNUC_UNUSED)
 {
     if (!virStorageSourceIsLocalStorage(src))
         return 0;
@@ -709,21 +677,13 @@ AppArmorRestoreSecurityImageLabel(virSecurityManagerPtr mgr,
 
 /* Called when hotplugging */
 static int
-AppArmorSetMemoryLabel(virSecurityManagerPtr mgr,
-                       virDomainDefPtr def,
-                       virDomainMemoryDefPtr mem)
+AppArmorSetMemoryLabel(virSecurityManager *mgr,
+                       virDomainDef *def,
+                       virDomainMemoryDef *mem)
 {
-    if (mem == NULL)
-        return 0;
-
-    switch ((virDomainMemoryModel) mem->model) {
+    switch (mem->model) {
     case VIR_DOMAIN_MEMORY_MODEL_NVDIMM:
-        if (mem->nvdimmPath == NULL) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("%s: nvdimm without a path"),
-                           __func__);
-            return -1;
-        }
+    case VIR_DOMAIN_MEMORY_MODEL_VIRTIO_PMEM:
         if (!virFileExists(mem->nvdimmPath)) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("%s: \'%s\' does not exist"),
@@ -731,7 +691,6 @@ AppArmorSetMemoryLabel(virSecurityManagerPtr mgr,
             return -1;
         }
         return reload_profile(mgr, def, mem->nvdimmPath, true);
-        break;
     case VIR_DOMAIN_MEMORY_MODEL_NONE:
     case VIR_DOMAIN_MEMORY_MODEL_DIMM:
     case VIR_DOMAIN_MEMORY_MODEL_LAST:
@@ -743,24 +702,25 @@ AppArmorSetMemoryLabel(virSecurityManagerPtr mgr,
 
 
 static int
-AppArmorRestoreMemoryLabel(virSecurityManagerPtr mgr,
-                           virDomainDefPtr def,
-                           virDomainMemoryDefPtr mem ATTRIBUTE_UNUSED)
+AppArmorRestoreMemoryLabel(virSecurityManager *mgr,
+                           virDomainDef *def,
+                           virDomainMemoryDef *mem G_GNUC_UNUSED)
 {
     return reload_profile(mgr, def, NULL, false);
 }
 
 /* Called when hotplugging */
 static int
-AppArmorSetInputLabel(virSecurityManagerPtr mgr,
-                      virDomainDefPtr def,
-                      virDomainInputDefPtr input)
+AppArmorSetInputLabel(virSecurityManager *mgr,
+                      virDomainDef *def,
+                      virDomainInputDef *input)
 {
     if (input == NULL)
         return 0;
 
     switch ((virDomainInputType)input->type) {
     case VIR_DOMAIN_INPUT_TYPE_PASSTHROUGH:
+    case VIR_DOMAIN_INPUT_TYPE_EVDEV:
         if (input->source.evdev == NULL) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("%s: passthrough input device has no source"),
@@ -788,68 +748,76 @@ AppArmorSetInputLabel(virSecurityManagerPtr mgr,
 
 
 static int
-AppArmorRestoreInputLabel(virSecurityManagerPtr mgr,
-                          virDomainDefPtr def,
-                          virDomainInputDefPtr input ATTRIBUTE_UNUSED)
+AppArmorRestoreInputLabel(virSecurityManager *mgr,
+                          virDomainDef *def,
+                          virDomainInputDef *input G_GNUC_UNUSED)
 {
     return reload_profile(mgr, def, NULL, false);
 }
 
 /* Called when hotplugging */
 static int
-AppArmorSetSecurityImageLabel(virSecurityManagerPtr mgr,
-                              virDomainDefPtr def,
-                              virStorageSourcePtr src,
-                              virSecurityDomainImageLabelFlags flags ATTRIBUTE_UNUSED)
+AppArmorSetSecurityImageLabelInternal(virSecurityManager *mgr,
+                                      virDomainDef *def,
+                                      virStorageSource *src)
 {
-    int rc = -1;
-    char *profile_name = NULL;
-    virSecurityLabelDefPtr secdef;
+    g_autofree char *vfioGroupDev = NULL;
+    const char *path;
 
-    if (!src->path || !virStorageSourceIsLocalStorage(src))
-        return 0;
+    if (src->type == VIR_STORAGE_TYPE_NVME) {
+        const virStorageSourceNVMeDef *nvme = src->nvme;
+
+        if (!(vfioGroupDev = virPCIDeviceAddressGetIOMMUGroupDev(&nvme->pciAddr)))
+            return -1;
+
+        path = vfioGroupDev;
+    } else {
+        if (!src->path || !virStorageSourceIsLocalStorage(src))
+            return 0;
+
+        path = src->path;
+    }
+
+    /* if the device doesn't exist, error out */
+    if (!virFileExists(path)) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("\'%s\' does not exist"),
+                       path);
+        return -1;
+    }
+
+    return reload_profile(mgr, def, path, true);
+}
+
+static int
+AppArmorSetSecurityImageLabel(virSecurityManager *mgr,
+                              virDomainDef *def,
+                              virStorageSource *src,
+                              virSecurityDomainImageLabelFlags flags G_GNUC_UNUSED)
+{
+    virSecurityLabelDef *secdef;
+    virStorageSource *n;
 
     secdef = virDomainDefGetSecurityLabelDef(def, SECURITY_APPARMOR_NAME);
     if (!secdef || !secdef->relabel)
         return 0;
 
-    if (secdef->imagelabel) {
-        /* if the device doesn't exist, error out */
-        if (!virFileExists(src->path)) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("\'%s\' does not exist"),
-                           src->path);
-            return -1;
-        }
+    if (!secdef->imagelabel)
+        return 0;
 
-        if ((profile_name = get_profile_name(def)) == NULL)
+    for (n = src; virStorageSourceIsBacking(n); n = n->backingStore) {
+        if (AppArmorSetSecurityImageLabelInternal(mgr, def, n) < 0)
             return -1;
-
-        /* update the profile only if it is loaded */
-        if (profile_loaded(secdef->imagelabel) >= 0) {
-            if (load_profile(mgr, secdef->imagelabel, def,
-                             src->path, false) < 0) {
-                virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("cannot update AppArmor profile "
-                                 "\'%s\'"),
-                               secdef->imagelabel);
-                goto cleanup;
-            }
-        }
     }
-    rc = 0;
 
- cleanup:
-    VIR_FREE(profile_name);
-
-    return rc;
+    return 0;
 }
 
 static int
-AppArmorSecurityVerify(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
-                       virDomainDefPtr def)
+AppArmorSecurityVerify(virSecurityManager *mgr G_GNUC_UNUSED,
+                       virDomainDef *def)
 {
-    virSecurityLabelDefPtr secdef =
+    virSecurityLabelDef *secdef =
         virDomainDefGetSecurityLabelDef(def, SECURITY_APPARMOR_NAME);
 
     if (!secdef)
@@ -867,29 +835,29 @@ AppArmorSecurityVerify(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
 }
 
 static int
-AppArmorReserveSecurityLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
-                             virDomainDefPtr def ATTRIBUTE_UNUSED,
-                             pid_t pid ATTRIBUTE_UNUSED)
+AppArmorReserveSecurityLabel(virSecurityManager *mgr G_GNUC_UNUSED,
+                             virDomainDef *def G_GNUC_UNUSED,
+                             pid_t pid G_GNUC_UNUSED)
 {
     /* NOOP. Nothing to reserve with AppArmor */
     return 0;
 }
 
 static int
-AppArmorSetSecurityHostdevLabel(virSecurityManagerPtr mgr,
-                                virDomainDefPtr def,
-                                virDomainHostdevDefPtr dev,
+AppArmorSetSecurityHostdevLabel(virSecurityManager *mgr,
+                                virDomainDef *def,
+                                virDomainHostdevDef *dev,
                                 const char *vroot)
 {
     struct SDPDOP *ptr;
     int ret = -1;
-    virSecurityLabelDefPtr secdef =
+    virSecurityLabelDef *secdef =
         virDomainDefGetSecurityLabelDef(def, SECURITY_APPARMOR_NAME);
-    virDomainHostdevSubsysUSBPtr usbsrc = &dev->source.subsys.u.usb;
-    virDomainHostdevSubsysPCIPtr pcisrc = &dev->source.subsys.u.pci;
-    virDomainHostdevSubsysSCSIPtr scsisrc = &dev->source.subsys.u.scsi;
-    virDomainHostdevSubsysSCSIVHostPtr hostsrc = &dev->source.subsys.u.scsi_host;
-    virDomainHostdevSubsysMediatedDevPtr mdevsrc = &dev->source.subsys.u.mdev;
+    virDomainHostdevSubsysUSB *usbsrc = &dev->source.subsys.u.usb;
+    virDomainHostdevSubsysPCI *pcisrc = &dev->source.subsys.u.pci;
+    virDomainHostdevSubsysSCSI *scsisrc = &dev->source.subsys.u.scsi;
+    virDomainHostdevSubsysSCSIVHost *hostsrc = &dev->source.subsys.u.scsi_host;
+    virDomainHostdevSubsysMediatedDev *mdevsrc = &dev->source.subsys.u.mdev;
 
     if (!secdef || !secdef->relabel)
         return 0;
@@ -907,14 +875,13 @@ AppArmorSetSecurityHostdevLabel(virSecurityManagerPtr mgr,
     if (profile_loaded(secdef->imagelabel) < 0)
         return 0;
 
-    if (VIR_ALLOC(ptr) < 0)
-        return -1;
+    ptr = g_new0(struct SDPDOP, 1);
     ptr->mgr = mgr;
     ptr->def = def;
 
     switch ((virDomainHostdevSubsysType)dev->source.subsys.type) {
     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB: {
-        virUSBDevicePtr usb =
+        virUSBDevice *usb =
             virUSBDeviceNew(usbsrc->bus, usbsrc->device, vroot);
         if (!usb)
             goto done;
@@ -925,9 +892,8 @@ AppArmorSetSecurityHostdevLabel(virSecurityManagerPtr mgr,
     }
 
     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI: {
-        virPCIDevicePtr pci =
-            virPCIDeviceNew(pcisrc->addr.domain, pcisrc->addr.bus,
-                            pcisrc->addr.slot, pcisrc->addr.function);
+        virPCIDevice *pci =
+            virPCIDeviceNew(&pcisrc->addr);
 
         if (!pci)
             goto done;
@@ -949,8 +915,8 @@ AppArmorSetSecurityHostdevLabel(virSecurityManagerPtr mgr,
     }
 
     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI: {
-        virDomainHostdevSubsysSCSIHostPtr scsihostsrc = &scsisrc->u.host;
-        virSCSIDevicePtr scsi =
+        virDomainHostdevSubsysSCSIHost *scsihostsrc = &scsisrc->u.host;
+        virSCSIDevice *scsi =
             virSCSIDeviceNew(NULL,
                              scsihostsrc->adapter, scsihostsrc->bus,
                              scsihostsrc->target, scsihostsrc->unit,
@@ -966,7 +932,7 @@ AppArmorSetSecurityHostdevLabel(virSecurityManagerPtr mgr,
     }
 
     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI_HOST: {
-        virSCSIVHostDevicePtr host = virSCSIVHostDeviceNew(hostsrc->wwpn);
+        virSCSIVHostDevice *host = virSCSIVHostDeviceNew(hostsrc->wwpn);
 
         if (!host)
             goto done;
@@ -1002,13 +968,13 @@ AppArmorSetSecurityHostdevLabel(virSecurityManagerPtr mgr,
 
 
 static int
-AppArmorRestoreSecurityHostdevLabel(virSecurityManagerPtr mgr,
-                                    virDomainDefPtr def,
-                                    virDomainHostdevDefPtr dev ATTRIBUTE_UNUSED,
-                                    const char *vroot ATTRIBUTE_UNUSED)
+AppArmorRestoreSecurityHostdevLabel(virSecurityManager *mgr,
+                                    virDomainDef *def,
+                                    virDomainHostdevDef *dev G_GNUC_UNUSED,
+                                    const char *vroot G_GNUC_UNUSED)
 
 {
-    virSecurityLabelDefPtr secdef =
+    virSecurityLabelDef *secdef =
         virDomainDefGetSecurityLabelDef(def, SECURITY_APPARMOR_NAME);
 
     if (!secdef || !secdef->relabel)
@@ -1018,14 +984,14 @@ AppArmorRestoreSecurityHostdevLabel(virSecurityManagerPtr mgr,
 }
 
 static int
-AppArmorSetChardevLabel(virSecurityManagerPtr mgr,
-                        virDomainDefPtr def,
-                        virDomainChrSourceDefPtr dev_source,
-                        bool chardevStdioLogd ATTRIBUTE_UNUSED)
+AppArmorSetChardevLabel(virSecurityManager *mgr,
+                        virDomainDef *def,
+                        virDomainChrSourceDef *dev_source,
+                        bool chardevStdioLogd G_GNUC_UNUSED)
 {
     char *in = NULL, *out = NULL;
     int ret = -1;
-    virSecurityLabelDefPtr secdef;
+    virSecurityLabelDef *secdef;
 
     secdef = virDomainDefGetSecurityLabelDef(def, SECURITY_APPARMOR_NAME);
     if (!secdef)
@@ -1040,9 +1006,8 @@ AppArmorSetChardevLabel(virSecurityManagerPtr mgr,
         break;
 
     case VIR_DOMAIN_CHR_TYPE_PIPE:
-        if (virAsprintf(&in, "%s.in", dev_source->data.file.path) < 0 ||
-            virAsprintf(&out, "%s.out", dev_source->data.file.path) < 0)
-            goto done;
+        in = g_strdup_printf("%s.in", dev_source->data.file.path);
+        out = g_strdup_printf("%s.out", dev_source->data.file.path);
         if (virFileExists(in)) {
             if (reload_profile(mgr, def, in, true) < 0)
                 goto done;
@@ -1074,12 +1039,12 @@ AppArmorSetChardevLabel(virSecurityManagerPtr mgr,
 }
 
 static int
-AppArmorRestoreChardevLabel(virSecurityManagerPtr mgr,
-                            virDomainDefPtr def,
-                            virDomainChrSourceDefPtr dev_source ATTRIBUTE_UNUSED,
-                            bool chardevStdioLogd ATTRIBUTE_UNUSED)
+AppArmorRestoreChardevLabel(virSecurityManager *mgr,
+                            virDomainDef *def,
+                            virDomainChrSourceDef *dev_source G_GNUC_UNUSED,
+                            bool chardevStdioLogd G_GNUC_UNUSED)
 {
-    virSecurityLabelDefPtr secdef;
+    virSecurityLabelDef *secdef;
 
     secdef = virDomainDefGetSecurityLabelDef(def, SECURITY_APPARMOR_NAME);
     if (!secdef)
@@ -1089,16 +1054,8 @@ AppArmorRestoreChardevLabel(virSecurityManagerPtr mgr,
 }
 
 static int
-AppArmorSetSavedStateLabel(virSecurityManagerPtr mgr,
-                           virDomainDefPtr def,
-                           const char *savefile)
-{
-    return reload_profile(mgr, def, savefile, true);
-}
-
-static int
-AppArmorSetPathLabel(virSecurityManagerPtr mgr,
-                           virDomainDefPtr def,
+AppArmorSetPathLabel(virSecurityManager *mgr,
+                           virDomainDef *def,
                            const char *path,
                            bool allowSubtree)
 {
@@ -1106,8 +1063,7 @@ AppArmorSetPathLabel(virSecurityManagerPtr mgr,
     char *full_path = NULL;
 
     if (allowSubtree) {
-        if (virAsprintf(&full_path, "%s/{,**}", path) < 0)
-            return -1;
+        full_path = g_strdup_printf("%s/{,**}", path);
         rc = reload_profile(mgr, def, full_path, true);
         VIR_FREE(full_path);
     } else {
@@ -1118,30 +1074,28 @@ AppArmorSetPathLabel(virSecurityManagerPtr mgr,
 }
 
 static int
-AppArmorRestoreSavedStateLabel(virSecurityManagerPtr mgr,
-                               virDomainDefPtr def,
-                               const char *savefile ATTRIBUTE_UNUSED)
+AppArmorRestorePathLabel(virSecurityManager *mgr,
+                         virDomainDef *def,
+                         const char *path G_GNUC_UNUSED)
 {
     return reload_profile(mgr, def, NULL, false);
 }
 
 static int
-AppArmorSetFDLabel(virSecurityManagerPtr mgr,
-                   virDomainDefPtr def,
+AppArmorSetFDLabel(virSecurityManager *mgr,
+                   virDomainDef *def,
                    int fd)
 {
-    int rc = -1;
     char *proc = NULL;
     char *fd_path = NULL;
 
-    virSecurityLabelDefPtr secdef =
+    virSecurityLabelDef *secdef =
         virDomainDefGetSecurityLabelDef(def, SECURITY_APPARMOR_NAME);
 
     if (!secdef || !secdef->imagelabel)
         return 0;
 
-    if (virAsprintf(&proc, "/proc/self/fd/%d", fd) == -1)
-        return rc;
+    proc = g_strdup_printf("/proc/self/fd/%d", fd);
 
     if (virFileResolveLink(proc, &fd_path) < 0) {
         /* it's a deleted file, presumably.  Ignore? */
@@ -1153,18 +1107,18 @@ AppArmorSetFDLabel(virSecurityManagerPtr mgr,
 }
 
 static char *
-AppArmorGetMountOptions(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
-                        virDomainDefPtr vm ATTRIBUTE_UNUSED)
+AppArmorGetMountOptions(virSecurityManager *mgr G_GNUC_UNUSED,
+                        virDomainDef *vm G_GNUC_UNUSED)
 {
     char *opts;
 
-    ignore_value(VIR_STRDUP(opts, ""));
+    opts = g_strdup("");
     return opts;
 }
 
 static const char *
-AppArmorGetBaseLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
-                     int virtType ATTRIBUTE_UNUSED)
+AppArmorGetBaseLabel(virSecurityManager *mgr G_GNUC_UNUSED,
+                     int virtType G_GNUC_UNUSED)
 {
     return NULL;
 }
@@ -1208,10 +1162,8 @@ virSecurityDriver virAppArmorSecurityDriver = {
     .domainSetSecurityHostdevLabel      = AppArmorSetSecurityHostdevLabel,
     .domainRestoreSecurityHostdevLabel  = AppArmorRestoreSecurityHostdevLabel,
 
-    .domainSetSavedStateLabel           = AppArmorSetSavedStateLabel,
-    .domainRestoreSavedStateLabel       = AppArmorRestoreSavedStateLabel,
-
     .domainSetPathLabel                 = AppArmorSetPathLabel,
+    .domainRestorePathLabel             = AppArmorRestorePathLabel,
 
     .domainSetSecurityChardevLabel      = AppArmorSetChardevLabel,
     .domainRestoreSecurityChardevLabel  = AppArmorRestoreChardevLabel,

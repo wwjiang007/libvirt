@@ -3,6 +3,7 @@
   <model>EPYC</model>
   <vendor>AMD</vendor>
   <feature name='ht'/>
+  <feature name='monitor'/>
   <feature name='osxsave'/>
   <feature name='xsaves'/>
   <feature name='cmp_legacy'/>
@@ -14,4 +15,16 @@
   <feature name='perfctr_core'/>
   <feature name='perfctr_nb'/>
   <feature name='invtsc'/>
+  <feature name='clzero'/>
+  <feature name='xsaveerptr'/>
+  <feature name='npt'/>
+  <feature name='lbrv'/>
+  <feature name='svm-lock'/>
+  <feature name='nrip-save'/>
+  <feature name='tsc-scale'/>
+  <feature name='vmcb-clean'/>
+  <feature name='flushbyasid'/>
+  <feature name='decodeassists'/>
+  <feature name='pause-filter'/>
+  <feature name='pfthreshold'/>
 </cpu>

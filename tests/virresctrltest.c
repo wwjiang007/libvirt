@@ -21,22 +21,19 @@ test_virResctrlGetUnused(const void *opaque)
     char *system_dir = NULL;
     char *resctrl_dir = NULL;
     int ret = -1;
-    virResctrlAllocPtr alloc = NULL;
+    virResctrlAlloc *alloc = NULL;
     char *schemata_str = NULL;
     char *schemata_file;
-    virCapsPtr caps = NULL;
+    virCaps *caps = NULL;
 
-    if (virAsprintf(&system_dir, "%s/vircaps2xmldata/linux-%s/system",
-                    abs_srcdir, data->filename) < 0)
-        goto cleanup;
+    system_dir = g_strdup_printf("%s/vircaps2xmldata/linux-%s/system", abs_srcdir,
+                                 data->filename);
 
-    if (virAsprintf(&resctrl_dir, "%s/vircaps2xmldata/linux-%s/resctrl",
-                    abs_srcdir, data->filename) < 0)
-        goto cleanup;
+    resctrl_dir = g_strdup_printf("%s/vircaps2xmldata/linux-%s/resctrl",
+                                  abs_srcdir, data->filename);
 
-    if (virAsprintf(&schemata_file, "%s/virresctrldata/%s.schemata",
-                    abs_srcdir, data->filename) < 0)
-        goto cleanup;
+    schemata_file = g_strdup_printf("%s/virresctrldata/%s.schemata", abs_srcdir,
+                                    data->filename);
 
     virFileWrapperAddPrefix("/sys/devices/system", system_dir);
     virFileWrapperAddPrefix("/sys/fs/resctrl", resctrl_dir);
@@ -56,7 +53,7 @@ test_virResctrlGetUnused(const void *opaque)
             ret = 0;
         goto cleanup;
     } else if (data->fail) {
-        VIR_TEST_DEBUG("Error expected but there wasn't any.\n");
+        VIR_TEST_DEBUG("Error expected but there wasn't any.");
         ret = -1;
         goto cleanup;
     }
@@ -96,7 +93,7 @@ mymain(void)
     DO_TEST_UNUSED("resctrl-skx");
     DO_TEST_UNUSED("resctrl-skx-twocaches");
 
-    return ret;
+    return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 VIR_TEST_MAIN(mymain)

@@ -24,16 +24,11 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <sys/wait.h>
 #include <time.h>
+#include <gio/gnetworking.h>
 
 #include <libxml/parser.h>
 #include <libxml/xpath.h>
-#include "getpass.h"
-
-#ifdef HAVE_WINSOCK2_H
-# include <winsock2.h>
-#endif
 
 #ifdef WITH_CURL
 # include <curl/curl.h>
@@ -48,10 +43,9 @@
 #include "viralloc.h"
 #include "configmake.h"
 #include "virconf.h"
-#if WITH_GNUTLS
-# include "rpc/virnettlscontext.h"
-#endif
+#include "rpc/virnettlscontext.h"
 #include "vircommand.h"
+#include "virevent.h"
 #include "virfile.h"
 #include "virrandom.h"
 #include "viruri.h"
@@ -72,21 +66,16 @@
 #ifdef WITH_VMWARE
 # include "vmware/vmware_driver.h"
 #endif
-#ifdef WITH_PHYP
-# include "phyp/phyp_driver.h"
-#endif
 #ifdef WITH_ESX
 # include "esx/esx_driver.h"
 #endif
 #ifdef WITH_HYPERV
 # include "hyperv/hyperv_driver.h"
 #endif
-#ifdef WITH_XENAPI
-# include "xenapi/xenapi_driver.h"
-#endif
 #ifdef WITH_BHYVE
 # include "bhyve/bhyve_driver.h"
 #endif
+#include "access/viraccessmanager.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -100,29 +89,29 @@ VIR_LOG_INIT("libvirt");
 
 #define MAX_DRIVERS 21
 
-static virConnectDriverPtr virConnectDriverTab[MAX_DRIVERS];
+static virConnectDriver *virConnectDriverTab[MAX_DRIVERS];
 static int virConnectDriverTabCount;
-static virStateDriverPtr virStateDriverTab[MAX_DRIVERS];
+static virStateDriver *virStateDriverTab[MAX_DRIVERS];
 static int virStateDriverTabCount;
 
-static virNetworkDriverPtr virSharedNetworkDriver;
-static virInterfaceDriverPtr virSharedInterfaceDriver;
-static virStorageDriverPtr virSharedStorageDriver;
-static virNodeDeviceDriverPtr virSharedNodeDeviceDriver;
-static virSecretDriverPtr virSharedSecretDriver;
-static virNWFilterDriverPtr virSharedNWFilterDriver;
+static virNetworkDriver *virSharedNetworkDriver;
+static virInterfaceDriver *virSharedInterfaceDriver;
+static virStorageDriver *virSharedStorageDriver;
+static virNodeDeviceDriver *virSharedNodeDeviceDriver;
+static virSecretDriver *virSharedSecretDriver;
+static virNWFilterDriver *virSharedNWFilterDriver;
 
 
 static int
 virConnectAuthCallbackDefault(virConnectCredentialPtr cred,
                               unsigned int ncred,
-                              void *cbdata ATTRIBUTE_UNUSED)
+                              void *cbdata G_GNUC_UNUSED)
 {
     size_t i;
 
     for (i = 0; i < ncred; i++) {
         char buf[1024];
-        char *bufptr = buf;
+        char *bufptr = NULL;
         size_t len;
 
         switch (cred[i].type) {
@@ -149,14 +138,17 @@ virConnectAuthCallbackDefault(virConnectCredentialPtr cred,
 
             if (!fgets(buf, sizeof(buf), stdin)) {
                 if (feof(stdin)) { /* Treat EOF as "" */
-                    buf[0] = '\0';
                     break;
                 }
                 return -1;
             }
+
             len = strlen(buf);
             if (len != 0 && buf[len-1] == '\n')
                 buf[len-1] = '\0';
+
+            if (strlen(buf) > 0)
+                bufptr = g_strdup(buf);
             break;
 
         case VIR_CRED_PASSPHRASE:
@@ -166,9 +158,9 @@ virConnectAuthCallbackDefault(virConnectCredentialPtr cred,
             if (fflush(stdout) != 0)
                 return -1;
 
-            bufptr = getpass("");
-            if (!bufptr)
-                return -1;
+            bufptr = virGetPassword();
+            if (STREQ(bufptr, ""))
+                VIR_FREE(bufptr);
             break;
 
         default:
@@ -176,10 +168,7 @@ virConnectAuthCallbackDefault(virConnectCredentialPtr cred,
         }
 
         if (cred[i].type != VIR_CRED_EXTERNAL) {
-            if (VIR_STRDUP(cred[i].result,
-                           STREQ(bufptr, "") && cred[i].defresult ?
-                           cred[i].defresult : bufptr) < 0)
-                return -1;
+            cred[i].result = bufptr ? bufptr : g_strdup(cred[i].defresult ? cred[i].defresult : "");
             cred[i].resultlen = strlen(cred[i].result);
         }
     }
@@ -220,21 +209,6 @@ static virConnectAuth virConnectAuthDefault = {
  */
 virConnectAuthPtr virConnectAuthPtrDefault = &virConnectAuthDefault;
 
-#if HAVE_WINSOCK2_H
-static int
-virWinsockInit(void)
-{
-    WORD winsock_version, err;
-    WSADATA winsock_data;
-
-    /* http://msdn2.microsoft.com/en-us/library/ms742213.aspx */
-    winsock_version = MAKEWORD(2, 2);
-    err = WSAStartup(winsock_version, &winsock_data);
-    return err == 0 ? 0 : -1;
-}
-#endif
-
-
 static bool virGlobalError;
 static virOnceControl virGlobalOnce = VIR_ONCE_CONTROL_INITIALIZER;
 
@@ -246,23 +220,21 @@ virGlobalInit(void)
      * virConnectOpen first.  But we can't rely on VIR_DEBUG working
      * until after initialization is complete, and since this is
      * one-shot, we never get here again.  */
-    if (virThreadInitialize() < 0 ||
-        virErrorInitialize() < 0)
+    if (virErrorInitialize() < 0)
         goto error;
 
-#ifndef LIBVIRT_SETUID_RPC_CLIENT
-    if (virIsSUID()) {
+    virFileActivateDirOverrideForLib();
+
+    if (getuid() != geteuid() ||
+        getgid() != getegid()) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("libvirt.so is not safe to use from setuid programs"));
+                       _("libvirt.so is not safe to use from setuid/setgid programs"));
         goto error;
     }
-#endif
 
     virLogSetFromEnv();
 
-#ifdef WITH_GNUTLS
     virNetTLSInit();
-#endif
 
 #if WITH_CURL
     curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -270,53 +242,36 @@ virGlobalInit(void)
 
     VIR_DEBUG("register drivers");
 
-#if HAVE_WINSOCK2_H
-    if (virWinsockInit() == -1)
-        goto error;
-#endif
+    g_networking_init();
 
-#ifdef HAVE_LIBINTL_H
+#ifdef WITH_LIBINTL_H
     if (!bindtextdomain(PACKAGE, LOCALEDIR))
         goto error;
-#endif /* HAVE_LIBINTL_H */
+#endif /* WITH_LIBINTL_H */
 
-    /*
-     * Note we must avoid everything except 'remote' driver
-     * for virt-login-shell usage
-     */
-#ifndef LIBVIRT_SETUID_RPC_CLIENT
     /*
      * Note that the order is important: the first ones have a higher
      * priority when calling virConnectOpen.
      */
-# ifdef WITH_TEST
+#ifdef WITH_TEST
     if (testRegister() == -1)
         goto error;
-# endif
-# ifdef WITH_OPENVZ
+#endif
+#ifdef WITH_OPENVZ
     if (openvzRegister() == -1)
         goto error;
-# endif
-# ifdef WITH_VMWARE
+#endif
+#ifdef WITH_VMWARE
     if (vmwareRegister() == -1)
         goto error;
-# endif
-# ifdef WITH_PHYP
-    if (phypRegister() == -1)
-        goto error;
-# endif
-# ifdef WITH_ESX
+#endif
+#ifdef WITH_ESX
     if (esxRegister() == -1)
         goto error;
-# endif
-# ifdef WITH_HYPERV
+#endif
+#ifdef WITH_HYPERV
     if (hypervRegister() == -1)
         goto error;
-# endif
-# ifdef WITH_XENAPI
-    if (xenapiRegister() == -1)
-        goto error;
-# endif
 #endif
 #ifdef WITH_REMOTE
     if (remoteRegister() == -1)
@@ -367,9 +322,9 @@ BOOL WINAPI
 DllMain(HINSTANCE instance, DWORD reason, LPVOID ignore);
 
 BOOL WINAPI
-DllMain(HINSTANCE instance ATTRIBUTE_UNUSED,
+DllMain(HINSTANCE instance G_GNUC_UNUSED,
         DWORD reason,
-        LPVOID ignore ATTRIBUTE_UNUSED)
+        LPVOID ignore G_GNUC_UNUSED)
 {
     switch (reason) {
     case DLL_PROCESS_ATTACH:
@@ -377,12 +332,8 @@ DllMain(HINSTANCE instance ATTRIBUTE_UNUSED,
         break;
 
     case DLL_THREAD_ATTACH:
-        /* Nothing todo in libvirt yet */
-        break;
-
     case DLL_THREAD_DETACH:
-        /* Release per-thread local data */
-        virThreadOnExit();
+        /* Nothing todo in libvirt yet */
         break;
 
     case DLL_PROCESS_DETACH:
@@ -406,7 +357,7 @@ DllMain(HINSTANCE instance ATTRIBUTE_UNUSED,
  * Returns 0 on success, or -1 in case of error.
  */
 int
-virSetSharedNetworkDriver(virNetworkDriverPtr driver)
+virSetSharedNetworkDriver(virNetworkDriver *driver)
 {
     virCheckNonNullArgReturn(driver, -1);
 
@@ -432,7 +383,7 @@ virSetSharedNetworkDriver(virNetworkDriverPtr driver)
  * Returns the driver priority or -1 in case of error.
  */
 int
-virSetSharedInterfaceDriver(virInterfaceDriverPtr driver)
+virSetSharedInterfaceDriver(virInterfaceDriver *driver)
 {
     virCheckNonNullArgReturn(driver, -1);
 
@@ -458,7 +409,7 @@ virSetSharedInterfaceDriver(virInterfaceDriverPtr driver)
  * Returns the driver priority or -1 in case of error.
  */
 int
-virSetSharedStorageDriver(virStorageDriverPtr driver)
+virSetSharedStorageDriver(virStorageDriver *driver)
 {
     virCheckNonNullArgReturn(driver, -1);
 
@@ -484,7 +435,7 @@ virSetSharedStorageDriver(virStorageDriverPtr driver)
  * Returns the driver priority or -1 in case of error.
  */
 int
-virSetSharedNodeDeviceDriver(virNodeDeviceDriverPtr driver)
+virSetSharedNodeDeviceDriver(virNodeDeviceDriver *driver)
 {
     virCheckNonNullArgReturn(driver, -1);
 
@@ -510,7 +461,7 @@ virSetSharedNodeDeviceDriver(virNodeDeviceDriverPtr driver)
  * Returns the driver priority or -1 in case of error.
  */
 int
-virSetSharedSecretDriver(virSecretDriverPtr driver)
+virSetSharedSecretDriver(virSecretDriver *driver)
 {
     virCheckNonNullArgReturn(driver, -1);
 
@@ -536,7 +487,7 @@ virSetSharedSecretDriver(virSecretDriverPtr driver)
  * Returns the driver priority or -1 in case of error.
  */
 int
-virSetSharedNWFilterDriver(virNWFilterDriverPtr driver)
+virSetSharedNWFilterDriver(virNWFilterDriver *driver)
 {
     virCheckNonNullArgReturn(driver, -1);
 
@@ -564,7 +515,7 @@ virSetSharedNWFilterDriver(virNWFilterDriverPtr driver)
  * Returns the driver priority or -1 in case of error.
  */
 int
-virRegisterConnectDriver(virConnectDriverPtr driver,
+virRegisterConnectDriver(virConnectDriver *driver,
                          bool setSharedDrivers)
 {
     VIR_DEBUG("driver=%p name=%s", driver,
@@ -602,6 +553,33 @@ virRegisterConnectDriver(virConnectDriverPtr driver,
 
 
 /**
+ * virHasDriverForURIScheme:
+ * @scheme: the URI scheme
+ *
+ * Determine if there is a driver registered that explicitly
+ * handles URIs with the scheme @scheme.
+ *
+ * Returns: true if a driver is registered
+ */
+bool
+virHasDriverForURIScheme(const char *scheme)
+{
+    size_t i;
+    size_t j;
+
+    for (i = 0; i < virConnectDriverTabCount; i++) {
+        if (!virConnectDriverTab[i]->uriSchemes)
+            continue;
+        for (j = 0; virConnectDriverTab[i]->uriSchemes[j]; j++) {
+            if (STREQ(virConnectDriverTab[i]->uriSchemes[j], scheme))
+                return true;
+        }
+    }
+
+    return false;
+}
+
+/**
  * virRegisterStateDriver:
  * @driver: pointer to a driver block
  *
@@ -610,7 +588,7 @@ virRegisterConnectDriver(virConnectDriverPtr driver,
  * Returns the driver priority or -1 in case of error.
  */
 int
-virRegisterStateDriver(virStateDriverPtr driver)
+virRegisterStateDriver(virStateDriver *driver)
 {
     virCheckNonNullArgReturn(driver, -1);
 
@@ -629,15 +607,37 @@ virRegisterStateDriver(virStateDriverPtr driver)
 /**
  * virStateInitialize:
  * @privileged: set to true if running with root privilege, false otherwise
+ * @mandatory: set to true if all drivers must report success, not skipped
+ * @root: directory to use for embedded mode
  * @callback: callback to invoke to inhibit shutdown of the daemon
  * @opaque: data to pass to @callback
  *
  * Initialize all virtualization drivers.
  *
+ * Passing a non-NULL @root instructs the driver to run in embedded mode.
+ * Instead of using the compile time $prefix as the basis for directory
+ * paths, @root should be used instead. In addition any '/libvirt'
+ * component of the paths should be stripped.
+ *
+ * eg consider a build with prefix=/usr/local. A driver might use the
+ * locations
+ *
+ *    /usr/local/etc/libvirt/$DRIVER/
+ *    /usr/local/var/lib/libvirt/$DRIVER/
+ *    /usr/local/run/libvirt/$DRIVER/
+ *
+ * When run with @root, the locations should instead be
+ *
+ *    @root/etc/$DRIVER/
+ *    @root/var/lib/$DRIVER/
+ *    @root/run/$DRIVER/
+ *
  * Returns 0 if all succeed, -1 upon any failure.
  */
 int
 virStateInitialize(bool privileged,
+                   bool mandatory,
+                   const char *root,
                    virStateInhibitCallback callback,
                    void *opaque)
 {
@@ -647,18 +647,70 @@ virStateInitialize(bool privileged,
         return -1;
 
     for (i = 0; i < virStateDriverTabCount; i++) {
-        if (virStateDriverTab[i]->stateInitialize) {
+        if (virStateDriverTab[i]->stateInitialize &&
+            !virStateDriverTab[i]->initialized) {
+            virDrvStateInitResult ret;
             VIR_DEBUG("Running global init for %s state driver",
                       virStateDriverTab[i]->name);
-            if (virStateDriverTab[i]->stateInitialize(privileged,
-                                                      callback,
-                                                      opaque) < 0) {
+            virStateDriverTab[i]->initialized = true;
+            ret = virStateDriverTab[i]->stateInitialize(privileged,
+                                                        root,
+                                                        callback,
+                                                        opaque);
+            VIR_DEBUG("State init result %d (mandatory=%d)", ret, mandatory);
+            if (ret == VIR_DRV_STATE_INIT_ERROR) {
                 VIR_ERROR(_("Initialization of %s state driver failed: %s"),
                           virStateDriverTab[i]->name,
                           virGetLastErrorMessage());
                 return -1;
+            } else if (ret == VIR_DRV_STATE_INIT_SKIPPED && mandatory) {
+                VIR_ERROR(_("Initialization of mandatory %s state driver skipped"),
+                          virStateDriverTab[i]->name);
+                return -1;
             }
         }
+    }
+    return 0;
+}
+
+
+/**
+ * virStateShutdownPrepare:
+ *
+ * Run each virtualization driver's shutdown prepare method.
+ *
+ * Returns 0 if all succeed, -1 upon any failure.
+ */
+int
+virStateShutdownPrepare(void)
+{
+    size_t i;
+
+    for (i = 0; i < virStateDriverTabCount; i++) {
+        if (virStateDriverTab[i]->stateShutdownPrepare &&
+            virStateDriverTab[i]->stateShutdownPrepare() < 0)
+            return -1;
+    }
+    return 0;
+}
+
+
+/**
+ * virStateShutdownWait:
+ *
+ * Run each virtualization driver's shutdown wait method.
+ *
+ * Returns 0 if all succeed, -1 upon any failure.
+ */
+int
+virStateShutdownWait(void)
+{
+    size_t i;
+
+    for (i = 0; i < virStateDriverTabCount; i++) {
+        if (virStateDriverTab[i]->stateShutdownWait &&
+            virStateDriverTab[i]->stateShutdownWait() < 0)
+            return -1;
     }
     return 0;
 }
@@ -753,7 +805,7 @@ virStateStop(void)
  *       @typeVer have the format major * 1,000,000 + minor * 1,000 + release.
  */
 int
-virGetVersion(unsigned long *libVer, const char *type ATTRIBUTE_UNUSED,
+virGetVersion(unsigned long *libVer, const char *type G_GNUC_UNUSED,
               unsigned long *typeVer)
 {
     if (virInitialize() < 0)
@@ -777,26 +829,22 @@ virGetVersion(unsigned long *libVer, const char *type ATTRIBUTE_UNUSED,
 
 
 static int
-virConnectGetDefaultURI(virConfPtr conf,
+virConnectGetDefaultURI(virConf *conf,
                         char **name)
 {
-    int ret = -1;
-    const char *defname = virGetEnvBlockSUID("LIBVIRT_DEFAULT_URI");
+    const char *defname = getenv("LIBVIRT_DEFAULT_URI");
     if (defname && *defname) {
         VIR_DEBUG("Using LIBVIRT_DEFAULT_URI '%s'", defname);
-        if (VIR_STRDUP(*name, defname) < 0)
-            goto cleanup;
+        *name = g_strdup(defname);
     } else {
         if (virConfGetValueString(conf, "uri_default", name) < 0)
-            goto cleanup;
+            return -1;
 
         if (*name)
             VIR_DEBUG("Using config file uri '%s'", *name);
     }
 
-    ret = 0;
- cleanup:
-    return ret;
+    return 0;
 }
 
 
@@ -805,7 +853,7 @@ virConnectGetDefaultURI(virConfPtr conf,
  * offer the suggested fix.
  */
 static int
-virConnectCheckURIMissingSlash(const char *uristr, virURIPtr uri)
+virConnectCheckURIMissingSlash(const char *uristr, virURI *uri)
 {
     if (!uri->path || !uri->server)
         return 0;
@@ -837,8 +885,9 @@ virConnectOpenInternal(const char *name,
     size_t i;
     int res;
     virConnectPtr ret;
-    virConfPtr conf = NULL;
+    g_autoptr(virConf) conf = NULL;
     char *uristr = NULL;
+    bool embed = false;
 
     ret = virGetConnect();
     if (ret == NULL)
@@ -849,12 +898,6 @@ virConnectOpenInternal(const char *name,
 
     if (name && name[0] == '\0')
         name = NULL;
-
-    if (!name && virIsSUID()) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("An explicit URI must be provided when setuid"));
-        goto failed;
-    }
 
     /* Convert xen -> xen:///system for back compat */
     if (name && STRCASEEQ(name, "xen"))
@@ -872,8 +915,7 @@ virConnectOpenInternal(const char *name,
      * if detectable.
      */
     if (name) {
-        if (VIR_STRDUP(uristr, name) < 0)
-            goto failed;
+        uristr = g_strdup(name);
     } else {
         if (virConnectGetDefaultURI(conf, &uristr) < 0)
             goto failed;
@@ -886,7 +928,7 @@ virConnectOpenInternal(const char *name,
                         goto failed;
                     VIR_DEBUG("%s driver URI probe returned '%s'",
                               virConnectDriverTab[i]->hypervisorDriver->name,
-                              NULLSTR_EMPTY(uristr));
+                              NULLSTR(uristr));
                 }
             }
         }
@@ -911,9 +953,8 @@ virConnectOpenInternal(const char *name,
 
         /* Avoid need for drivers to worry about NULLs, as
          * no one needs to distinguish "" vs NULL */
-        if (ret->uri->path == NULL &&
-            VIR_STRDUP(ret->uri->path, "") < 0)
-            goto failed;
+        if (ret->uri->path == NULL)
+            ret->uri->path = g_strdup("");
 
         VIR_DEBUG("Split \"%s\" to URI components:\n"
                   "  scheme %s\n"
@@ -937,6 +978,53 @@ virConnectOpenInternal(const char *name,
                                            ret->uri) < 0) {
             goto failed;
         }
+
+        if (STREQ(ret->uri->path, "/embed")) {
+            const char *root = NULL;
+            g_autofree char *regMethod = NULL;
+            VIR_DEBUG("URI path requests %s driver embedded mode",
+                      ret->uri->scheme);
+            if (strspn(ret->uri->scheme, "abcdefghijklmnopqrstuvwxyz")  !=
+                strlen(ret->uri->scheme)) {
+                virReportError(VIR_ERR_NO_CONNECT,
+                               _("URI scheme '%s' for embedded driver is not valid"),
+                               ret->uri->scheme);
+                goto failed;
+            }
+
+            root = virURIGetParam(ret->uri, "root");
+            if (!root)
+                goto failed;
+
+            if (!g_path_is_absolute(root)) {
+                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                               _("root path must be absolute"));
+                goto failed;
+            }
+
+            if (virEventRequireImpl() < 0)
+                goto failed;
+
+            regMethod = g_strdup_printf("%sRegister", ret->uri->scheme);
+
+            if (virDriverLoadModule(ret->uri->scheme, regMethod, false) < 0)
+                goto failed;
+
+            if (virAccessManagerGetDefault() == NULL) {
+                virAccessManager *acl;
+
+                virResetLastError();
+
+                if (!(acl = virAccessManagerNew("none")))
+                    goto failed;
+                virAccessManagerSetDefault(acl);
+            }
+
+            if (virStateInitialize(geteuid() == 0, true, root, NULL, NULL) < 0)
+                goto failed;
+
+            embed = true;
+        }
     } else {
         VIR_DEBUG("no name, allowing driver auto-select");
     }
@@ -955,9 +1043,6 @@ virConnectOpenInternal(const char *name,
         if (STREQ(virConnectDriverTab[i]->hypervisorDriver->name, "remote") &&
             ret->uri != NULL &&
             (
-#ifndef WITH_PHYP
-             STRCASEEQ(ret->uri->scheme, "phyp") ||
-#endif
 #ifndef WITH_ESX
              STRCASEEQ(ret->uri->scheme, "vpx") ||
              STRCASEEQ(ret->uri->scheme, "esx") ||
@@ -965,9 +1050,6 @@ virConnectOpenInternal(const char *name,
 #endif
 #ifndef WITH_HYPERV
              STRCASEEQ(ret->uri->scheme, "hyperv") ||
-#endif
-#ifndef WITH_XENAPI
-             STRCASEEQ(ret->uri->scheme, "xenapi") ||
 #endif
 #ifndef WITH_VZ
              STRCASEEQ(ret->uri->scheme, "parallels") ||
@@ -996,6 +1078,12 @@ virConnectOpenInternal(const char *name,
                 VIR_DEBUG("No URI, skipping driver with URI whitelist");
                 continue;
             }
+            if (embed && !virConnectDriverTab[i]->embeddable) {
+                VIR_DEBUG("Ignoring non-embeddable driver %s",
+                          virConnectDriverTab[i]->hypervisorDriver->name);
+                continue;
+            }
+
             VIR_DEBUG("Checking for supported URI schemes");
             for (s = 0; virConnectDriverTab[i]->uriSchemes[s] != NULL; s++) {
                 if (STREQ(ret->uri->scheme, virConnectDriverTab[i]->uriSchemes[s])) {
@@ -1009,9 +1097,20 @@ virConnectOpenInternal(const char *name,
                 continue;
             }
         } else {
-            VIR_DEBUG("Matching any URI scheme for '%s'", ret->uri ? ret->uri->scheme : "");
+            if (embed) {
+                VIR_DEBUG("Skipping wildcard for embedded URI");
+                continue;
+            } else {
+                VIR_DEBUG("Matching any URI scheme for '%s'", ret->uri ? ret->uri->scheme : "");
+            }
         }
 
+        if (embed && !virConnectDriverTab[i]->embeddable) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                           _("Driver %s cannot be used in embedded mode"),
+                           virConnectDriverTab[i]->hypervisorDriver->name);
+            goto failed;
+        }
         /* before starting the new connection, check if the driver only works
          * with a server, and so return an error if the server is missing */
         if (virConnectDriverTab[i]->remoteOnly && ret->uri && !ret->uri->server) {
@@ -1056,14 +1155,12 @@ virConnectOpenInternal(const char *name,
         goto failed;
     }
 
-    virConfFree(conf);
     VIR_FREE(uristr);
 
     return ret;
 
  failed:
     VIR_FREE(uristr);
-    virConfFree(conf);
     virObjectUnref(ret);
 
     return NULL;
@@ -1230,7 +1327,9 @@ virConnectClose(virConnectPtr conn)
 
     virCheckConnectReturn(conn, -1);
 
-    if (!virObjectUnref(conn))
+    virConnectWatchDispose();
+    virObjectUnref(conn);
+    if (virConnectWasDisposed())
         return 0;
     return 1;
 }
@@ -1243,12 +1342,13 @@ virTypedParameterValidateSet(virConnectPtr conn,
                              virTypedParameterPtr params,
                              int nparams)
 {
-    bool string_okay;
+    int string_okay;
     size_t i;
 
-    string_okay = VIR_DRV_SUPPORTS_FEATURE(conn->driver,
-                                           conn,
+    string_okay = VIR_DRV_SUPPORTS_FEATURE(conn->driver, conn,
                                            VIR_DRV_FEATURE_TYPED_PARAM_STRING);
+    if (string_okay < 0)
+        return -1;
     for (i = 0; i < nparams; i++) {
         if (strnlen(params[i].field, VIR_TYPED_PARAM_FIELD_LENGTH) ==
             VIR_TYPED_PARAM_FIELD_LENGTH) {

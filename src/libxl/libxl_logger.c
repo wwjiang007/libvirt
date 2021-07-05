@@ -42,19 +42,19 @@ struct xentoollog_logger_libvirt {
     const char *logDir;
 
     /* map storing the opened fds: "domid" -> FILE* */
-    virHashTablePtr files;
+    GHashTable *files;
     FILE *defaultLogFile;
 };
 
 static void
-libxlLoggerFileFree(void *payload, const void *key ATTRIBUTE_UNUSED)
+libxlLoggerFileFree(void *payload)
 {
     FILE *file = payload;
     VIR_FORCE_FCLOSE(file);
     file = NULL;
 }
 
-ATTRIBUTE_FMT_PRINTF(5, 0) static void
+G_GNUC_PRINTF(5, 0) static void
 libvirt_vmessage(xentoollog_logger *logger_in,
                  xentoollog_level level,
                  int errnoval,
@@ -65,17 +65,15 @@ libvirt_vmessage(xentoollog_logger *logger_in,
     xentoollog_logger_libvirt *lg = (xentoollog_logger_libvirt *)logger_in;
     FILE *logFile = lg->defaultLogFile;
     char timestamp[VIR_TIME_STRING_BUFLEN];
-    char *message = NULL;
+    g_autofree char *message = NULL;
     char *start, *end;
-    char ebuf[1024];
 
     VIR_DEBUG("libvirt_vmessage: context='%s' format='%s'", context, format);
 
     if (level < lg->minLevel)
         return;
 
-    if (virVasprintf(&message, format, args) < 0)
-        return;
+    message = g_strdup_vprintf(format, args);
 
     /* Should we print to a domain-specific log file? */
     if ((start = strstr(message, ": Domain ")) &&
@@ -105,21 +103,19 @@ libvirt_vmessage(xentoollog_logger *logger_in,
     fprintf(logFile, "%s", message);
 
     if (errnoval >= 0)
-        fprintf(logFile, ": %s", virStrerror(errnoval, ebuf, sizeof(ebuf)));
+        fprintf(logFile, ": %s", g_strerror(errnoval));
 
     fputc('\n', logFile);
     fflush(logFile);
-
-    VIR_FREE(message);
 }
 
 static void
-libvirt_progress(xentoollog_logger *logger_in ATTRIBUTE_UNUSED,
-                 const char *context ATTRIBUTE_UNUSED,
-                 const char *doingwhat ATTRIBUTE_UNUSED,
-                 int percent ATTRIBUTE_UNUSED,
-                 unsigned long done ATTRIBUTE_UNUSED,
-                 unsigned long total ATTRIBUTE_UNUSED)
+libvirt_progress(xentoollog_logger *logger_in G_GNUC_UNUSED,
+                 const char *context G_GNUC_UNUSED,
+                 const char *doingwhat G_GNUC_UNUSED,
+                 int percent G_GNUC_UNUSED,
+                 unsigned long done G_GNUC_UNUSED,
+                 unsigned long total G_GNUC_UNUSED)
 {
     /* This function purposedly does nothing: it's no logging info */
 }
@@ -132,12 +128,11 @@ libvirt_destroy(xentoollog_logger *logger_in)
 }
 
 
-libxlLoggerPtr
+libxlLogger *
 libxlLoggerNew(const char *logDir, virLogPriority minLevel)
 {
     xentoollog_logger_libvirt logger;
-    libxlLoggerPtr logger_out = NULL;
-    char *path = NULL;
+    g_autofree char *path = NULL;
 
     switch (minLevel) {
     case VIR_LOG_DEBUG:
@@ -155,28 +150,21 @@ libxlLoggerNew(const char *logDir, virLogPriority minLevel)
     }
     logger.logDir = logDir;
 
-    if ((logger.files = virHashCreate(3, libxlLoggerFileFree)) == NULL)
+    if ((logger.files = virHashNew(libxlLoggerFileFree)) == NULL)
         return NULL;
 
-    if (virAsprintf(&path, "%s/libxl-driver.log", logDir) < 0)
-        goto error;
+    path = g_strdup_printf("%s/libxl-driver.log", logDir);
 
-    if ((logger.defaultLogFile = fopen(path, "a")) == NULL)
-        goto error;
+    if ((logger.defaultLogFile = fopen(path, "a")) == NULL) {
+        virHashFree(logger.files);
+        return NULL;
+    }
 
-    logger_out = XTL_NEW_LOGGER(libvirt, logger);
-
- cleanup:
-    VIR_FREE(path);
-    return logger_out;
-
- error:
-    virHashFree(logger.files);
-    goto cleanup;
+    return XTL_NEW_LOGGER(libvirt, logger);
 }
 
 void
-libxlLoggerFree(libxlLoggerPtr logger)
+libxlLoggerFree(libxlLogger *logger)
 {
     xentoollog_logger *xtl_logger = (xentoollog_logger*)logger;
     if (logger->defaultLogFile)
@@ -186,24 +174,22 @@ libxlLoggerFree(libxlLoggerPtr logger)
 }
 
 void
-libxlLoggerOpenFile(libxlLoggerPtr logger,
+libxlLoggerOpenFile(libxlLogger *logger,
                     int id,
                     const char *name,
                     const char *domain_config)
 {
-    char *path = NULL;
+    g_autofree char *path = NULL;
     FILE *logFile = NULL;
-    char *domidstr = NULL;
-    char ebuf[1024];
+    g_autofree char *domidstr = NULL;
 
-    if (virAsprintf(&path, "%s/%s.log", logger->logDir, name) < 0 ||
-        virAsprintf(&domidstr, "%d", id) < 0)
-        goto cleanup;
+    path = g_strdup_printf("%s/%s.log", logger->logDir, name);
+    domidstr = g_strdup_printf("%d", id);
 
     if (!(logFile = fopen(path, "a"))) {
         VIR_WARN("Failed to open log file %s: %s",
-                 path, virStrerror(errno, ebuf, sizeof(ebuf)));
-        goto cleanup;
+                 path, g_strerror(errno));
+        return;
     }
     ignore_value(virHashAddEntry(logger->files, domidstr, logFile));
 
@@ -212,20 +198,13 @@ libxlLoggerOpenFile(libxlLoggerPtr logger,
         fprintf(logFile, "Domain start: %s\n", domain_config);
         fflush(logFile);
     }
-
- cleanup:
-    VIR_FREE(path);
-    VIR_FREE(domidstr);
 }
 
 void
-libxlLoggerCloseFile(libxlLoggerPtr logger, int id)
+libxlLoggerCloseFile(libxlLogger *logger, int id)
 {
-    char *domidstr = NULL;
-    if (virAsprintf(&domidstr, "%d", id) < 0)
-        return;
+    g_autofree char *domidstr = NULL;
+    domidstr = g_strdup_printf("%d", id);
 
     ignore_value(virHashRemoveEntry(logger->files, domidstr));
-
-    VIR_FREE(domidstr);
 }

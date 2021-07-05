@@ -41,41 +41,33 @@ VIR_LOG_INIT("util.scsi_host");
  * Read the value of the "scsi_host" unique_id file.
  *
  * Returns the value on success or -1 on failure.
+ *
+ * No errors are reported.
  */
 int
 virSCSIHostGetUniqueId(const char *sysfs_prefix,
                        int host)
 {
-    char *sysfs_path = NULL;
+    g_autofree char *sysfs_path = NULL;
     char *p = NULL;
-    int ret = -1;
-    char *buf = NULL;
+    g_autofree char *buf = NULL;
     int unique_id;
 
-    if (virAsprintf(&sysfs_path, "%s/host%d/unique_id",
-                    sysfs_prefix ? sysfs_prefix : SYSFS_SCSI_HOST_PATH,
-                    host) < 0)
-        return -1;
+    sysfs_path = g_strdup_printf("%s/host%d/unique_id",
+                                 sysfs_prefix ? sysfs_prefix : SYSFS_SCSI_HOST_PATH, host);
 
-    if (virFileReadAll(sysfs_path, 1024, &buf) < 0)
-        goto cleanup;
+    if (virFileReadAllQuiet(sysfs_path, 1024, &buf) < 0)
+        return -1;
 
     if ((p = strchr(buf, '\n')))
         *p = '\0';
 
     if (virStrToLong_i(buf, NULL, 10, &unique_id) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unable to parse unique_id: %s"), buf);
-
-        goto cleanup;
+        VIR_DEBUG("unable to parse unique_id: '%s'", buf);
+        return -1;
     }
 
-    ret = unique_id;
-
- cleanup:
-    VIR_FREE(sysfs_path);
-    VIR_FREE(buf);
-    return ret;
+    return unique_id;
 }
 
 
@@ -102,7 +94,7 @@ virSCSIHostFindByPCI(const char *sysfs_prefix,
 {
     const char *prefix = sysfs_prefix ? sysfs_prefix : SYSFS_SCSI_HOST_PATH;
     struct dirent *entry = NULL;
-    DIR *dir = NULL;
+    g_autoptr(DIR) dir = NULL;
     char *host_link = NULL;
     char *host_path = NULL;
     char *p = NULL;
@@ -118,8 +110,7 @@ virSCSIHostFindByPCI(const char *sysfs_prefix,
         if (!virFileIsLink(entry->d_name))
             continue;
 
-        if (virAsprintf(&host_link, "%s/%s", prefix, entry->d_name) < 0)
-            goto cleanup;
+        host_link = g_strdup_printf("%s/%s", prefix, entry->d_name);
 
         if (virFileResolveLink(host_link, &host_path) < 0)
             goto cleanup;
@@ -132,9 +123,7 @@ virSCSIHostFindByPCI(const char *sysfs_prefix,
         VIR_FREE(host_link);
         VIR_FREE(host_path);
 
-        if (virAsprintf(&unique_path, "%s/%s/unique_id", prefix,
-                        entry->d_name) < 0)
-            goto cleanup;
+        unique_path = g_strdup_printf("%s/%s/unique_id", prefix, entry->d_name);
 
         if (!virFileExists(unique_path)) {
             VIR_FREE(unique_path);
@@ -157,12 +146,11 @@ virSCSIHostFindByPCI(const char *sysfs_prefix,
             continue;
         }
 
-        ignore_value(VIR_STRDUP(ret, entry->d_name));
+        ret = g_strdup(entry->d_name);
         break;
     }
 
  cleanup:
-    VIR_DIR_CLOSE(dir);
     VIR_FREE(unique_path);
     VIR_FREE(host_link);
     VIR_FREE(host_path);
@@ -240,9 +228,8 @@ virSCSIHostGetNameByParentaddr(unsigned int domain,
     char *name = NULL;
     char *parentaddr = NULL;
 
-    if (virAsprintf(&parentaddr, "%04x:%02x:%02x.%01x",
-                    domain, bus, slot, function) < 0)
-        goto cleanup;
+    parentaddr = g_strdup_printf("%04x:%02x:%02x.%01x", domain, bus, slot,
+                                 function);
     if (!(name = virSCSIHostFindByPCI(NULL, parentaddr, unique_id))) {
         virReportError(VIR_ERR_XML_ERROR,
                        _("Failed to find scsi_host using PCI '%s' "
@@ -259,36 +246,36 @@ virSCSIHostGetNameByParentaddr(unsigned int domain,
 #else
 
 int
-virSCSIHostGetUniqueId(const char *sysfs_prefix ATTRIBUTE_UNUSED,
-                       int host ATTRIBUTE_UNUSED)
+virSCSIHostGetUniqueId(const char *sysfs_prefix G_GNUC_UNUSED,
+                       int host G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s", _("Not supported on this platform"));
     return -1;
 }
 
 char *
-virSCSIHostFindByPCI(const char *sysfs_prefix ATTRIBUTE_UNUSED,
-                     const char *parentaddr ATTRIBUTE_UNUSED,
-                     unsigned int unique_id ATTRIBUTE_UNUSED)
+virSCSIHostFindByPCI(const char *sysfs_prefix G_GNUC_UNUSED,
+                     const char *parentaddr G_GNUC_UNUSED,
+                     unsigned int unique_id G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s", _("Not supported on this platform"));
     return NULL;
 }
 
 int
-virSCSIHostGetNumber(const char *adapter_name ATTRIBUTE_UNUSED,
-                     unsigned int *result ATTRIBUTE_UNUSED)
+virSCSIHostGetNumber(const char *adapter_name G_GNUC_UNUSED,
+                     unsigned int *result G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s", _("Not supported on this platform"));
     return -1;
 }
 
 char *
-virSCSIHostGetNameByParentaddr(unsigned int domain ATTRIBUTE_UNUSED,
-                               unsigned int bus ATTRIBUTE_UNUSED,
-                               unsigned int slot ATTRIBUTE_UNUSED,
-                               unsigned int function ATTRIBUTE_UNUSED,
-                               unsigned int unique_id ATTRIBUTE_UNUSED)
+virSCSIHostGetNameByParentaddr(unsigned int domain G_GNUC_UNUSED,
+                               unsigned int bus G_GNUC_UNUSED,
+                               unsigned int slot G_GNUC_UNUSED,
+                               unsigned int function G_GNUC_UNUSED,
+                               unsigned int unique_id G_GNUC_UNUSED)
 {
     virReportSystemError(ENOSYS, "%s", _("Not supported on this platform"));
     return NULL;

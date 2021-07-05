@@ -1,6 +1,6 @@
 <domstatus state='running' reason='booted' pid='15433'>
   <taint flag='high-privileges'/>
-  <monitor path='/var/lib/libvirt/qemu/domain-4-upstream/monitor.sock' json='1' type='unix'/>
+  <monitor path='/var/lib/libvirt/qemu/domain-4-upstream/monitor.sock' type='unix'/>
   <vcpus>
     <vcpu id='0' pid='15449'/>
     <vcpu id='1' pid='15450'/>
@@ -260,6 +260,7 @@
   <chardevStdioLogd/>
   <allowReboot value='yes'/>
   <blockjobs active='no'/>
+  <agentTimeout>-2</agentTimeout>
   <domain type='kvm' id='4'>
     <name>upstream</name>
     <uuid>dcf47dbd-46d1-4d5b-b442-262a806a333a</uuid>
@@ -419,6 +420,7 @@
         <alias name='sound0'/>
         <address type='pci' domain='0x0000' bus='0x00' slot='0x04' function='0x0'/>
       </sound>
+      <audio id='1' type='spice'/>
       <video>
         <model type='qxl' ram='65536' vram='65536' vgamem='16384' heads='1' primary='yes'/>
         <alias name='video0'/>

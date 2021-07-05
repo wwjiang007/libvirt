@@ -21,33 +21,30 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_NWFILTER_LEARNIPADDR_H
-# define LIBVIRT_NWFILTER_LEARNIPADDR_H
+#pragma once
 
-# include "conf/nwfilter_params.h"
-# include "nwfilter_tech_driver.h"
-# include "virnwfilterbindingdef.h"
-# include <net/if.h>
+#include "conf/nwfilter_params.h"
+#include "nwfilter_tech_driver.h"
+#include "virnwfilterbindingdef.h"
+#include <net/if.h>
 
 enum howDetect {
   DETECT_DHCP = 1,
   DETECT_STATIC = 2,
 };
 
-int virNWFilterLearnIPAddress(virNWFilterTechDriverPtr techdriver,
-                              virNWFilterBindingDefPtr binding,
+int virNWFilterLearnIPAddress(virNWFilterTechDriver *techdriver,
+                              virNWFilterBindingDef *binding,
                               int ifindex,
-                              virNWFilterDriverStatePtr driver,
+                              virNWFilterDriverState *driver,
                               int howDetect);
 
 bool virNWFilterHasLearnReq(int ifindex);
 int virNWFilterTerminateLearnReq(const char *ifname);
 
-int virNWFilterLockIface(const char *ifname) ATTRIBUTE_RETURN_CHECK;
+int virNWFilterLockIface(const char *ifname) G_GNUC_WARN_UNUSED_RESULT;
 void virNWFilterUnlockIface(const char *ifname);
 
 int virNWFilterLearnInit(void);
 void virNWFilterLearnShutdown(void);
 void virNWFilterLearnThreadsTerminate(bool allowNewThreads);
-
-#endif /* LIBVIRT_NWFILTER_LEARNIPADDR_H */

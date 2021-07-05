@@ -31,46 +31,41 @@
 #define VIR_FROM_THIS VIR_FROM_NWFILTER
 
 void
-virNWFilterBindingDefFree(virNWFilterBindingDefPtr def)
+virNWFilterBindingDefFree(virNWFilterBindingDef *def)
 {
     if (!def)
         return;
 
-    VIR_FREE(def->ownername);
-    VIR_FREE(def->portdevname);
-    VIR_FREE(def->linkdevname);
-    VIR_FREE(def->filter);
+    g_free(def->ownername);
+    g_free(def->portdevname);
+    g_free(def->linkdevname);
+    g_free(def->filter);
     virHashFree(def->filterparams);
 
-    VIR_FREE(def);
+    g_free(def);
 }
 
 
-virNWFilterBindingDefPtr
-virNWFilterBindingDefCopy(virNWFilterBindingDefPtr src)
+virNWFilterBindingDef *
+virNWFilterBindingDefCopy(virNWFilterBindingDef *src)
 {
-    virNWFilterBindingDefPtr ret;
+    virNWFilterBindingDef *ret;
 
-    if (VIR_ALLOC(ret) < 0)
-        return NULL;
+    ret = g_new0(virNWFilterBindingDef, 1);
 
-    if (VIR_STRDUP(ret->ownername, src->ownername) < 0)
-        goto error;
+    ret->ownername = g_strdup(src->ownername);
 
     memcpy(ret->owneruuid, src->owneruuid, sizeof(ret->owneruuid));
 
-    if (VIR_STRDUP(ret->portdevname, src->portdevname) < 0)
-        goto error;
+    ret->portdevname = g_strdup(src->portdevname);
 
-    if (VIR_STRDUP(ret->linkdevname, src->linkdevname) < 0)
-        goto error;
+    ret->linkdevname = g_strdup(src->linkdevname);
 
     ret->mac = src->mac;
 
-    if (VIR_STRDUP(ret->filter, src->filter) < 0)
-        goto error;
+    ret->filter = g_strdup(src->filter);
 
-    if (!(ret->filterparams = virNWFilterHashTableCreate(0)))
+    if (!(ret->filterparams = virHashNew(virNWFilterVarValueHashFree)))
         goto error;
 
     if (virNWFilterHashTablePutAll(src->filterparams, ret->filterparams) < 0)
@@ -84,16 +79,15 @@ virNWFilterBindingDefCopy(virNWFilterBindingDefPtr src)
 }
 
 
-static virNWFilterBindingDefPtr
+static virNWFilterBindingDef *
 virNWFilterBindingDefParseXML(xmlXPathContextPtr ctxt)
 {
-    virNWFilterBindingDefPtr ret;
+    virNWFilterBindingDef *ret;
     char *uuid = NULL;
     char *mac = NULL;
     xmlNodePtr node;
 
-    if (VIR_ALLOC(ret) < 0)
-        return NULL;
+    ret = g_new0(virNWFilterBindingDef, 1);
 
     ret->portdevname = virXPathString("string(./portdev/@name)", ctxt);
     if (!ret->portdevname) {
@@ -168,12 +162,12 @@ virNWFilterBindingDefParseXML(xmlXPathContextPtr ctxt)
 }
 
 
-virNWFilterBindingDefPtr
+virNWFilterBindingDef *
 virNWFilterBindingDefParseNode(xmlDocPtr xml,
                                xmlNodePtr root)
 {
     xmlXPathContextPtr ctxt = NULL;
-    virNWFilterBindingDefPtr def = NULL;
+    virNWFilterBindingDef *def = NULL;
 
     if (STRNEQ((const char *)root->name, "filterbinding")) {
         virReportError(VIR_ERR_XML_ERROR,
@@ -182,11 +176,8 @@ virNWFilterBindingDefParseNode(xmlDocPtr xml,
         goto cleanup;
     }
 
-    ctxt = xmlXPathNewContext(xml);
-    if (ctxt == NULL) {
-        virReportOOMError();
+    if (!(ctxt = virXMLXPathContextNew(xml)))
         goto cleanup;
-    }
 
     ctxt->node = root;
     def = virNWFilterBindingDefParseXML(ctxt);
@@ -197,11 +188,11 @@ virNWFilterBindingDefParseNode(xmlDocPtr xml,
 }
 
 
-static virNWFilterBindingDefPtr
+static virNWFilterBindingDef *
 virNWFilterBindingDefParse(const char *xmlStr,
                            const char *filename)
 {
-    virNWFilterBindingDefPtr def = NULL;
+    virNWFilterBindingDef *def = NULL;
     xmlDocPtr xml;
 
     if ((xml = virXMLParse(filename, xmlStr, _("(nwfilterbinding_definition)")))) {
@@ -213,14 +204,14 @@ virNWFilterBindingDefParse(const char *xmlStr,
 }
 
 
-virNWFilterBindingDefPtr
+virNWFilterBindingDef *
 virNWFilterBindingDefParseString(const char *xmlStr)
 {
     return virNWFilterBindingDefParse(xmlStr, NULL);
 }
 
 
-virNWFilterBindingDefPtr
+virNWFilterBindingDef *
 virNWFilterBindingDefParseFile(const char *filename)
 {
     return virNWFilterBindingDefParse(NULL, filename);
@@ -230,14 +221,9 @@ virNWFilterBindingDefParseFile(const char *filename)
 char *
 virNWFilterBindingDefFormat(const virNWFilterBindingDef *def)
 {
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
 
-    if (virNWFilterBindingDefFormatBuf(&buf, def) < 0) {
-        virBufferFreeAndReset(&buf);
-        return NULL;
-    }
-
-    if (virBufferCheckError(&buf) < 0)
+    if (virNWFilterBindingDefFormatBuf(&buf, def) < 0)
         return NULL;
 
     return virBufferContentAndReset(&buf);
@@ -245,7 +231,7 @@ virNWFilterBindingDefFormat(const virNWFilterBindingDef *def)
 
 
 int
-virNWFilterBindingDefFormatBuf(virBufferPtr buf,
+virNWFilterBindingDefFormatBuf(virBuffer *buf,
                                const virNWFilterBindingDef *def)
 {
     char uuid[VIR_UUID_STRING_BUFLEN];

@@ -18,38 +18,35 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_QEMU_TPM_H
-# define LIBVIRT_QEMU_TPM_H
+#pragma once
 
-# include "vircommand.h"
+#include "vircommand.h"
 
-int qemuExtTPMInitPaths(virQEMUDriverPtr driver,
-                        virDomainDefPtr def)
+int qemuExtTPMInitPaths(virQEMUDriver *driver,
+                        virDomainDef *def)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2)
-    ATTRIBUTE_RETURN_CHECK;
+    G_GNUC_WARN_UNUSED_RESULT;
 
-int qemuExtTPMPrepareHost(virQEMUDriverPtr driver,
-                          virDomainDefPtr def)
+int qemuExtTPMPrepareHost(virQEMUDriver *driver,
+                          virDomainDef *def)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2)
-    ATTRIBUTE_RETURN_CHECK;
+    G_GNUC_WARN_UNUSED_RESULT;
 
-void qemuExtTPMCleanupHost(virDomainDefPtr def)
+void qemuExtTPMCleanupHost(virDomainDef *def)
     ATTRIBUTE_NONNULL(1);
 
-int qemuExtTPMStart(virQEMUDriverPtr driver,
-                    virDomainObjPtr vm,
-                    qemuDomainLogContextPtr logCtxt)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
-    ATTRIBUTE_RETURN_CHECK;
+int qemuExtTPMStart(virQEMUDriver *driver,
+                    virDomainObj *vm,
+                    bool incomingMigration)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2)
+    G_GNUC_WARN_UNUSED_RESULT;
 
-void qemuExtTPMStop(virQEMUDriverPtr driver,
-                    virDomainObjPtr vm)
+void qemuExtTPMStop(virQEMUDriver *driver,
+                    virDomainObj *vm)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
-int qemuExtTPMSetupCgroup(virQEMUDriverPtr driver,
-                          virDomainDefPtr def,
-                          virCgroupPtr cgroup)
+int qemuExtTPMSetupCgroup(virQEMUDriver *driver,
+                          virDomainDef *def,
+                          virCgroup *cgroup)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
-    ATTRIBUTE_RETURN_CHECK;
-
-#endif /* LIBVIRT_QEMU_TPM_H */
+    G_GNUC_WARN_UNUSED_RESULT;

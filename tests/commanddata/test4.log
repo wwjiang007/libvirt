@@ -1,3 +1,4 @@
+ARG:--check-daemonize
 ENV:DISPLAY=:0.0
 ENV:HOME=/home/test
 ENV:HOSTNAME=test
@@ -9,6 +10,7 @@ ENV:USER=test
 FD:0
 FD:1
 FD:2
+FD:5
 DAEMON:yes
 CWD:/
 UMASK:0022

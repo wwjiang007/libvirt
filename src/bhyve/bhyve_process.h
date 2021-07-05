@@ -19,30 +19,34 @@
  *
  */
 
-#ifndef LIBVIRT_BHYVE_PROCESS_H
-# define LIBVIRT_BHYVE_PROCESS_H
+#pragma once
 
-# include "bhyve_utils.h"
+#include "bhyve_utils.h"
 
-int virBhyveProcessStart(virConnectPtr conn,
-                         bhyveConnPtr driver,
-                         virDomainObjPtr vm,
+int
+bhyveProcessPrepareDomain(bhyveConn *driver,
+                          virDomainObj *vm,
+                          unsigned int flags);
+
+int virBhyveProcessStart(virConnect *conn,
+                         virDomainObj *vm,
                          virDomainRunningReason reason,
                          unsigned int flags);
 
-int virBhyveProcessStop(bhyveConnPtr driver,
-                        virDomainObjPtr vm,
+int virBhyveProcessStop(struct _bhyveConn *driver,
+                        virDomainObj *vm,
                         virDomainShutoffReason reason);
 
-int virBhyveProcessShutdown(virDomainObjPtr vm);
+int virBhyveProcessRestart(struct _bhyveConn *driver,
+                           virDomainObj *vm);
 
-int virBhyveGetDomainTotalCpuStats(virDomainObjPtr vm,
+int virBhyveProcessShutdown(virDomainObj *vm);
+
+int virBhyveGetDomainTotalCpuStats(virDomainObj *vm,
                                    unsigned long long *cpustats);
 
-void virBhyveProcessReconnectAll(bhyveConnPtr driver);
+void virBhyveProcessReconnectAll(struct _bhyveConn *driver);
 
 typedef enum {
     VIR_BHYVE_PROCESS_START_AUTODESTROY = 1 << 0,
 } bhyveProcessStartFlags;
-
-#endif /* LIBVIRT_BHYVE_PROCESS_H */

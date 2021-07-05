@@ -20,12 +20,11 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_MOMENT_CONF_H
-# define LIBVIRT_MOMENT_CONF_H
+#pragma once
 
-# include "internal.h"
-# include "virconftypes.h"
-# include "virobject.h"
+#include "internal.h"
+#include "virconftypes.h"
+#include "virobject.h"
 
 /* Base class for a domain moment */
 struct _virDomainMomentDef {
@@ -37,11 +36,20 @@ struct _virDomainMomentDef {
     char *parent_name;
     long long creationTime; /* in seconds */
 
-    virDomainDefPtr dom;
+    /*
+     * Store the active domain definition in case of online
+     * guest and the inactive domain definition in case of
+     * offline guest
+     */
+    virDomainDef *dom;
+
+    /*
+     * Store the inactive domain definition in case of online
+     * guest and leave NULL in case of offline guest
+     */
+    virDomainDef *inactiveDom;
 };
 
-virClassPtr virClassForDomainMomentDef(void);
+virClass *virClassForDomainMomentDef(void);
 
-int virDomainMomentDefPostParse(virDomainMomentDefPtr def);
-
-#endif /* LIBVIRT_MOMENT_CONF_H */
+int virDomainMomentDefPostParse(virDomainMomentDef *def);

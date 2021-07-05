@@ -18,11 +18,13 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRDEVMAPPER_H
-# define LIBVIRT_VIRDEVMAPPER_H
+#pragma once
+
+#include "internal.h"
 
 int
 virDevMapperGetTargets(const char *path,
-                       char ***devPaths);
+                       char ***devPaths) G_GNUC_NO_INLINE;
 
-#endif /* LIBVIRT_VIRDEVMAPPER_H */
+bool
+virIsDevMapperDevice(const char *dev_name) ATTRIBUTE_NONNULL(1);

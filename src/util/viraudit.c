@@ -24,28 +24,13 @@
 #ifdef WITH_AUDIT
 # include <libaudit.h>
 #endif
-#include <unistd.h>
 
 #include "virerror.h"
 #include "virlog.h"
 #include "viraudit.h"
 #include "virfile.h"
-#include "viralloc.h"
-#include "virstring.h"
 
 VIR_LOG_INIT("util.audit");
-
-/* Provide the macros in case the header file is old.
-   FIXME: should be removed. */
-#ifndef AUDIT_VIRT_CONTROL
-# define AUDIT_VIRT_CONTROL              2500 /* Start, Pause, Stop VM */
-#endif
-#ifndef AUDIT_VIRT_RESOURCE
-# define AUDIT_VIRT_RESOURCE             2501 /* Resource assignment */
-#endif
-#ifndef AUDIT_VIRT_MACHINE_ID
-# define AUDIT_VIRT_MACHINE_ID           2502 /* Binding of label to VM */
-#endif
 
 #define VIR_FROM_THIS VIR_FROM_AUDIT
 
@@ -54,7 +39,7 @@ static int auditfd = -1;
 #endif
 static bool auditlog;
 
-int virAuditOpen(unsigned int audit_level ATTRIBUTE_UNUSED)
+int virAuditOpen(unsigned int audit_level G_GNUC_UNUSED)
 {
 #if WITH_AUDIT
     if ((auditfd = audit_open()) < 0) {
@@ -87,16 +72,16 @@ void virAuditLog(bool logging)
 }
 
 
-void virAuditSend(virLogSourcePtr source,
+void virAuditSend(virLogSource *source,
                   const char *filename,
                   size_t linenr,
                   const char *funcname,
-                  const char *clienttty ATTRIBUTE_UNUSED,
-                  const char *clientaddr ATTRIBUTE_UNUSED,
-                  virAuditRecordType type ATTRIBUTE_UNUSED, bool success,
+                  const char *clienttty G_GNUC_UNUSED,
+                  const char *clientaddr G_GNUC_UNUSED,
+                  virAuditRecordType type G_GNUC_UNUSED, bool success,
                   const char *fmt, ...)
 {
-    VIR_AUTOFREE(char *) str = NULL;
+    g_autofree char *str = NULL;
     va_list args;
 
     /* Duplicate later checks, to short circuit & avoid printf overhead
@@ -110,8 +95,7 @@ void virAuditSend(virLogSourcePtr source,
 #endif
 
     va_start(args, fmt);
-    if (virVasprintf(&str, fmt, args) < 0)
-        VIR_WARN("Out of memory while formatting audit message");
+    str = g_strdup_vprintf(fmt, args);
     va_end(args);
 
     if (auditlog && str) {
@@ -133,13 +117,12 @@ void virAuditSend(virLogSourcePtr source,
             [VIR_AUDIT_RECORD_RESOURCE] = AUDIT_VIRT_RESOURCE,
         };
 
-        if (type >= ARRAY_CARDINALITY(record_types) || record_types[type] == 0)
+        if (type >= G_N_ELEMENTS(record_types) || record_types[type] == 0)
             VIR_WARN("Unknown audit record type %d", type);
         else if (audit_log_user_message(auditfd, record_types[type], str, NULL,
                                         clientaddr, clienttty, success) < 0) {
-            char ebuf[1024];
             VIR_WARN("Failed to send audit message %s: %s",
-                     NULLSTR(str), virStrerror(errno, ebuf, sizeof(ebuf)));
+                     NULLSTR(str), g_strerror(errno));
         }
     }
 #endif
@@ -158,8 +141,7 @@ char *virAuditEncode(const char *key, const char *value)
     return audit_encode_nv_string(key, value, 0);
 #else
     char *str;
-    if (virAsprintf(&str, "%s=%s", key, value) < 0)
-        return NULL;
+    str = g_strdup_printf("%s=%s", key, value);
     return str;
 #endif
 }

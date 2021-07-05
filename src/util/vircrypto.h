@@ -18,13 +18,12 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRCRYPTO_H
-# define LIBVIRT_VIRCRYPTO_H
+#pragma once
 
-# include "internal.h"
+#include "internal.h"
 
-# define VIR_CRYPTO_HASH_SIZE_MD5 16
-# define VIR_CRYPTO_HASH_SIZE_SHA256 32
+#define VIR_CRYPTO_HASH_SIZE_MD5 16
+#define VIR_CRYPTO_HASH_SIZE_SHA256 32
 
 typedef enum {
     VIR_CRYPTO_HASH_MD5, /* Don't use this except for historic compat */
@@ -46,14 +45,14 @@ virCryptoHashBuf(virCryptoHash hash,
                  const char *input,
                  unsigned char *output)
     ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
-    ATTRIBUTE_RETURN_CHECK;
+    G_GNUC_WARN_UNUSED_RESULT;
 
 int
 virCryptoHashString(virCryptoHash hash,
                     const char *input,
                     char **output)
     ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
-    ATTRIBUTE_RETURN_CHECK;
+    G_GNUC_WARN_UNUSED_RESULT;
 
 bool virCryptoHaveCipher(virCryptoCipher algorithm);
 
@@ -63,6 +62,4 @@ int virCryptoEncryptData(virCryptoCipher algorithm,
                          uint8_t *data, size_t datalen,
                          uint8_t **ciphertext, size_t *ciphertextlen)
     ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(6)
-    ATTRIBUTE_NONNULL(8) ATTRIBUTE_NONNULL(9) ATTRIBUTE_RETURN_CHECK;
-
-#endif /* LIBVIRT_VIRCRYPTO_H */
+    ATTRIBUTE_NONNULL(8) ATTRIBUTE_NONNULL(9) G_GNUC_WARN_UNUSED_RESULT;

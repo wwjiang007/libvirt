@@ -18,18 +18,17 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VMWARE_CONF_H
-# define LIBVIRT_VMWARE_CONF_H
+#pragma once
 
-# define NOGUI "nogui"
+#define NOGUI "nogui"
 
-# include "internal.h"
-# include "virdomainobjlist.h"
-# include "virthread.h"
-# include "virenum.h"
+#include "internal.h"
+#include "virdomainobjlist.h"
+#include "virthread.h"
+#include "virenum.h"
 
-# define VIR_FROM_THIS VIR_FROM_VMWARE
-# define PROGRAM_SENTINEL ((char *)0x1)
+#define VIR_FROM_THIS VIR_FROM_VMWARE
+#define PROGRAM_SENTINEL ((char *)0x1)
 
 enum vmwareDriverType {
     VMWARE_DRIVER_PLAYER      = 0, /* VMware Player */
@@ -43,10 +42,10 @@ VIR_ENUM_DECL(vmwareDriver);
 
 struct vmware_driver {
     virMutex lock;
-    virCapsPtr caps;
-    virDomainXMLOptionPtr xmlopt;
+    virCaps *caps;
+    virDomainXMLOption *xmlopt;
 
-    virDomainObjListPtr domains;
+    virDomainObjList *domains;
     unsigned long version;
     int type;
     char *vmrun;
@@ -60,7 +59,7 @@ typedef struct _vmwareDomain {
 
 void vmwareFreeDriver(struct vmware_driver *driver);
 
-virCapsPtr vmwareCapsInit(void);
+virCaps *vmwareCapsInit(void);
 
 int vmwareLoadDomains(struct vmware_driver *driver);
 
@@ -70,12 +69,12 @@ int vmwareExtractVersion(struct vmware_driver *driver);
 
 int vmwareParseVersionStr(int type, const char *buf, unsigned long *version);
 
-int vmwareDomainConfigDisplay(vmwareDomainPtr domain, virDomainDefPtr vmdef);
+int vmwareDomainConfigDisplay(vmwareDomainPtr domain, virDomainDef *vmdef);
 
-int vmwareConstructVmxPath(char *directoryName, char *name,
-                           char **vmxPath);
+void  vmwareConstructVmxPath(char *directoryName, char *name,
+                             char **vmxPath);
 
-int vmwareVmxPath(virDomainDefPtr vmdef, char **vmxPath);
+int vmwareVmxPath(virDomainDef *vmdef, char **vmxPath);
 
 int vmwareMoveFile(char *srcFile, char *dstFile);
 
@@ -84,6 +83,12 @@ int vmwareMakePath(char *srcDir, char *srcName, char *srcExt,
 
 int vmwareExtractPid(const char * vmxPath);
 
-char *vmwareCopyVMXFileName(const char *datastorePath, void *opaque);
+int
+vmwareParseVMXFileName(const char *datastorePath,
+                       void *opaque,
+                       char **out,
+                       bool allow_missing);
 
-#endif /* LIBVIRT_VMWARE_CONF_H */
+char *
+vmwareFormatVMXFileName(const char *datastorePath,
+                        void *opaque);

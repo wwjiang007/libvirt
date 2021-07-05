@@ -19,33 +19,28 @@
  *
  */
 
-#ifndef LIBVIRT_VIRCOMMAND_H
-# define LIBVIRT_VIRCOMMAND_H
+#pragma once
 
-# include "internal.h"
-# include "virbuffer.h"
-# include "virautoclean.h"
+#include "internal.h"
+#include "virbuffer.h"
 
 typedef struct _virCommand virCommand;
-typedef virCommand *virCommandPtr;
 
 /* This will execute in the context of the first child
  * after fork() but before execve().  As such, it is unsafe to
  * call any function that is not async-signal-safe.  */
 typedef int (*virExecHook)(void *data);
 
-pid_t virFork(void) ATTRIBUTE_RETURN_CHECK;
+pid_t virFork(void) G_GNUC_WARN_UNUSED_RESULT;
 
-int virRun(const char *const*argv, int *status) ATTRIBUTE_RETURN_CHECK;
+virCommand *virCommandNew(const char *binary) ATTRIBUTE_NONNULL(1);
 
-virCommandPtr virCommandNew(const char *binary) ATTRIBUTE_NONNULL(1);
+virCommand *virCommandNewArgs(const char *const*args) ATTRIBUTE_NONNULL(1);
 
-virCommandPtr virCommandNewArgs(const char *const*args) ATTRIBUTE_NONNULL(1);
+virCommand *virCommandNewArgList(const char *binary, ...)
+    ATTRIBUTE_NONNULL(1) G_GNUC_NULL_TERMINATED;
 
-virCommandPtr virCommandNewArgList(const char *binary, ...)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_SENTINEL;
-
-virCommandPtr virCommandNewVAList(const char *binary, va_list list)
+virCommand *virCommandNewVAList(const char *binary, va_list list)
     ATTRIBUTE_NONNULL(1);
 
 /* All error report from these setup APIs is
@@ -57,149 +52,158 @@ typedef enum {
     VIR_COMMAND_PASS_FD_CLOSE_PARENT = (1 << 0),
 } virCommandPassFDFlags;
 
-void virCommandPassFD(virCommandPtr cmd,
+void virCommandPassFD(virCommand *cmd,
                       int fd,
-                      unsigned int flags) ATTRIBUTE_NOINLINE;
+                      unsigned int flags) G_GNUC_NO_INLINE;
 
-void virCommandPassListenFDs(virCommandPtr cmd);
+void virCommandPassFDIndex(virCommand *cmd,
+                           int fd,
+                           unsigned int flags,
+                           size_t *idx) G_GNUC_NO_INLINE;
 
-int virCommandPassFDGetFDIndex(virCommandPtr cmd,
+int virCommandPassFDGetFDIndex(virCommand *cmd,
                                int fd);
 
-void virCommandSetPidFile(virCommandPtr cmd,
+void virCommandSetPidFile(virCommand *cmd,
                           const char *pidfile) ATTRIBUTE_NONNULL(2);
 
-gid_t virCommandGetGID(virCommandPtr cmd) ATTRIBUTE_NONNULL(1);
+gid_t virCommandGetGID(virCommand *cmd) ATTRIBUTE_NONNULL(1);
 
-uid_t virCommandGetUID(virCommandPtr cmd) ATTRIBUTE_NONNULL(1);
+uid_t virCommandGetUID(virCommand *cmd) ATTRIBUTE_NONNULL(1);
 
-void virCommandSetGID(virCommandPtr cmd, gid_t gid);
+void virCommandSetGID(virCommand *cmd, gid_t gid);
 
-void virCommandSetUID(virCommandPtr cmd, uid_t uid);
+void virCommandSetUID(virCommand *cmd, uid_t uid);
 
-void virCommandSetMaxMemLock(virCommandPtr cmd, unsigned long long bytes);
-void virCommandSetMaxProcesses(virCommandPtr cmd, unsigned int procs);
-void virCommandSetMaxFiles(virCommandPtr cmd, unsigned int files);
-void virCommandSetMaxCoreSize(virCommandPtr cmd, unsigned long long bytes);
-void virCommandSetUmask(virCommandPtr cmd, int umask);
+void virCommandSetMaxMemLock(virCommand *cmd, unsigned long long bytes);
+void virCommandSetMaxProcesses(virCommand *cmd, unsigned int procs);
+void virCommandSetMaxFiles(virCommand *cmd, unsigned int files);
+void virCommandSetMaxCoreSize(virCommand *cmd, unsigned long long bytes);
+void virCommandSetUmask(virCommand *cmd, int umask);
 
-void virCommandClearCaps(virCommandPtr cmd);
+void virCommandClearCaps(virCommand *cmd);
 
-void virCommandAllowCap(virCommandPtr cmd,
+void virCommandAllowCap(virCommand *cmd,
                         int capability);
 
-void virCommandSetSELinuxLabel(virCommandPtr cmd,
+void virCommandSetSELinuxLabel(virCommand *cmd,
                                const char *label);
 
-void virCommandSetAppArmorProfile(virCommandPtr cmd,
+void virCommandSetAppArmorProfile(virCommand *cmd,
                                   const char *profile);
 
-void virCommandDaemonize(virCommandPtr cmd);
+void virCommandDaemonize(virCommand *cmd);
 
-void virCommandNonblockingFDs(virCommandPtr cmd);
+void virCommandNonblockingFDs(virCommand *cmd);
 
-void virCommandRawStatus(virCommandPtr cmd);
+void virCommandRawStatus(virCommand *cmd);
 
-void virCommandAddEnvFormat(virCommandPtr cmd, const char *format, ...)
-    ATTRIBUTE_NONNULL(2) ATTRIBUTE_FMT_PRINTF(2, 3);
+void virCommandAddEnvFormat(virCommand *cmd, const char *format, ...)
+    ATTRIBUTE_NONNULL(2) G_GNUC_PRINTF(2, 3);
 
-void virCommandAddEnvPair(virCommandPtr cmd,
+void virCommandAddEnvPair(virCommand *cmd,
                           const char *name,
                           const char *value) ATTRIBUTE_NONNULL(2);
 
-void virCommandAddEnvString(virCommandPtr cmd,
+void virCommandAddEnvString(virCommand *cmd,
                             const char *str) ATTRIBUTE_NONNULL(2);
 
-void virCommandAddEnvBuffer(virCommandPtr cmd,
-                            virBufferPtr buf);
+void virCommandAddEnvPass(virCommand *cmd,
+                          const char *name) ATTRIBUTE_NONNULL(2);
 
-void virCommandAddEnvPassBlockSUID(virCommandPtr cmd,
-                                   const char *name,
-                                   const char *defvalue) ATTRIBUTE_NONNULL(2);
+void virCommandAddEnvPassCommon(virCommand *cmd);
 
-void virCommandAddEnvPassAllowSUID(virCommandPtr cmd,
-                                   const char *name) ATTRIBUTE_NONNULL(2);
+void virCommandAddEnvXDG(virCommand *cmd, const char *baseDir);
 
-void virCommandAddEnvPassCommon(virCommandPtr cmd);
-
-void virCommandAddEnvXDG(virCommandPtr cmd, const char *baseDir);
-
-void virCommandAddArg(virCommandPtr cmd,
+void virCommandAddArg(virCommand *cmd,
                       const char *val) ATTRIBUTE_NONNULL(2);
 
-void virCommandAddArgBuffer(virCommandPtr cmd,
-                            virBufferPtr buf);
+void virCommandAddArgBuffer(virCommand *cmd,
+                            virBuffer *buf);
 
-void virCommandAddArgFormat(virCommandPtr cmd,
+void virCommandAddArgFormat(virCommand *cmd,
                             const char *format, ...)
-    ATTRIBUTE_NONNULL(2) ATTRIBUTE_FMT_PRINTF(2, 3);
+    ATTRIBUTE_NONNULL(2) G_GNUC_PRINTF(2, 3);
 
-void virCommandAddArgPair(virCommandPtr cmd,
+void virCommandAddArgPair(virCommand *cmd,
                           const char *name,
-                          const char *val)
-    ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
+                          const char *val);
 
-void virCommandAddArgSet(virCommandPtr cmd,
+void virCommandAddArgSet(virCommand *cmd,
                          const char *const*vals) ATTRIBUTE_NONNULL(2);
 
-void virCommandAddArgList(virCommandPtr cmd,
+void virCommandAddArgList(virCommand *cmd,
                           ... /* const char *arg, ..., NULL */)
-    ATTRIBUTE_SENTINEL;
+    G_GNUC_NULL_TERMINATED;
 
-void virCommandSetWorkingDirectory(virCommandPtr cmd,
+void virCommandSetWorkingDirectory(virCommand *cmd,
                                    const char *pwd) ATTRIBUTE_NONNULL(2);
 
-void virCommandSetInputBuffer(virCommandPtr cmd,
+int virCommandSetSendBuffer(virCommand *cmd,
+                            unsigned char *buffer,
+                            size_t buflen)
+    ATTRIBUTE_NONNULL(2);
+
+void virCommandSetInputBuffer(virCommand *cmd,
                               const char *inbuf) ATTRIBUTE_NONNULL(2);
 
-void virCommandSetOutputBuffer(virCommandPtr cmd,
+void virCommandSetOutputBuffer(virCommand *cmd,
                                char **outbuf) ATTRIBUTE_NONNULL(2);
 
-void virCommandSetErrorBuffer(virCommandPtr cmd,
+void virCommandSetErrorBuffer(virCommand *cmd,
                               char **errbuf) ATTRIBUTE_NONNULL(2);
 
-void virCommandSetInputFD(virCommandPtr cmd,
+void virCommandSetInputFD(virCommand *cmd,
                           int infd);
 
-void virCommandSetOutputFD(virCommandPtr cmd,
+void virCommandSetOutputFD(virCommand *cmd,
                            int *outfd) ATTRIBUTE_NONNULL(2);
 
-void virCommandSetErrorFD(virCommandPtr cmd,
+void virCommandSetErrorFD(virCommand *cmd,
                           int *errfd) ATTRIBUTE_NONNULL(2);
 
-void virCommandSetPreExecHook(virCommandPtr cmd,
+void virCommandSetPreExecHook(virCommand *cmd,
                               virExecHook hook,
                               void *opaque) ATTRIBUTE_NONNULL(2);
 
-void virCommandWriteArgLog(virCommandPtr cmd,
+void virCommandWriteArgLog(virCommand *cmd,
                            int logfd);
 
-char *virCommandToString(virCommandPtr cmd, bool linebreaks) ATTRIBUTE_RETURN_CHECK;
+char *virCommandToString(virCommand *cmd, bool linebreaks) G_GNUC_WARN_UNUSED_RESULT;
+char *virCommandToStringFull(virCommand *cmd,
+                             bool linebreaks,
+                             bool stripCommandPath);
+int virCommandToStringBuf(virCommand *cmd,
+                          virBuffer *buf,
+                          bool linebreaks,
+                          bool stripCommandPath);
 
-int virCommandExec(virCommandPtr cmd, gid_t *groups, int ngroups) ATTRIBUTE_RETURN_CHECK;
+int virCommandGetArgList(virCommand *cmd, char ***args, size_t *nargs);
 
-int virCommandRun(virCommandPtr cmd,
-                  int *exitstatus) ATTRIBUTE_RETURN_CHECK;
+int virCommandExec(virCommand *cmd, gid_t *groups, int ngroups) G_GNUC_WARN_UNUSED_RESULT;
 
-int virCommandRunAsync(virCommandPtr cmd,
-                       pid_t *pid) ATTRIBUTE_RETURN_CHECK;
+int virCommandRun(virCommand *cmd,
+                  int *exitstatus) G_GNUC_WARN_UNUSED_RESULT;
 
-int virCommandWait(virCommandPtr cmd,
-                   int *exitstatus) ATTRIBUTE_RETURN_CHECK;
+int virCommandRunAsync(virCommand *cmd,
+                       pid_t *pid) G_GNUC_WARN_UNUSED_RESULT;
 
-void virCommandRequireHandshake(virCommandPtr cmd);
+int virCommandWait(virCommand *cmd,
+                   int *exitstatus) G_GNUC_WARN_UNUSED_RESULT;
 
-int virCommandHandshakeWait(virCommandPtr cmd)
-    ATTRIBUTE_RETURN_CHECK;
+void virCommandRequireHandshake(virCommand *cmd);
 
-int virCommandHandshakeNotify(virCommandPtr cmd)
-    ATTRIBUTE_RETURN_CHECK;
+int virCommandHandshakeWait(virCommand *cmd)
+    G_GNUC_WARN_UNUSED_RESULT;
 
-void virCommandAbort(virCommandPtr cmd);
+int virCommandHandshakeNotify(virCommand *cmd)
+    G_GNUC_WARN_UNUSED_RESULT;
 
-void virCommandFree(virCommandPtr cmd);
+void virCommandAbort(virCommand *cmd);
 
-void virCommandDoAsyncIO(virCommandPtr cmd);
+void virCommandFree(virCommand *cmd);
+
+void virCommandDoAsyncIO(virCommand *cmd);
 
 typedef int (*virCommandRunRegexFunc)(char **const groups,
                                       void *data);
@@ -207,7 +211,7 @@ typedef int (*virCommandRunNulFunc)(size_t n_tokens,
                                     char **const groups,
                                     void *data);
 
-int virCommandRunRegex(virCommandPtr cmd,
+int virCommandRunRegex(virCommand *cmd,
                        int nregex,
                        const char **regex,
                        int *nvars,
@@ -216,11 +220,9 @@ int virCommandRunRegex(virCommandPtr cmd,
                        const char *cmd_to_ignore,
                        int *exitstatus);
 
-int virCommandRunNul(virCommandPtr cmd,
+int virCommandRunNul(virCommand *cmd,
                      size_t n_columns,
                      virCommandRunNulFunc func,
                      void *data);
 
-VIR_DEFINE_AUTOPTR_FUNC(virCommand, virCommandFree);
-
-#endif /* LIBVIRT_VIRCOMMAND_H */
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virCommand, virCommandFree);

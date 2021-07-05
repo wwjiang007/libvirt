@@ -20,25 +20,20 @@
  *
  */
 
-#ifndef LIBVIRT_ESX_VI_H
-# define LIBVIRT_ESX_VI_H
+#pragma once
 
-# include <libxml/tree.h>
-# include <libxml/xpath.h>
-# include <curl/curl.h>
+#include <libxml/tree.h>
+#include <libxml/xpath.h>
+#include <curl/curl.h>
 
-# include "internal.h"
-# include "virerror.h"
-# include "datatypes.h"
-# include "esx_vi_types.h"
-# include "esx_util.h"
-
-/* curl_multi_wait was added in libcurl 7.28.0, emulate it on older versions */
-# define ESX_EMULATE_CURL_MULTI_WAIT (LIBCURL_VERSION_NUM < 0x071C00)
+#include "internal.h"
+#include "virerror.h"
+#include "datatypes.h"
+#include "esx_vi_types.h"
+#include "esx_util.h"
 
 
-
-# define ESX_VI__SOAP__REQUEST_HEADER \
+#define ESX_VI__SOAP__REQUEST_HEADER \
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" \
     "<soapenv:Envelope\n" \
     " xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\"\n" \
@@ -49,13 +44,13 @@
 
 
 
-# define ESX_VI__SOAP__REQUEST_FOOTER \
+#define ESX_VI__SOAP__REQUEST_FOOTER \
     "</soapenv:Body>\n" \
     "</soapenv:Envelope>"
 
 
 
-# define ESV_VI__XML_TAG__OPEN(_buffer, _element, _type) \
+#define ESV_VI__XML_TAG__OPEN(_buffer, _element, _type) \
     do { \
         virBufferAddLit(_buffer, "<"); \
         virBufferAdd(_buffer, _element, -1); \
@@ -66,7 +61,7 @@
 
 
 
-# define ESV_VI__XML_TAG__CLOSE(_buffer, _element) \
+#define ESV_VI__XML_TAG__CLOSE(_buffer, _element) \
     do { \
         virBufferAddLit(_buffer, "</"); \
         virBufferAdd(_buffer, _element, -1); \
@@ -160,11 +155,6 @@ int esxVI_SharedCURL_Remove(esxVI_SharedCURL *shared, esxVI_CURL *curl);
 struct _esxVI_MultiCURL {
     CURLM *handle;
     size_t count; /* number of added easy handle */
-# if ESX_EMULATE_CURL_MULTI_WAIT
-    struct pollfd *pollfds;
-    size_t npollfds;
-    bool timeoutPending;
-# endif
 };
 
 int esxVI_MultiCURL_Alloc(esxVI_MultiCURL **multi);
@@ -194,7 +184,7 @@ struct _esxVI_Context {
     esxVI_ProductLine productLine;
     unsigned long productVersion; /* = 1000000 * major + 1000 * minor + micro */
     esxVI_UserSession *session; /* ... except the session ... */
-    virMutexPtr sessionLock; /* ... that is protected by this mutex */
+    virMutex *sessionLock; /* ... that is protected by this mutex */
     esxVI_Datacenter *datacenter;
     char *datacenterPath; /* including folders */
     esxVI_ComputeResource *computeResource;
@@ -214,8 +204,8 @@ struct _esxVI_Context {
 
 int esxVI_Context_Alloc(esxVI_Context **ctx);
 void esxVI_Context_Free(esxVI_Context **ctx);
-int esxVI_Context_Connect(esxVI_Context *ctx, const char *ipAddress,
-                          const char *url, const char *username,
+int esxVI_Context_Connect(esxVI_Context *ctx, const char *url,
+                          const char *ipAddress, const char *username,
                           const char *password, esxUtil_ParsedUri *parsedUri);
 int esxVI_Context_LookupManagedObjects(esxVI_Context *ctx);
 int esxVI_Context_LookupManagedObjectsByPath(esxVI_Context *ctx, const char *path);
@@ -261,7 +251,7 @@ int esxVI_Enumeration_CastFromAnyType(const esxVI_Enumeration *enumeration,
                                       esxVI_AnyType *anyType, int *value);
 int esxVI_Enumeration_Serialize(const esxVI_Enumeration *enumeration,
                                 int value, const char *element,
-                                virBufferPtr output);
+                                virBuffer *output);
 int esxVI_Enumeration_Deserialize(const esxVI_Enumeration *enumeration,
                                   xmlNodePtr node, int *value);
 
@@ -280,7 +270,7 @@ typedef int (*esxVI_List_DeepCopyFunc) (esxVI_List **dest, esxVI_List *src);
 typedef int (*esxVI_List_CastFromAnyTypeFunc) (esxVI_AnyType *anyType,
                                                esxVI_List **item);
 typedef int (*esxVI_List_SerializeFunc) (esxVI_List *item, const char *element,
-                                         virBufferPtr output);
+                                         virBuffer *output);
 typedef int (*esxVI_List_DeserializeFunc) (xmlNodePtr node, esxVI_List **item);
 
 int esxVI_List_Append(esxVI_List **list, esxVI_List *item);
@@ -291,7 +281,7 @@ int esxVI_List_CastFromAnyType(esxVI_AnyType *anyType, esxVI_List **list,
                                esxVI_List_CastFromAnyTypeFunc castFromAnyTypeFunc,
                                esxVI_List_FreeFunc freeFunc);
 int esxVI_List_Serialize(esxVI_List *list, const char *element,
-                         virBufferPtr output,
+                         virBuffer *output,
                          esxVI_List_SerializeFunc serializeFunc);
 int esxVI_List_Deserialize(xmlNodePtr node, esxVI_List **list,
                            esxVI_List_DeserializeFunc deserializeFunc,
@@ -530,6 +520,4 @@ int esxVI_LookupHostScsiTopologyLunListByTargetName
 int esxVI_LookupStoragePoolNameByScsiLunKey(esxVI_Context *ctx, const char *key,
                                             char **poolName);
 
-# include "esx_vi.generated.h"
-
-#endif /* LIBVIRT_ESX_VI_H */
+#include "esx_vi.generated.h"

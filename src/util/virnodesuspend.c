@@ -29,6 +29,7 @@
 #include "datatypes.h"
 
 #include "viralloc.h"
+#include "virfile.h"
 #include "virlog.h"
 #include "virerror.h"
 
@@ -72,7 +73,7 @@ static void virNodeSuspendUnlock(void)
  */
 static int virNodeSuspendSetNodeWakeup(unsigned long long alarmTime)
 {
-    virCommandPtr setAlarmCmd;
+    virCommand *setAlarmCmd;
     int ret = -1;
 
     if (alarmTime < MIN_TIME_REQ_FOR_SUSPEND) {
@@ -109,7 +110,7 @@ static int virNodeSuspendSetNodeWakeup(unsigned long long alarmTime)
  */
 static void virNodeSuspendHelper(void *cmdString)
 {
-    virCommandPtr suspendCmd = virCommandNew((const char *)cmdString);
+    virCommand *suspendCmd = virCommandNew((const char *)cmdString);
 
     /*
      * Delay for sometime so that the function virNodeSuspend()
@@ -219,9 +220,11 @@ int virNodeSuspend(unsigned int target,
     if (virNodeSuspendSetNodeWakeup(duration) < 0)
         goto cleanup;
 
-    if (virThreadCreate(&thread, false,
-                        virNodeSuspendHelper,
-                        (void *)cmdString) < 0) {
+    if (virThreadCreateFull(&thread, false,
+                            virNodeSuspendHelper,
+                            "node-suspend",
+                            false,
+                            (void *)cmdString) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Failed to create thread to suspend the host"));
         goto cleanup;
@@ -238,44 +241,45 @@ int virNodeSuspend(unsigned int target,
 static int
 virNodeSuspendSupportsTargetPMUtils(unsigned int target, bool *supported)
 {
-    virCommandPtr cmd;
+    g_autoptr(virCommand) cmd = NULL;
+    g_autofree char *binary = NULL;
     int status;
-    int ret = -1;
 
     *supported = false;
 
+    binary = virFindFileInPath("pm-is-supported");
+    if (!binary)
+        return -2;
+
     switch (target) {
     case VIR_NODE_SUSPEND_TARGET_MEM:
-        cmd = virCommandNewArgList("pm-is-supported", "--suspend", NULL);
+        cmd = virCommandNewArgList(binary, "--suspend", NULL);
         break;
     case VIR_NODE_SUSPEND_TARGET_DISK:
-        cmd = virCommandNewArgList("pm-is-supported", "--hibernate", NULL);
+        cmd = virCommandNewArgList(binary, "--hibernate", NULL);
         break;
     case VIR_NODE_SUSPEND_TARGET_HYBRID:
-        cmd = virCommandNewArgList("pm-is-supported", "--suspend-hybrid", NULL);
+        cmd = virCommandNewArgList(binary, "--suspend-hybrid", NULL);
         break;
     default:
-        return ret;
+        return -1;
     }
 
     if (virCommandRun(cmd, &status) < 0)
-        goto cleanup;
+        return -1;
 
    /*
     * Check return code of command == 0 for success
     * (i.e., the PM capability is supported)
     */
     *supported = (status == 0);
-    ret = 0;
 
- cleanup:
-    virCommandFree(cmd);
-    return ret;
+    return 0;
 }
 #else /* ! WITH_PM_UTILS */
 static int
-virNodeSuspendSupportsTargetPMUtils(unsigned int target ATTRIBUTE_UNUSED,
-                                    bool *supported ATTRIBUTE_UNUSED)
+virNodeSuspendSupportsTargetPMUtils(unsigned int target G_GNUC_UNUSED,
+                                    bool *supported G_GNUC_UNUSED)
 {
     return -2;
 }
@@ -330,11 +334,10 @@ virNodeSuspendSupportsTarget(unsigned int target, bool *supported)
     if (ret == -2)
         ret = virNodeSuspendSupportsTargetPMUtils(target, supported);
 
-    /* If still unavailable, then report error */
+    /* If still unavailable, then report unsupported */
     if (ret == -2) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Cannot probe for supported suspend types"));
-        ret = -1;
+        *supported = false;
+        ret = 0;
     }
 
     return ret;

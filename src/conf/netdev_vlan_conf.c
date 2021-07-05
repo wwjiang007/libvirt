@@ -30,10 +30,10 @@ VIR_ENUM_IMPL(virNativeVlanMode,
 );
 
 int
-virNetDevVlanParse(xmlNodePtr node, xmlXPathContextPtr ctxt, virNetDevVlanPtr def)
+virNetDevVlanParse(xmlNodePtr node, xmlXPathContextPtr ctxt, virNetDevVlan *def)
 {
     int ret = -1;
-    xmlNodePtr save = ctxt->node;
+    VIR_XPATH_NODE_AUTORESTORE(ctxt)
     char *trunk = NULL;
     char *nativeMode = NULL;
     xmlNodePtr *tagNodes = NULL;
@@ -53,9 +53,7 @@ virNetDevVlanParse(xmlNodePtr node, xmlXPathContextPtr ctxt, virNetDevVlanPtr de
         goto cleanup;
     }
 
-    if (VIR_ALLOC_N(def->tag, nTags) < 0)
-        goto cleanup;
-
+    def->tag = g_new0(unsigned int, nTags);
     def->nativeMode = 0;
     def->nativeTag = 0;
     for (i = 0; i < nTags; i++) {
@@ -128,7 +126,6 @@ virNetDevVlanParse(xmlNodePtr node, xmlXPathContextPtr ctxt, virNetDevVlanPtr de
 
     ret = 0;
  cleanup:
-    ctxt->node = save;
     VIR_FREE(tagNodes);
     VIR_FREE(trunk);
     VIR_FREE(nativeMode);
@@ -138,7 +135,7 @@ virNetDevVlanParse(xmlNodePtr node, xmlXPathContextPtr ctxt, virNetDevVlanPtr de
 }
 
 int
-virNetDevVlanFormat(const virNetDevVlan *def, virBufferPtr buf)
+virNetDevVlanFormat(const virNetDevVlan *def, virBuffer *buf)
 {
     size_t i;
 

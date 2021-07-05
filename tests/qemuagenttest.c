@@ -36,10 +36,88 @@ virQEMUDriver driver;
 
 
 static int
+testQemuAgentSSHKeys(const void *data)
+{
+    virDomainXMLOption *xmlopt = (virDomainXMLOption *)data;
+    qemuMonitorTest *test = qemuMonitorTestNewAgent(xmlopt);
+    char **keys = NULL;
+    int nkeys = 0;
+    int ret = -1;
+
+    if (!test)
+        return -1;
+
+    if (qemuMonitorTestAddAgentSyncResponse(test) < 0)
+        goto cleanup;
+
+    if (qemuMonitorTestAddItem(test, "guest-ssh-get-authorized-keys",
+                               "{\"return\": {"
+                               "  \"keys\": ["
+                               "    \"algo1 key1 comments1\","
+                               "    \"algo2 key2 comments2\""
+                               "  ]"
+                               "}}") < 0)
+        goto cleanup;
+
+    if (qemuMonitorTestAddAgentSyncResponse(test) < 0)
+        goto cleanup;
+
+    if (qemuMonitorTestAddItem(test, "guest-ssh-add-authorized-keys",
+                               "{ \"return\" : {} }") < 0)
+        goto cleanup;
+
+    if (qemuMonitorTestAddAgentSyncResponse(test) < 0)
+        goto cleanup;
+
+    if (qemuMonitorTestAddItem(test, "guest-ssh-remove-authorized-keys",
+                               "{ \"return\" : {} }") < 0)
+        goto cleanup;
+
+    if ((nkeys = qemuAgentSSHGetAuthorizedKeys(qemuMonitorTestGetAgent(test),
+                                               "user",
+                                               &keys)) < 0)
+        goto cleanup;
+
+    if (nkeys != 2) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       "expected 2 keys, got %d", nkeys);
+        ret = -1;
+        goto cleanup;
+    }
+
+    if (STRNEQ(keys[1], "algo2 key2 comments2")) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "Unexpected key returned: %s", keys[1]);
+        ret = -1;
+        goto cleanup;
+    }
+
+    if ((ret = qemuAgentSSHAddAuthorizedKeys(qemuMonitorTestGetAgent(test),
+                                             "user",
+                                             (const char **) keys,
+                                             nkeys,
+                                             true)) < 0)
+        goto cleanup;
+
+    if ((ret = qemuAgentSSHRemoveAuthorizedKeys(qemuMonitorTestGetAgent(test),
+                                                "user",
+                                                (const char **) keys,
+                                                nkeys)) < 0)
+        goto cleanup;
+
+    ret = 0;
+
+ cleanup:
+    virStringListFreeCount(keys, nkeys);
+    qemuMonitorTestFree(test);
+    return ret;
+}
+
+
+static int
 testQemuAgentFSFreeze(const void *data)
 {
-    virDomainXMLOptionPtr xmlopt = (virDomainXMLOptionPtr)data;
-    qemuMonitorTestPtr test = qemuMonitorTestNewAgent(xmlopt);
+    virDomainXMLOption *xmlopt = (virDomainXMLOption *)data;
+    qemuMonitorTest *test = qemuMonitorTestNewAgent(xmlopt);
     const char *mountpoints[] = {"/fs1", "/fs2", "/fs3", "/fs4", "/fs5"};
     int ret = -1;
 
@@ -90,8 +168,8 @@ testQemuAgentFSFreeze(const void *data)
 static int
 testQemuAgentFSThaw(const void *data)
 {
-    virDomainXMLOptionPtr xmlopt = (virDomainXMLOptionPtr)data;
-    qemuMonitorTestPtr test = qemuMonitorTestNewAgent(xmlopt);
+    virDomainXMLOption *xmlopt = (virDomainXMLOption *)data;
+    qemuMonitorTest *test = qemuMonitorTestNewAgent(xmlopt);
     int ret = -1;
 
     if (!test)
@@ -140,8 +218,8 @@ testQemuAgentFSThaw(const void *data)
 static int
 testQemuAgentFSTrim(const void *data)
 {
-    virDomainXMLOptionPtr xmlopt = (virDomainXMLOptionPtr)data;
-    qemuMonitorTestPtr test = qemuMonitorTestNewAgent(xmlopt);
+    virDomainXMLOption *xmlopt = (virDomainXMLOption *)data;
+    qemuMonitorTest *test = qemuMonitorTestNewAgent(xmlopt);
     int ret = -1;
 
     if (!test)
@@ -168,38 +246,43 @@ testQemuAgentFSTrim(const void *data)
 
 
 static int
-testQemuAgentGetFSInfo(const void *data)
+testQemuAgentGetFSInfoCommon(virDomainXMLOption *xmlopt,
+                             qemuMonitorTest **test,
+                             virDomainDef **def)
 {
-    virDomainXMLOptionPtr xmlopt = (virDomainXMLOptionPtr)data;
-    qemuMonitorTestPtr test = qemuMonitorTestNewAgent(xmlopt);
-    char *domain_filename = NULL;
-    virDomainDefPtr def = NULL;
-    virDomainFSInfoPtr *info = NULL;
-    int ret = -1, ninfo = 0, i;
+    int ret = -1;
+    g_autofree char *domain_filename = NULL;
+    qemuMonitorTest *ret_test = NULL;
+    g_autoptr(virDomainDef) ret_def = NULL;
 
-    if (!test)
+    if (!test || !def)
         return -1;
 
-    if (virAsprintf(&domain_filename, "%s/qemuagentdata/fsinfo.xml",
-                    abs_srcdir) < 0)
+    if (!(ret_test = qemuMonitorTestNewAgent(xmlopt)))
+        return -1;
+
+    domain_filename = g_strdup_printf("%s/qemuagentdata/fsinfo.xml", abs_srcdir);
+
+    if (!(ret_def = virDomainDefParseFile(domain_filename, xmlopt,
+                                          NULL, VIR_DOMAIN_DEF_PARSE_INACTIVE)))
         goto cleanup;
 
-    if (!(def = virDomainDefParseFile(domain_filename, driver.caps, xmlopt,
-                                      NULL, VIR_DOMAIN_DEF_PARSE_INACTIVE)))
+    if (qemuMonitorTestAddAgentSyncResponse(ret_test) < 0)
         goto cleanup;
 
-    if (qemuMonitorTestAddAgentSyncResponse(test) < 0)
-        goto cleanup;
-
-    if (qemuMonitorTestAddItem(test, "guest-get-fsinfo",
+    if (qemuMonitorTestAddItem(ret_test, "guest-get-fsinfo",
                                "{\"return\": ["
                                "  {\"name\": \"sda1\", \"mountpoint\": \"/\","
+                               "   \"total-bytes\":952840192,"
+                               "   \"used-bytes\":229019648,"
                                "   \"disk\": ["
-                               "     {\"bus-type\": \"ide\","
+                               "     {\"serial\": \"ARBITRARYSTRING\","
+                               "      \"bus-type\": \"ide\","
                                "      \"bus\": 1, \"unit\": 0,"
                                "      \"pci-controller\": {"
                                "        \"bus\": 0, \"slot\": 1,"
                                "        \"domain\": 0, \"function\": 1},"
+                               "      \"dev\": \"/dev/sda1\","
                                "      \"target\": 0}],"
                                "   \"type\": \"ext4\"},"
                                "  {\"name\": \"dm-1\","
@@ -221,10 +304,32 @@ testQemuAgentGetFSInfo(const void *data)
                                "  {\"name\": \"sdb1\","
                                "   \"mountpoint\": \"/mnt/disk\","
                                "   \"disk\": [], \"type\": \"xfs\"}]}") < 0)
+                               goto cleanup;
+
+    *test = g_steal_pointer(&ret_test);
+    *def = g_steal_pointer(&ret_def);
+    ret = 0;
+
+ cleanup:
+    if (ret_test)
+        qemuMonitorTestFree(ret_test);
+    return ret;
+}
+
+static int
+testQemuAgentGetFSInfo(const void *data)
+{
+    virDomainXMLOption *xmlopt = (virDomainXMLOption *)data;
+    qemuMonitorTest *test = NULL;
+    virDomainDef *def = NULL;
+    qemuAgentFSInfo **info = NULL;
+    int ret = -1, ninfo = 0, i;
+
+    if (testQemuAgentGetFSInfoCommon(xmlopt, &test, &def) < 0)
         goto cleanup;
 
     if ((ninfo = qemuAgentGetFSInfo(qemuMonitorTestGetAgent(test),
-                                    &info, def)) < 0)
+                                    &info, true)) < 0)
         goto cleanup;
 
     if (ninfo != 3) {
@@ -236,35 +341,48 @@ testQemuAgentGetFSInfo(const void *data)
     if (STRNEQ(info[2]->name, "sda1") ||
         STRNEQ(info[2]->mountpoint, "/") ||
         STRNEQ(info[2]->fstype, "ext4") ||
-        info[2]->ndevAlias != 1 ||
-        !info[2]->devAlias || !info[2]->devAlias[0] ||
-        STRNEQ(info[2]->devAlias[0], "hdc")) {
+        info[2]->ndisks != 1 ||
+        !info[2]->disks || !info[2]->disks[0]) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-            "unexpected filesystems information returned for sda1 (%s,%s)",
-            info[2]->name, info[2]->devAlias ? info[2]->devAlias[0] : "null");
+            "unexpected filesystems information returned for sda1 (%s)",
+            info[2]->name);
         ret = -1;
         goto cleanup;
     }
     if (STRNEQ(info[1]->name, "dm-1") ||
         STRNEQ(info[1]->mountpoint, "/opt") ||
         STRNEQ(info[1]->fstype, "vfat") ||
-        info[1]->ndevAlias != 2 ||
-        !info[1]->devAlias || !info[1]->devAlias[0] || !info[1]->devAlias[1] ||
-        STRNEQ(info[1]->devAlias[0], "vda") ||
-        STRNEQ(info[1]->devAlias[1], "vdb")) {
+        info[1]->ndisks != 2 ||
+        !info[1]->disks || !info[1]->disks[0] || !info[1]->disks[1] ||
+        STRNEQ(info[1]->disks[0]->bus_type, "virtio") ||
+        info[1]->disks[0]->bus != 0 ||
+        info[1]->disks[0]->target != 0 ||
+        info[1]->disks[0]->unit != 0 ||
+        info[1]->disks[0]->pci_controller.domain != 0 ||
+        info[1]->disks[0]->pci_controller.bus != 0 ||
+        info[1]->disks[0]->pci_controller.slot != 6 ||
+        info[1]->disks[0]->pci_controller.function != 0 ||
+        STRNEQ(info[1]->disks[1]->bus_type, "virtio") ||
+        info[1]->disks[1]->bus != 0 ||
+        info[1]->disks[1]->target != 0 ||
+        info[1]->disks[1]->unit != 0 ||
+        info[1]->disks[1]->pci_controller.domain != 0 ||
+        info[1]->disks[1]->pci_controller.bus != 0 ||
+        info[1]->disks[1]->pci_controller.slot != 7 ||
+        info[1]->disks[1]->pci_controller.function != 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-            "unexpected filesystems information returned for dm-1 (%s,%s)",
-            info[0]->name, info[0]->devAlias ? info[0]->devAlias[0] : "null");
+            "unexpected filesystems information returned for dm-1 (%s)",
+            info[0]->name);
         ret = -1;
         goto cleanup;
     }
     if (STRNEQ(info[0]->name, "sdb1") ||
         STRNEQ(info[0]->mountpoint, "/mnt/disk") ||
         STRNEQ(info[0]->fstype, "xfs") ||
-        info[0]->ndevAlias != 0 || info[0]->devAlias) {
+        info[0]->ndisks != 0 || info[0]->disks) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-            "unexpected filesystems information returned for sdb1 (%s,%s)",
-            info[0]->name, info[0]->devAlias ? info[0]->devAlias[0] : "null");
+            "unexpected filesystems information returned for sdb1 (%s)",
+            info[0]->name);
         ret = -1;
         goto cleanup;
     }
@@ -283,7 +401,7 @@ testQemuAgentGetFSInfo(const void *data)
                                "}") < 0)
         goto cleanup;
 
-    if (qemuAgentGetFSInfo(qemuMonitorTestGetAgent(test), &info, def) != -1) {
+    if (qemuAgentGetFSInfo(qemuMonitorTestGetAgent(test), &info, true) >= 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        "agent get-fsinfo command should have failed");
         goto cleanup;
@@ -293,20 +411,18 @@ testQemuAgentGetFSInfo(const void *data)
 
  cleanup:
     for (i = 0; i < ninfo; i++)
-        virDomainFSInfoFree(info[i]);
+        qemuAgentFSInfoFree(info[i]);
     VIR_FREE(info);
-    VIR_FREE(domain_filename);
     virDomainDefFree(def);
     qemuMonitorTestFree(test);
     return ret;
 }
 
-
 static int
 testQemuAgentSuspend(const void *data)
 {
-    virDomainXMLOptionPtr xmlopt = (virDomainXMLOptionPtr)data;
-    qemuMonitorTestPtr test = qemuMonitorTestNewAgent(xmlopt);
+    virDomainXMLOption *xmlopt = (virDomainXMLOption *)data;
+    qemuMonitorTest *test = qemuMonitorTestNewAgent(xmlopt);
     int ret = -1;
     size_t i;
 
@@ -355,13 +471,13 @@ struct qemuAgentShutdownTestData {
 
 
 static int
-qemuAgentShutdownTestMonitorHandler(qemuMonitorTestPtr test,
-                                    qemuMonitorTestItemPtr item,
+qemuAgentShutdownTestMonitorHandler(qemuMonitorTest *test,
+                                    qemuMonitorTestItem *item,
                                     const char *cmdstr)
 {
     struct qemuAgentShutdownTestData *data;
-    virJSONValuePtr val = NULL;
-    virJSONValuePtr args;
+    g_autoptr(virJSONValue) val = NULL;
+    virJSONValue *args;
     const char *cmdname;
     const char *mode;
     int ret = -1;
@@ -372,7 +488,7 @@ qemuAgentShutdownTestMonitorHandler(qemuMonitorTestPtr test,
         return -1;
 
     if (!(cmdname = virJSONValueObjectGetString(val, "execute"))) {
-        ret = qemuMonitorReportError(test, "Missing command name in %s", cmdstr);
+        ret = qemuMonitorTestAddErrorResponse(test, "Missing command name in %s", cmdstr);
         goto cleanup;
     }
 
@@ -383,20 +499,20 @@ qemuAgentShutdownTestMonitorHandler(qemuMonitorTestPtr test,
     }
 
     if (!(args = virJSONValueObjectGet(val, "arguments"))) {
-        ret = qemuMonitorReportError(test,
-                                     "Missing arguments section");
+        ret = qemuMonitorTestAddErrorResponse(test,
+                                              "Missing arguments section");
         goto cleanup;
     }
 
     if (!(mode = virJSONValueObjectGetString(args, "mode"))) {
-        ret = qemuMonitorReportError(test, "Missing shutdown mode");
+        ret = qemuMonitorTestAddErrorResponse(test, "Missing shutdown mode");
         goto cleanup;
     }
 
     if (STRNEQ(mode, data->mode)) {
-        ret = qemuMonitorReportError(test,
-                                     "expected shutdown mode '%s' got '%s'",
-                                     data->mode, mode);
+        ret = qemuMonitorTestAddErrorResponse(test,
+                                              "expected shutdown mode '%s' got '%s'",
+                                              data->mode, mode);
         goto cleanup;
     }
 
@@ -407,7 +523,6 @@ qemuAgentShutdownTestMonitorHandler(qemuMonitorTestPtr test,
     ret = 0;
 
  cleanup:
-    virJSONValueFree(val);
     return ret;
 
 }
@@ -416,8 +531,8 @@ qemuAgentShutdownTestMonitorHandler(qemuMonitorTestPtr test,
 static int
 testQemuAgentShutdown(const void *data)
 {
-    virDomainXMLOptionPtr xmlopt = (virDomainXMLOptionPtr)data;
-    qemuMonitorTestPtr test = qemuMonitorTestNewAgent(xmlopt);
+    virDomainXMLOption *xmlopt = (virDomainXMLOption *)data;
+    qemuMonitorTest *test = qemuMonitorTestNewAgent(xmlopt);
     struct qemuAgentShutdownTestData priv;
     int ret = -1;
 
@@ -430,7 +545,8 @@ testQemuAgentShutdown(const void *data)
     priv.event = QEMU_AGENT_EVENT_SHUTDOWN;
     priv.mode = "halt";
 
-    if (qemuMonitorTestAddHandler(test, qemuAgentShutdownTestMonitorHandler,
+    if (qemuMonitorTestAddHandler(test, "guest-shutdown",
+                                  qemuAgentShutdownTestMonitorHandler,
                                   &priv, NULL) < 0)
         goto cleanup;
 
@@ -444,7 +560,8 @@ testQemuAgentShutdown(const void *data)
     priv.event = QEMU_AGENT_EVENT_SHUTDOWN;
     priv.mode = "powerdown";
 
-    if (qemuMonitorTestAddHandler(test, qemuAgentShutdownTestMonitorHandler,
+    if (qemuMonitorTestAddHandler(test, "guest-shutdown",
+                                  qemuAgentShutdownTestMonitorHandler,
                                   &priv, NULL) < 0)
         goto cleanup;
 
@@ -458,7 +575,9 @@ testQemuAgentShutdown(const void *data)
     priv.event = QEMU_AGENT_EVENT_RESET;
     priv.mode = "reboot";
 
-    if (qemuMonitorTestAddHandler(test, qemuAgentShutdownTestMonitorHandler,
+    if (qemuMonitorTestAddHandler(test,
+                                  "guest-shutdown",
+                                  qemuAgentShutdownTestMonitorHandler,
                                   &priv, NULL) < 0)
         goto cleanup;
 
@@ -532,9 +651,9 @@ static const char testQemuAgentCPUArguments3[] =
 static int
 testQemuAgentCPU(const void *data)
 {
-    virDomainXMLOptionPtr xmlopt = (virDomainXMLOptionPtr)data;
-    qemuMonitorTestPtr test = qemuMonitorTestNewAgent(xmlopt);
-    qemuAgentCPUInfoPtr cpuinfo = NULL;
+    virDomainXMLOption *xmlopt = (virDomainXMLOption *)data;
+    qemuMonitorTest *test = qemuMonitorTestNewAgent(xmlopt);
+    qemuAgentCPUInfo *cpuinfo = NULL;
     int nvcpus;
     int ret = -1;
 
@@ -575,7 +694,7 @@ testQemuAgentCPU(const void *data)
     if (qemuAgentSetVCPUs(qemuMonitorTestGetAgent(test), cpuinfo, nvcpus) < 0)
         goto cleanup;
 
-    /* try to hotplug two, second one will fail*/
+    /* try to hotplug two, second one will fail */
     if (qemuMonitorTestAddAgentSyncResponse(test) < 0)
         goto cleanup;
 
@@ -616,10 +735,10 @@ static const char testQemuAgentArbitraryCommandResponse[] =
 static int
 testQemuAgentArbitraryCommand(const void *data)
 {
-    virDomainXMLOptionPtr xmlopt = (virDomainXMLOptionPtr)data;
-    qemuMonitorTestPtr test = qemuMonitorTestNewAgent(xmlopt);
+    virDomainXMLOption *xmlopt = (virDomainXMLOption *)data;
+    qemuMonitorTest *test = qemuMonitorTestNewAgent(xmlopt);
     int ret = -1;
-    char *reply = NULL;
+    g_autofree char *reply = NULL;
 
     if (!test)
         return -1;
@@ -648,16 +767,15 @@ testQemuAgentArbitraryCommand(const void *data)
     ret = 0;
 
  cleanup:
-    VIR_FREE(reply);
     qemuMonitorTestFree(test);
     return ret;
 }
 
 
 static int
-qemuAgentTimeoutTestMonitorHandler(qemuMonitorTestPtr test ATTRIBUTE_UNUSED,
-                                   qemuMonitorTestItemPtr item ATTRIBUTE_UNUSED,
-                                   const char *cmdstr ATTRIBUTE_UNUSED)
+qemuAgentTimeoutTestMonitorHandler(qemuMonitorTest *test G_GNUC_UNUSED,
+                                   qemuMonitorTestItem *item G_GNUC_UNUSED,
+                                   const char *cmdstr G_GNUC_UNUSED)
 {
     return 0;
 }
@@ -666,9 +784,9 @@ qemuAgentTimeoutTestMonitorHandler(qemuMonitorTestPtr test ATTRIBUTE_UNUSED,
 static int
 testQemuAgentTimeout(const void *data)
 {
-    virDomainXMLOptionPtr xmlopt = (virDomainXMLOptionPtr)data;
-    qemuMonitorTestPtr test = qemuMonitorTestNewAgent(xmlopt);
-    char *reply = NULL;
+    virDomainXMLOption *xmlopt = (virDomainXMLOption *)data;
+    qemuMonitorTest *test = qemuMonitorTestNewAgent(xmlopt);
+    g_autofree char *reply = NULL;
     int ret = -1;
 
     if (!test)
@@ -679,7 +797,8 @@ testQemuAgentTimeout(const void *data)
         goto cleanup;
     }
 
-    if (qemuMonitorTestAddHandler(test, qemuAgentTimeoutTestMonitorHandler,
+    if (qemuMonitorTestAddHandler(test, NULL,
+                                  qemuAgentTimeoutTestMonitorHandler,
                                   NULL, NULL) < 0)
         goto cleanup;
 
@@ -693,7 +812,9 @@ testQemuAgentTimeout(const void *data)
     if (qemuMonitorTestAddAgentSyncResponse(test) < 0)
         goto cleanup;
 
-    if (qemuMonitorTestAddHandler(test, qemuAgentTimeoutTestMonitorHandler,
+    if (qemuMonitorTestAddHandler(test,
+                                  NULL,
+                                  qemuAgentTimeoutTestMonitorHandler,
                                   NULL, NULL) < 0)
         goto cleanup;
 
@@ -709,7 +830,6 @@ testQemuAgentTimeout(const void *data)
     ret = 0;
 
  cleanup:
-    VIR_FREE(reply);
     qemuMonitorTestFree(test);
     return ret;
 }
@@ -790,8 +910,8 @@ static const char testQemuAgentGetInterfacesResponse[] =
 static int
 testQemuAgentGetInterfaces(const void *data)
 {
-    virDomainXMLOptionPtr xmlopt = (virDomainXMLOptionPtr)data;
-    qemuMonitorTestPtr test = qemuMonitorTestNewAgent(xmlopt);
+    virDomainXMLOption *xmlopt = (virDomainXMLOption *)data;
+    qemuMonitorTest *test = qemuMonitorTestNewAgent(xmlopt);
     size_t i;
     int ret = -1;
     int ifaces_count = 0;
@@ -902,18 +1022,467 @@ testQemuAgentGetInterfaces(const void *data)
     return ret;
 }
 
+
+/* this is a bit of a pathological response on a real hw */
+static const char testQemuAgentGetDisksResponse[] =
+    "{\"return\": "
+    "  ["
+    "    {\"alias\" : \"fedora_localhost--live-home\","
+    "     \"dependencies\" : "
+    "     ["
+    "       \"/dev/dm-0\""
+    "     ],"
+    "     \"name\" : \"/dev/dm-3\","
+    "     \"partition\" : false"
+    "    },"
+    "    {\"address\" : "
+    "      {\"bus\" : 0,"
+    "       \"bus-type\" : \"unknown\","
+    "       \"dev\" : \"/dev/nvme0n1\","
+    "       \"pci-controller\" : "
+    "         {\"bus\" : -1,"
+    "          \"domain\" : -1,"
+    "          \"function\" : -1,"
+    "          \"slot\" : -1"
+    "         },"
+    "     \"serial\" : \"GIGABYTE GP-ASM2NE6100TTTD_SN202208900567\","
+    "     \"target\" : 0,"
+    "     \"unit\" : 0"
+    "    },"
+    "    \"dependencies\" : [],"
+    "    \"name\" : \"/dev/nvme0n1\","
+    "    \"partition\" : false"
+    "   }"
+    "  ]"
+    "}";
+
+static int
+testQemuAgentGetDisks(const void *data)
+{
+    virDomainXMLOption *xmlopt = (virDomainXMLOption *)data;
+    qemuMonitorTest *test = qemuMonitorTestNewAgent(xmlopt);
+    size_t i;
+    int ret = -1;
+    int disks_count = 0;
+    qemuAgentDiskInfo **disks = NULL;
+
+    if (!test)
+        return -1;
+
+    if (qemuMonitorTestAddAgentSyncResponse(test) < 0)
+        goto cleanup;
+
+    if (qemuMonitorTestAddItem(test, "guest-get-disks",
+                               testQemuAgentGetDisksResponse) < 0)
+        goto cleanup;
+
+    if ((disks_count = qemuAgentGetDisks(qemuMonitorTestGetAgent(test),
+                                         &disks, true)) < 0)
+        goto cleanup;
+
+    if (disks_count != 2) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       "expected 2 disks, got %d", ret);
+        goto cleanup;
+    }
+
+    if (STRNEQ(disks[0]->name, "/dev/dm-3") ||
+        STRNEQ(disks[1]->name, "/dev/nvme0n1")) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       "unexpected return values for disks names");
+        goto cleanup;
+    }
+
+    if (STRNEQ(disks[0]->alias, "fedora_localhost--live-home") ||
+        disks[1]->alias != NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       "unexpected return values for disks aliases");
+        goto cleanup;
+    }
+
+    if (STRNEQ(disks[0]->dependencies[0], "/dev/dm-0") ||
+        disks[0]->dependencies[1] != NULL ||
+        disks[1]->dependencies[0] != NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       "unexpected return values for disks dependencies");
+        goto cleanup;
+    }
+
+    if (disks[0]->address != NULL ||
+        disks[1]->address->bus != 0 ||
+        disks[1]->address->target != 0 ||
+        disks[1]->address->unit != 0 ||
+        STRNEQ(disks[1]->address->serial, "GIGABYTE GP-ASM2NE6100TTTD_SN202208900567") ||
+        STRNEQ(disks[1]->address->bus_type, "unknown")) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       "unexpected return values for disks addresses");
+        goto cleanup;
+    }
+    ret = 0;
+
+ cleanup:
+    qemuMonitorTestFree(test);
+    if (disks) {
+        for (i = 0; i < disks_count; i++)
+            qemuAgentDiskInfoFree(disks[i]);
+    }
+    VIR_FREE(disks);
+
+    return ret;
+}
+
+
+static const char testQemuAgentUsersResponse[] =
+    "{\"return\": "
+    "   ["
+    "       {\"user\": \"test\","
+    "        \"login-time\": 1561739203.584038"
+    "       },"
+    "       {\"user\": \"test2\","
+    "        \"login-time\": 1561739229.190697"
+    "       }"
+    "   ]"
+    "}";
+
+static const char testQemuAgentUsersResponse2[] =
+    "{\"return\": "
+    "   ["
+    "       {\"user\": \"test\","
+    "        \"domain\": \"DOMAIN\","
+    "        \"login-time\": 1561739203.584038"
+    "       }"
+    "   ]"
+    "}";
+
+static int
+checkUserInfo(virTypedParameterPtr params,
+              int nparams,
+              size_t nth,
+              const char *expUsername,
+              const char *expDomain,
+              unsigned long long expLogintime)
+{
+    char param_name[VIR_TYPED_PARAM_FIELD_LENGTH];
+    const char *username = NULL;
+    const char *domain = NULL;
+    unsigned long long logintime = 0;
+
+    g_snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH,
+               "user.%zu.name", nth);
+    if (virTypedParamsGetString(params, nparams, param_name, &username) < 0)
+        return -1;
+
+    if (STRNEQ_NULLABLE(expUsername, username)) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       "Expected user name '%s', got '%s'",
+                       expUsername, username);
+        return -1;
+    }
+
+    g_snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH,
+               "user.%zu.domain", nth);
+    if (virTypedParamsGetString(params, nparams, param_name, &domain) < 0)
+        return -1;
+
+    if (STRNEQ_NULLABLE(expDomain, domain)) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       "Expected domain '%s', got '%s'",
+                       NULLSTR(expDomain), NULLSTR(domain));
+        return -1;
+    }
+
+    g_snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH,
+               "user.%zu.login-time", nth);
+    if (virTypedParamsGetULLong(params, nparams, param_name, &logintime) < 0)
+        return -1;
+
+    if (expLogintime != logintime) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       "Expected login time of '%llu', got '%llu'",
+                       expLogintime, logintime);
+        return -1;
+    }
+
+    return 0;
+}
+
+static int
+testQemuAgentUsers(const void *data)
+{
+    virDomainXMLOption *xmlopt = (virDomainXMLOption *)data;
+    qemuMonitorTest *test = qemuMonitorTestNewAgent(xmlopt);
+    virTypedParameterPtr params = NULL;
+    int nparams = 0;
+    int maxparams = 0;
+    int ret = -1;
+    unsigned int count;
+
+    if (!test)
+        return -1;
+
+    if (qemuMonitorTestAddAgentSyncResponse(test) < 0)
+        goto cleanup;
+
+    if (qemuMonitorTestAddItem(test, "guest-get-users",
+                               testQemuAgentUsersResponse) < 0)
+        goto cleanup;
+
+    /* get users */
+    if (qemuAgentGetUsers(qemuMonitorTestGetAgent(test),
+                          &params, &nparams, &maxparams, true) < 0)
+        goto cleanup;
+
+    if (virTypedParamsGetUInt(params, nparams, "user.count", &count) < 0)
+        goto cleanup;
+    if (count != 2) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       "Expected '2' users, got '%u'", count);
+        goto cleanup;
+    }
+
+    if (checkUserInfo(params, nparams, 0, "test", NULL, 1561739203584) < 0 ||
+        checkUserInfo(params, nparams, 1, "test2", NULL, 1561739229190) < 0)
+        goto cleanup;
+
+    if (qemuMonitorTestAddAgentSyncResponse(test) < 0)
+        goto cleanup;
+
+    if (qemuMonitorTestAddItem(test, "guest-get-users",
+                               testQemuAgentUsersResponse2) < 0)
+        goto cleanup;
+
+    virTypedParamsFree(params, nparams);
+    params = NULL;
+    nparams = 0;
+    maxparams = 0;
+
+    /* get users with domain */
+    if (qemuAgentGetUsers(qemuMonitorTestGetAgent(test),
+                          &params, &nparams, &maxparams, true) < 0)
+        goto cleanup;
+
+    if (virTypedParamsGetUInt(params, nparams, "user.count", &count) < 0)
+        goto cleanup;
+    if (count != 1) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       "Expected '1' user, got '%u'", count);
+        goto cleanup;
+    }
+
+    if (checkUserInfo(params, nparams, 0, "test", "DOMAIN", 1561739203584) < 0)
+        goto cleanup;
+
+    ret = 0;
+
+ cleanup:
+    virTypedParamsFree(params, nparams);
+    qemuMonitorTestFree(test);
+    return ret;
+}
+
+static const char testQemuAgentOSInfoResponse[] =
+    "{\"return\": "
+    "   {\"name\":\"CentOS Linux\", "
+    "   \"kernel-release\":\"3.10.0-862.14.4.el7.x86_64\", "
+    "   \"version\":\"7 (Core)\", "
+    "   \"pretty-name\":\"CentOS Linux 7 (Core)\", "
+    "   \"version-id\":\"7\", "
+    "   \"kernel-version\":\"#1 SMP Wed Sep 26 15:12:11 UTC 2018\", "
+    "   \"machine\":\"x86_64\", "
+    "   \"id\":\"centos\"} "
+    "}";
+
+static const char testQemuAgentOSInfoResponse2[] =
+    "{\"return\": "
+    "   {\"name\":\"Microsoft Windows\", "
+    "   \"kernel-release\":\"7601\", "
+    "   \"version\":\"Microsoft Windows 77\", "
+    "   \"variant\":\"client\", "
+    "   \"pretty-name\":\"Windows 7 Professional\", "
+    "   \"version-id\":\"\", "
+    "   \"variant-id\":\"client\", "
+    "   \"kernel-version\":\"6.1\", "
+    "   \"machine\":\"x86_64\", "
+    "   \"id\":\"mswindows\"} "
+    "}";
+
+static int
+testQemuAgentOSInfo(const void *data)
+{
+    virDomainXMLOption *xmlopt = (virDomainXMLOption *)data;
+    qemuMonitorTest *test = qemuMonitorTestNewAgent(xmlopt);
+    virTypedParameterPtr params = NULL;
+    int nparams = 0;
+    int maxparams = 0;
+    int ret = -1;
+
+    if (!test)
+        return -1;
+
+    if (qemuMonitorTestAddAgentSyncResponse(test) < 0)
+        goto cleanup;
+
+    if (qemuMonitorTestAddItem(test, "guest-get-osinfo",
+                               testQemuAgentOSInfoResponse) < 0)
+        goto cleanup;
+
+    /* get osinfo */
+    if (qemuAgentGetOSInfo(qemuMonitorTestGetAgent(test),
+                           &params, &nparams, &maxparams, true) < 0)
+        goto cleanup;
+
+    if (nparams != 8) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       "Expected 8 params, got %d", nparams);
+        goto cleanup;
+    }
+#define VALIDATE_PARAM(param_name_, expected_) \
+    do { \
+        const char *value_ = NULL; \
+        if (virTypedParamsGetString(params, nparams, param_name_, &value_) < 0 || \
+            value_ == NULL) { \
+            virReportError(VIR_ERR_INTERNAL_ERROR, "missing param '%s'", param_name_); \
+            goto cleanup; \
+        } \
+        if (STRNEQ(value_, expected_)) { \
+            virReportError(VIR_ERR_INTERNAL_ERROR, \
+                           "Expected name '%s', got '%s'", expected_, value_); \
+            goto cleanup; \
+        } \
+    } while (0)
+
+    VALIDATE_PARAM("os.id", "centos");
+    VALIDATE_PARAM("os.name", "CentOS Linux");
+    VALIDATE_PARAM("os.version", "7 (Core)");
+    VALIDATE_PARAM("os.version-id", "7");
+    VALIDATE_PARAM("os.pretty-name", "CentOS Linux 7 (Core)");
+    VALIDATE_PARAM("os.kernel-release", "3.10.0-862.14.4.el7.x86_64");
+    VALIDATE_PARAM("os.kernel-version", "#1 SMP Wed Sep 26 15:12:11 UTC 2018");
+    VALIDATE_PARAM("os.machine", "x86_64");
+    virTypedParamsFree(params, nparams);
+    params = NULL;
+    nparams = 0;
+    maxparams = 0;
+
+    if (qemuMonitorTestAddAgentSyncResponse(test) < 0)
+        goto cleanup;
+
+    if (qemuMonitorTestAddItem(test, "guest-get-osinfo",
+                               testQemuAgentOSInfoResponse2) < 0)
+        goto cleanup;
+
+    /* get users with domain */
+    if (qemuAgentGetOSInfo(qemuMonitorTestGetAgent(test),
+                           &params, &nparams, &maxparams, true) < 0)
+        goto cleanup;
+
+    if (nparams != 10) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       "Expected 10 params, got %d", nparams);
+        goto cleanup;
+    }
+
+    VALIDATE_PARAM("os.id", "mswindows");
+    VALIDATE_PARAM("os.name", "Microsoft Windows");
+    VALIDATE_PARAM("os.pretty-name", "Windows 7 Professional");
+    VALIDATE_PARAM("os.version", "Microsoft Windows 77");
+    VALIDATE_PARAM("os.version-id", "");
+    VALIDATE_PARAM("os.variant", "client");
+    VALIDATE_PARAM("os.variant-id", "client");
+    VALIDATE_PARAM("os.kernel-release", "7601");
+    VALIDATE_PARAM("os.kernel-version", "6.1");
+    VALIDATE_PARAM("os.machine", "x86_64");
+    virTypedParamsFree(params, nparams);
+
+    ret = 0;
+
+ cleanup:
+    qemuMonitorTestFree(test);
+    return ret;
+}
+
+static const char testQemuAgentTimezoneResponse1[] =
+"{\"return\":{\"zone\":\"IST\",\"offset\":19800}}";
+static const char testQemuAgentTimezoneResponse2[] =
+"{\"return\":{\"zone\":\"CEST\",\"offset\":7200}}";
+static const char testQemuAgentTimezoneResponse3[] =
+"{\"return\":{\"zone\":\"NDT\",\"offset\":-9000}}";
+static const char testQemuAgentTimezoneResponse4[] =
+"{\"return\":{\"zone\":\"PDT\",\"offset\":-25200}}";
+
+static int
+testQemuAgentTimezone(const void *data)
+{
+    virDomainXMLOption *xmlopt = (virDomainXMLOption *)data;
+    qemuMonitorTest *test = qemuMonitorTestNewAgent(xmlopt);
+    int ret = -1;
+
+    if (!test)
+        return -1;
+
+#define VALIDATE_TIMEZONE(response_, expected_name_, expected_offset_) \
+    do { \
+        virTypedParameterPtr params_ = NULL; \
+        int nparams_ = 0; \
+        int maxparams_ = 0; \
+        const char *name_ = NULL; \
+        int offset_; \
+        if (qemuMonitorTestAddAgentSyncResponse(test) < 0) \
+            goto cleanup; \
+        if (qemuMonitorTestAddItem(test, "guest-get-timezone", \
+                                   response_) < 0) \
+            goto cleanup; \
+        if (qemuAgentGetTimezone(qemuMonitorTestGetAgent(test), \
+                                 &params_, &nparams_, &maxparams_, true) < 0) \
+            goto cleanup; \
+        if (nparams_ != 2) { \
+            virReportError(VIR_ERR_INTERNAL_ERROR, \
+                           "Expected 2 params, got %d", nparams_); \
+            goto cleanup; \
+        } \
+        if (virTypedParamsGetString(params_, nparams_, \
+                                    "timezone.name", &name_) < 0) { \
+            virReportError(VIR_ERR_INTERNAL_ERROR, "missing param '%s'", \
+                           "tiemzone.name"); \
+            goto cleanup; \
+        } \
+        if (STRNEQ(name_, expected_name_)) { \
+            virReportError(VIR_ERR_INTERNAL_ERROR, \
+                           "Expected name '%s', got '%s'", expected_name_, name_); \
+            goto cleanup; \
+        } \
+        if (virTypedParamsGetInt(params_, nparams_, \
+                                 "timezone.offset", &offset_) < 0) { \
+            virReportError(VIR_ERR_INTERNAL_ERROR, "missing param '%s'", \
+                           "tiemzone.offset"); \
+            goto cleanup; \
+        } \
+        if (offset_ != expected_offset_) { \
+            virReportError(VIR_ERR_INTERNAL_ERROR, \
+                           "Expected offset '%i', got '%i'", offset_, \
+                           expected_offset_); \
+            goto cleanup; \
+        } \
+        virTypedParamsFree(params_, nparams_); \
+    } while (0)
+
+    VALIDATE_TIMEZONE(testQemuAgentTimezoneResponse1, "IST", 19800);
+    VALIDATE_TIMEZONE(testQemuAgentTimezoneResponse2, "CEST", 7200);
+    VALIDATE_TIMEZONE(testQemuAgentTimezoneResponse3, "NDT", -9000);
+    VALIDATE_TIMEZONE(testQemuAgentTimezoneResponse4, "PDT", -25200);
+
+    ret = 0;
+
+ cleanup:
+    qemuMonitorTestFree(test);
+    return ret;
+}
 static int
 mymain(void)
 {
     int ret = 0;
 
-#if !WITH_YAJL
-    fputs("libvirt not compiled with JSON support, skipping this test\n", stderr);
-    return EXIT_AM_SKIP;
-#endif
-
-    if (virThreadInitialize() < 0 ||
-        qemuTestDriverInit(&driver) < 0)
+    if (qemuTestDriverInit(&driver) < 0)
         return EXIT_FAILURE;
 
     virEventRegisterDefaultImpl();
@@ -931,6 +1500,11 @@ mymain(void)
     DO_TEST(CPU);
     DO_TEST(ArbitraryCommand);
     DO_TEST(GetInterfaces);
+    DO_TEST(Users);
+    DO_TEST(OSInfo);
+    DO_TEST(Timezone);
+    DO_TEST(SSHKeys);
+    DO_TEST(GetDisks);
 
     DO_TEST(Timeout); /* Timeout should always be called last */
 

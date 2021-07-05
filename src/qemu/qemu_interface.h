@@ -19,40 +19,45 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_QEMU_INTERFACE_H
-# define LIBVIRT_QEMU_INTERFACE_H
+#pragma once
 
-# include "domain_conf.h"
-# include "qemu_conf.h"
-# include "qemu_domain.h"
+#include "domain_conf.h"
+#include "qemu_conf.h"
+#include "qemu_domain.h"
+#include "qemu_slirp.h"
 
-int qemuInterfaceStartDevice(virDomainNetDefPtr net);
-int qemuInterfaceStartDevices(virDomainDefPtr def);
-int qemuInterfaceStopDevice(virDomainNetDefPtr net);
-int qemuInterfaceStopDevices(virDomainDefPtr def);
+int qemuInterfaceStartDevice(virDomainNetDef *net);
+int qemuInterfaceStartDevices(virDomainDef *def);
+int qemuInterfaceStopDevice(virDomainNetDef *net);
+int qemuInterfaceStopDevices(virDomainDef *def);
 
-int qemuInterfaceDirectConnect(virDomainDefPtr def,
-                               virQEMUDriverPtr driver,
-                               virDomainNetDefPtr net,
+int qemuInterfaceDirectConnect(virDomainDef *def,
+                               virQEMUDriver *driver,
+                               virDomainNetDef *net,
                                int *tapfd,
                                size_t tapfdSize,
                                virNetDevVPortProfileOp vmop);
 
-int qemuInterfaceEthernetConnect(virDomainDefPtr def,
-                                 virQEMUDriverPtr driver,
-                                 virDomainNetDefPtr net,
+int qemuInterfaceEthernetConnect(virDomainDef *def,
+                                 virQEMUDriver *driver,
+                                 virDomainNetDef *net,
                                  int *tapfd,
                                  size_t tapfdSize);
 
-int qemuInterfaceBridgeConnect(virDomainDefPtr def,
-                               virQEMUDriverPtr driver,
-                               virDomainNetDefPtr net,
+int qemuInterfaceBridgeConnect(virDomainDef *def,
+                               virQEMUDriver *driver,
+                               virDomainNetDef *net,
                                int *tapfd,
                                size_t *tapfdSize)
     ATTRIBUTE_NONNULL(2);
 
-int qemuInterfaceOpenVhostNet(virDomainDefPtr def,
-                              virDomainNetDefPtr net,
+int qemuInterfaceOpenVhostNet(virDomainDef *def,
+                              virDomainNetDef *net,
                               int *vhostfd,
-                              size_t *vhostfdSize);
-#endif /* LIBVIRT_QEMU_INTERFACE_H */
+                              size_t *vhostfdSize) G_GNUC_NO_INLINE;
+
+int qemuInterfacePrepareSlirp(virQEMUDriver *driver,
+                              virDomainNetDef *net,
+                              qemuSlirp **slirp);
+
+int qemuInterfaceVDPAConnect(virDomainNetDef *net) G_GNUC_NO_INLINE;

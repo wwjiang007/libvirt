@@ -27,6 +27,7 @@
 #include "virlog.h"
 #include "virstring.h"
 #include "storage_conf.h"
+#include "virutil.h"
 
 #include "vbox_common.h"
 #include "vbox_uniformed_api.h"
@@ -42,7 +43,7 @@ static vboxUniformedAPI gVBoxAPI;
  * The Storage Functions here on
  */
 
-static int vboxConnectNumOfStoragePools(virConnectPtr conn ATTRIBUTE_UNUSED)
+static int vboxConnectNumOfStoragePools(virConnectPtr conn G_GNUC_UNUSED)
 {
     /** Currently only one pool supported, the default one
      * given by ISystemProperties::defaultHardDiskFolder()
@@ -51,14 +52,15 @@ static int vboxConnectNumOfStoragePools(virConnectPtr conn ATTRIBUTE_UNUSED)
     return 1;
 }
 
-static int vboxConnectListStoragePools(virConnectPtr conn ATTRIBUTE_UNUSED,
+static int vboxConnectListStoragePools(virConnectPtr conn G_GNUC_UNUSED,
                                        char **const names, int nnames)
 {
     int numActive = 0;
 
-    if (nnames > 0 &&
-        VIR_STRDUP(names[numActive], "default-pool") > 0)
+    if (nnames > 0) {
+        names[numActive] = g_strdup("default-pool");
         numActive++;
+    }
     return numActive;
 }
 
@@ -85,15 +87,14 @@ vboxStoragePoolLookupByName(virConnectPtr conn, const char *name)
 
 static int vboxStoragePoolNumOfVolumes(virStoragePoolPtr pool)
 {
-    vboxDriverPtr data = pool->conn->privateData;
+    struct _vboxDriver *data = pool->conn->privateData;
     vboxArray hardDisks = VBOX_ARRAY_INITIALIZER;
     PRUint32 hardDiskAccessible = 0;
     nsresult rc;
     size_t i;
-    int ret = -1;
 
     if (!data->vboxObj)
-        return ret;
+        return -1;
 
     rc = gVBoxAPI.UArray.vboxArrayGet(&hardDisks, data->vboxObj,
                                       gVBoxAPI.UArray.handleGetHardDisks(data->vboxObj));
@@ -101,7 +102,7 @@ static int vboxStoragePoolNumOfVolumes(virStoragePoolPtr pool)
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("could not get number of volumes in the pool: %s, rc=%08x"),
                        pool->name, (unsigned)rc);
-        return ret;
+        return -1;
     }
 
     for (i = 0; i < hardDisks.count; ++i) {
@@ -118,23 +119,20 @@ static int vboxStoragePoolNumOfVolumes(virStoragePoolPtr pool)
 
     gVBoxAPI.UArray.vboxArrayRelease(&hardDisks);
 
-    ret = hardDiskAccessible;
-
-    return ret;
+    return hardDiskAccessible;
 }
 
 static int
 vboxStoragePoolListVolumes(virStoragePoolPtr pool, char **const names, int nnames)
 {
-    vboxDriverPtr data = pool->conn->privateData;
+    struct _vboxDriver *data = pool->conn->privateData;
     vboxArray hardDisks = VBOX_ARRAY_INITIALIZER;
     PRUint32 numActive = 0;
     nsresult rc;
     size_t i;
-    int ret = -1;
 
     if (!data->vboxObj)
-        return ret;
+        return -1;
 
     rc = gVBoxAPI.UArray.vboxArrayGet(&hardDisks, data->vboxObj,
                                       gVBoxAPI.UArray.handleGetHardDisks(data->vboxObj));
@@ -142,7 +140,7 @@ vboxStoragePoolListVolumes(virStoragePoolPtr pool, char **const names, int nname
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("could not get the volume list in the pool: %s, rc=%08x"),
                        pool->name, (unsigned)rc);
-        return ret;
+        return -1;
     }
 
     for (i = 0; i < hardDisks.count && numActive < nnames; ++i) {
@@ -167,22 +165,20 @@ vboxStoragePoolListVolumes(virStoragePoolPtr pool, char **const names, int nname
             continue;
 
         VIR_DEBUG("nnames[%d]: %s", numActive, nameUtf8);
-        if (VIR_STRDUP(names[numActive], nameUtf8) > 0)
-            numActive++;
+        names[numActive] = g_strdup(nameUtf8);
+        numActive++;
 
         VBOX_UTF8_FREE(nameUtf8);
     }
 
     gVBoxAPI.UArray.vboxArrayRelease(&hardDisks);
-    ret = numActive;
-
-    return ret;
+    return numActive;
 }
 
 static virStorageVolPtr
 vboxStorageVolLookupByName(virStoragePoolPtr pool, const char *name)
 {
-    vboxDriverPtr data = pool->conn->privateData;
+    struct _vboxDriver *data = pool->conn->privateData;
     vboxArray hardDisks = VBOX_ARRAY_INITIALIZER;
     nsresult rc;
     size_t i;
@@ -255,7 +251,7 @@ vboxStorageVolLookupByName(virStoragePoolPtr pool, const char *name)
 static virStorageVolPtr
 vboxStorageVolLookupByKey(virConnectPtr conn, const char *key)
 {
-    vboxDriverPtr data = conn->privateData;
+    struct _vboxDriver *data = conn->privateData;
     vboxIID hddIID;
     unsigned char uuid[VIR_UUID_BUFLEN];
     IMedium *hardDisk = NULL;
@@ -322,7 +318,7 @@ vboxStorageVolLookupByKey(virConnectPtr conn, const char *key)
 static virStorageVolPtr
 vboxStorageVolLookupByPath(virConnectPtr conn, const char *path)
 {
-    vboxDriverPtr data = conn->privateData;
+    struct _vboxDriver *data = conn->privateData;
     PRUnichar *hddPathUtf16 = NULL;
     IMedium *hardDisk = NULL;
     PRUnichar *hddNameUtf16 = NULL;
@@ -400,7 +396,7 @@ static virStorageVolPtr
 vboxStorageVolCreateXML(virStoragePoolPtr pool,
                         const char *xml, unsigned int flags)
 {
-    vboxDriverPtr data = pool->conn->privateData;
+    struct _vboxDriver *data = pool->conn->privateData;
     PRUnichar *hddFormatUtf16 = NULL;
     PRUnichar *hddNameUtf16 = NULL;
     virStoragePoolDef poolDef;
@@ -414,7 +410,8 @@ vboxStorageVolCreateXML(virStoragePoolPtr pool,
     PRUint32 variant = HardDiskVariant_Standard;
     resultCodeUnion resultCode;
     virStorageVolPtr ret = NULL;
-    VIR_AUTOPTR(virStorageVolDef) def = NULL;
+    g_autoptr(virStorageVolDef) def = NULL;
+    g_autofree char *homedir = NULL;
 
     if (!data->vboxObj)
         return ret;
@@ -447,9 +444,10 @@ vboxStorageVolCreateXML(virStoragePoolPtr pool,
     }
 
     /* If target.path isn't given, use default path ~/.VirtualBox/image_name */
-    if (def->target.path == NULL &&
-        virAsprintf(&def->target.path, "%s/.VirtualBox/%s", virGetUserDirectory(), def->name) < 0)
-        goto cleanup;
+    if (!def->target.path) {
+        homedir = virGetUserDirectory();
+        def->target.path = g_strdup_printf("%s/.VirtualBox/%s", homedir, def->name);
+    }
     VBOX_UTF8_TO_UTF16(def->target.path, &hddNameUtf16);
 
     if (!hddFormatUtf16 || !hddNameUtf16)
@@ -506,7 +504,7 @@ vboxStorageVolCreateXML(virStoragePoolPtr pool,
 
 static int vboxStorageVolDelete(virStorageVolPtr vol, unsigned int flags)
 {
-    vboxDriverPtr data = vol->conn->privateData;
+    struct _vboxDriver *data = vol->conn->privateData;
     unsigned char uuid[VIR_UUID_BUFLEN];
     IMedium *hardDisk = NULL;
     int deregister = 0;
@@ -659,7 +657,7 @@ static int vboxStorageVolDelete(virStorageVolPtr vol, unsigned int flags)
 
 static int vboxStorageVolGetInfo(virStorageVolPtr vol, virStorageVolInfoPtr info)
 {
-    vboxDriverPtr data = vol->conn->privateData;
+    struct _vboxDriver *data = vol->conn->privateData;
     IMedium *hardDisk = NULL;
     unsigned char uuid[VIR_UUID_BUFLEN];
     PRUint32 hddstate;
@@ -714,7 +712,7 @@ static int vboxStorageVolGetInfo(virStorageVolPtr vol, virStorageVolInfoPtr info
 
 static char *vboxStorageVolGetXMLDesc(virStorageVolPtr vol, unsigned int flags)
 {
-    vboxDriverPtr data = vol->conn->privateData;
+    struct _vboxDriver *data = vol->conn->privateData;
     IMedium *hardDisk = NULL;
     unsigned char uuid[VIR_UUID_BUFLEN];
     PRUnichar *hddFormatUtf16 = NULL;
@@ -770,11 +768,9 @@ static char *vboxStorageVolGetXMLDesc(virStorageVolPtr vol, unsigned int flags)
     if (NS_FAILED(rc))
         goto cleanup;
 
-    if (VIR_STRDUP(def.name, vol->name) < 0)
-        goto cleanup;
+    def.name = g_strdup(vol->name);
 
-    if (VIR_STRDUP(def.key, vol->key) < 0)
-        goto cleanup;
+    def.key = g_strdup(vol->key);
 
     rc = gVBoxAPI.UIMedium.GetFormat(hardDisk, &hddFormatUtf16);
     if (NS_FAILED(rc))
@@ -806,7 +802,7 @@ static char *vboxStorageVolGetXMLDesc(virStorageVolPtr vol, unsigned int flags)
 
 static char *vboxStorageVolGetPath(virStorageVolPtr vol)
 {
-    vboxDriverPtr data = vol->conn->privateData;
+    struct _vboxDriver *data = vol->conn->privateData;
     IMedium *hardDisk = NULL;
     PRUnichar *hddLocationUtf16 = NULL;
     char *hddLocationUtf8 = NULL;
@@ -843,7 +839,7 @@ static char *vboxStorageVolGetPath(virStorageVolPtr vol)
     if (!hddLocationUtf8)
         goto cleanup;
 
-    ignore_value(VIR_STRDUP(ret, hddLocationUtf8));
+    ret = g_strdup(hddLocationUtf8);
 
     VIR_DEBUG("Storage Volume Name: %s", vol->name);
     VIR_DEBUG("Storage Volume Path: %s", hddLocationUtf8);
@@ -879,17 +875,17 @@ virStorageDriver vboxStorageDriver = {
     .storageVolGetPath = vboxStorageVolGetPath /* 0.7.1 */
 };
 
-virStorageDriverPtr vboxGetStorageDriver(uint32_t uVersion)
+virStorageDriver *vboxGetStorageDriver(uint32_t uVersion)
 {
     /* Install gVBoxAPI according to the vbox API version.
      * Return -1 for unsupported version.
      */
-    if (uVersion >= 5000000 && uVersion < 5000051) {
-        vbox50InstallUniformedAPI(&gVBoxAPI);
-    } else if (uVersion >= 5000051 && uVersion < 5001051) {
-        vbox51InstallUniformedAPI(&gVBoxAPI);
-    } else if (uVersion >= 5001051 && uVersion < 5002051) {
+    if (uVersion >= 5001051 && uVersion < 5002051) {
         vbox52InstallUniformedAPI(&gVBoxAPI);
+    } else if (uVersion >= 6000000 && uVersion < 6000051) {
+        vbox60InstallUniformedAPI(&gVBoxAPI);
+    } else if (uVersion >= 6000051 && uVersion < 6001051) {
+        vbox61InstallUniformedAPI(&gVBoxAPI);
     } else {
         return NULL;
     }

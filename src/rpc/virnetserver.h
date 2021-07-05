@@ -19,18 +19,18 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRNETSERVER_H
-# define LIBVIRT_VIRNETSERVER_H
+#pragma once
 
-# include "virnettlscontext.h"
-# include "virnetserverprogram.h"
-# include "virnetserverclient.h"
-# include "virnetserverservice.h"
-# include "virobject.h"
-# include "virjson.h"
+#include "virnettlscontext.h"
+#include "virnetserverprogram.h"
+#include "virnetserverclient.h"
+#include "virnetserverservice.h"
+#include "virobject.h"
+#include "virjson.h"
+#include "virsystemd.h"
 
 
-virNetServerPtr virNetServerNew(const char *name,
+virNetServer *virNetServerNew(const char *name,
                                 unsigned long long next_client_id,
                                 size_t min_workers,
                                 size_t max_workers,
@@ -39,14 +39,13 @@ virNetServerPtr virNetServerNew(const char *name,
                                 size_t max_anonymous_clients,
                                 int keepaliveInterval,
                                 unsigned int keepaliveCount,
-                                const char *mdnsGroupName,
                                 virNetServerClientPrivNew clientPrivNew,
                                 virNetServerClientPrivPreExecRestart clientPrivPreExecRestart,
                                 virFreeCallback clientPrivFree,
                                 void *clientPrivOpaque)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(11) ATTRIBUTE_NONNULL(13);
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(10) ATTRIBUTE_NONNULL(12);
 
-virNetServerPtr virNetServerNewPostExecRestart(virJSONValuePtr object,
+virNetServer *virNetServerNewPostExecRestart(virJSONValue *object,
                                                const char *name,
                                                virNetServerClientPrivNew clientPrivNew,
                                                virNetServerClientPrivNewPostExecRestart clientPrivNewPostExecRestart,
@@ -56,34 +55,54 @@ virNetServerPtr virNetServerNewPostExecRestart(virJSONValuePtr object,
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
     ATTRIBUTE_NONNULL(4) ATTRIBUTE_NONNULL(5) ATTRIBUTE_NONNULL(6);
 
-void virNetServerClose(virNetServerPtr srv);
+void virNetServerClose(virNetServer *srv);
+void virNetServerShutdownWait(virNetServer *srv);
 
-virJSONValuePtr virNetServerPreExecRestart(virNetServerPtr srv);
+virJSONValue *virNetServerPreExecRestart(virNetServer *srv);
 
-int virNetServerAddService(virNetServerPtr srv,
-                           virNetServerServicePtr svc,
-                           const char *mdnsEntryName);
+int virNetServerAddService(virNetServer *srv,
+                           virNetServerService *svc);
+int virNetServerAddServiceTCP(virNetServer *srv,
+                              virSystemdActivation *act,
+                              const char *actname,
+                              const char *nodename,
+                              const char *service,
+                              int family,
+                              int auth,
+                              virNetTLSContext *tls,
+                              bool readonly,
+                              size_t max_queued_clients,
+                              size_t nrequests_client_max);
+int virNetServerAddServiceUNIX(virNetServer *srv,
+                               virSystemdActivation *act,
+                               const char *actname,
+                               const char *path,
+                               mode_t mask,
+                               gid_t grp,
+                               int auth,
+                               virNetTLSContext *tls,
+                               bool readonly,
+                               size_t max_queued_clients,
+                               size_t nrequests_client_max);
 
-int virNetServerAddProgram(virNetServerPtr srv,
-                           virNetServerProgramPtr prog);
+int virNetServerAddProgram(virNetServer *srv,
+                           virNetServerProgram *prog);
 
-int virNetServerSetTLSContext(virNetServerPtr srv,
-                              virNetTLSContextPtr tls);
+int virNetServerSetTLSContext(virNetServer *srv,
+                              virNetTLSContext *tls);
 
 
-int virNetServerAddClient(virNetServerPtr srv,
-                          virNetServerClientPtr client);
-bool virNetServerHasClients(virNetServerPtr srv);
-void virNetServerProcessClients(virNetServerPtr srv);
-void virNetServerSetClientAuthenticated(virNetServerPtr srv, virNetServerClientPtr client);
+int virNetServerAddClient(virNetServer *srv,
+                          virNetServerClient *client);
+bool virNetServerHasClients(virNetServer *srv);
+void virNetServerProcessClients(virNetServer *srv);
+void virNetServerSetClientAuthenticated(virNetServer *srv, virNetServerClient *client);
 
-void virNetServerUpdateServices(virNetServerPtr srv, bool enabled);
+void virNetServerUpdateServices(virNetServer *srv, bool enabled);
 
-int virNetServerStart(virNetServerPtr srv);
+const char *virNetServerGetName(virNetServer *srv);
 
-const char *virNetServerGetName(virNetServerPtr srv);
-
-int virNetServerGetThreadPoolParameters(virNetServerPtr srv,
+int virNetServerGetThreadPoolParameters(virNetServer *srv,
                                         size_t *minWorkers,
                                         size_t *maxWorkers,
                                         size_t *nWorkers,
@@ -91,26 +110,29 @@ int virNetServerGetThreadPoolParameters(virNetServerPtr srv,
                                         size_t *nPrioWorkers,
                                         size_t *jobQueueDepth);
 
-int virNetServerSetThreadPoolParameters(virNetServerPtr srv,
+int virNetServerSetThreadPoolParameters(virNetServer *srv,
                                         long long int minWorkers,
                                         long long int maxWorkers,
                                         long long int prioWorkers);
 
-unsigned long long virNetServerNextClientID(virNetServerPtr srv);
+unsigned long long virNetServerNextClientID(virNetServer *srv);
 
-virNetServerClientPtr virNetServerGetClient(virNetServerPtr srv,
+virNetServerClient *virNetServerGetClient(virNetServer *srv,
                                             unsigned long long id);
 
-int virNetServerGetClients(virNetServerPtr srv,
-                           virNetServerClientPtr **clients);
+bool virNetServerNeedsAuth(virNetServer *srv,
+                           int auth);
 
-size_t virNetServerGetMaxClients(virNetServerPtr srv);
-size_t virNetServerGetCurrentClients(virNetServerPtr srv);
-size_t virNetServerGetMaxUnauthClients(virNetServerPtr srv);
-size_t virNetServerGetCurrentUnauthClients(virNetServerPtr srv);
+int virNetServerGetClients(virNetServer *srv,
+                           virNetServerClient ***clients);
 
-int virNetServerSetClientLimits(virNetServerPtr srv,
+size_t virNetServerGetMaxClients(virNetServer *srv);
+size_t virNetServerGetCurrentClients(virNetServer *srv);
+size_t virNetServerGetMaxUnauthClients(virNetServer *srv);
+size_t virNetServerGetCurrentUnauthClients(virNetServer *srv);
+
+int virNetServerSetClientLimits(virNetServer *srv,
                                 long long int maxClients,
                                 long long int maxClientsUnauth);
 
-#endif /* LIBVIRT_VIRNETSERVER_H */
+int virNetServerUpdateTlsFiles(virNetServer *srv);

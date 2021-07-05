@@ -36,9 +36,9 @@ getArgs(int argc,
 
 
 static int
-authCallback(virConnectCredentialPtr cred ATTRIBUTE_UNUSED,
-             unsigned int ncred ATTRIBUTE_UNUSED,
-             void *cbdata ATTRIBUTE_UNUSED)
+authCallback(virConnectCredentialPtr cred G_GNUC_UNUSED,
+             unsigned int ncred G_GNUC_UNUSED,
+             void *cbdata G_GNUC_UNUSED)
 {
     return -1;
 }
@@ -50,7 +50,6 @@ main(int argc, char **argv)
     const char *uri;
     const char *uuid;
     virDomainLockFailureAction action;
-    char *xml = NULL;
     virConnectPtr conn = NULL;
     virDomainPtr dom = NULL;
     int ret = EXIT_FAILURE;
@@ -63,7 +62,7 @@ main(int argc, char **argv)
     };
     virConnectAuth auth = {
         .credtype = authTypes,
-        .ncredtype = ARRAY_CARDINALITY(authTypes),
+        .ncredtype = G_N_ELEMENTS(authTypes),
         .cb = authCallback,
     };
 
@@ -102,7 +101,6 @@ main(int argc, char **argv)
     virObjectUnref(dom);
     if (conn)
         virConnectClose(conn);
-    VIR_FREE(xml);
 
     return ret;
 }

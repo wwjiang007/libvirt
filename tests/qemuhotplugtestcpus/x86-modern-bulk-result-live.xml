@@ -19,7 +19,7 @@
     <boot dev='network'/>
   </os>
   <cpu>
-    <topology sockets='4' cores='2' threads='1'/>
+    <topology sockets='4' dies='1' cores='2' threads='1'/>
   </cpu>
   <clock offset='utc'/>
   <on_poweroff>destroy</on_poweroff>
@@ -40,9 +40,10 @@
     <input type='keyboard' bus='ps2'>
       <alias name='input1'/>
     </input>
+    <audio id='1' type='none'/>
     <memballoon model='virtio'>
       <alias name='balloon0'/>
-      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x02' function='0x0'/>
     </memballoon>
   </devices>
 </domain>

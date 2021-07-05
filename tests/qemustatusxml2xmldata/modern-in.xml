@@ -1,6 +1,6 @@
 <domstatus state='running' reason='booted' pid='195139'>
   <taint flag='high-privileges'/>
-  <monitor path='/var/lib/libvirt/qemu/domain-1-upstream/monitor.sock' json='1' type='unix'/>
+  <monitor path='/var/lib/libvirt/qemu/domain-1-upstream/monitor.sock' type='unix'/>
   <namespaces>
     <mount/>
   </namespaces>
@@ -234,6 +234,7 @@
     <flag name='dump-completed'/>
     <flag name='hda-output'/>
     <flag name='blockdev'/>
+    <flag name='blockdev-hostdev-scsi'/>
   </qemuCaps>
   <devices>
     <device alias='rng0'/>
@@ -261,6 +262,7 @@
   <allowReboot value='yes'/>
   <nodename index='123'/>
   <blockjobs active='no'/>
+  <agentTimeout>-2</agentTimeout>
   <domain type='kvm' id='1'>
     <name>upstream</name>
     <uuid>dcf47dbd-46d1-4d5b-b442-262a806a333a</uuid>
@@ -307,10 +309,19 @@
       <emulator>/usr/bin/qemu-system-x86_64</emulator>
       <disk type='file' device='disk'>
         <driver name='qemu' type='qcow2' discard='unmap' detect_zeroes='on'/>
+        <auth username='testuser'>
+          <secret type='iscsi' usage='libvirtiscsi'/>
+        </auth>
         <source file='/var/lib/libvirt/images/a.qcow2'/>
         <backingStore type='file' index='1'>
           <format type='qcow2'/>
           <source file='/var/lib/libvirt/images/base.qcow2'>
+            <slices>
+              <slice type='storage' offset='1234' size='3456'/>
+            </slices>
+            <seclabel model='dac' relabel='yes'>
+              <label>qemu:qemu</label>
+            </seclabel>
             <reservations managed='yes'>
               <source type='unix' path='/somepath/ux.sck' mode='client'/>
             </reservations>
@@ -318,12 +329,15 @@
               <nodenames>
                 <nodename type='storage' name='test-storage'/>
                 <nodename type='format' name='test-format'/>
+                <nodename type='slice-storage' name='test-slice-storage'/>
               </nodenames>
               <reservations mgralias='test-alias'/>
               <relPath>base.qcow2</relPath>
               <objects>
                 <secret type='auth' alias='test-auth-alias'/>
                 <secret type='encryption' alias='test-encryption-alias'/>
+                <secret type='httpcookie' alias='http-cookie-alias'/>
+                <secret type='tlskey' alias='tls-certificate-key-alias'/>
                 <TLSx509 alias='transport-alias'/>
               </objects>
             </privateData>
@@ -339,6 +353,7 @@
             <nodename type='copyOnRead' name='cor-node'/>
           </nodenames>
         </privateData>
+        <diskSecretsPlacement auth='true'/>
       </disk>
       <disk type='file' device='cdrom'>
         <driver name='qemu' type='raw'/>
@@ -439,11 +454,30 @@
         <alias name='sound0'/>
         <address type='pci' domain='0x0000' bus='0x00' slot='0x04' function='0x0'/>
       </sound>
+      <audio id='1' type='spice'/>
       <video>
         <model type='qxl' ram='65536' vram='65536' vgamem='16384' heads='1' primary='yes'/>
         <alias name='video0'/>
         <address type='pci' domain='0x0000' bus='0x00' slot='0x02' function='0x0'/>
       </video>
+      <hostdev mode='subsystem' type='scsi' managed='yes'>
+        <source protocol='iscsi' name='iqn.1992-01.com.example:storage/1'>
+          <host name='example.org' port='3260'/>
+          <privateData>
+            <nodenames>
+              <nodename type='storage' name='hostdev-backend'/>
+            </nodenames>
+            <objects>
+              <secret type='auth' alias='custom-secret'/>
+            </objects>
+          </privateData>
+          <auth username='myname'>
+            <secret type='iscsi' usage='mycluster_myname'/>
+          </auth>
+        </source>
+        <alias name='hostdev0'/>
+        <address type='drive' controller='0' bus='0' target='2' unit='4'/>
+      </hostdev>
       <redirdev bus='usb' type='spicevmc'>
         <alias name='redir0'/>
         <address type='usb' bus='0' port='2'/>

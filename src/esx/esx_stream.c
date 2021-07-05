@@ -132,13 +132,11 @@ esxVI_CURL_WriteStream(char *input, size_t size, size_t nmemb, void *userdata)
             priv->backlog_size = input_remaining;
             priv->backlog_used = 0;
 
-            if (VIR_ALLOC_N(priv->backlog, priv->backlog_size) < 0)
-                return 0;
+            priv->backlog = g_new0(char, priv->backlog_size);
         } else if (input_remaining > backlog_remaining) {
             priv->backlog_size += input_remaining - backlog_remaining;
 
-            if (VIR_REALLOC_N(priv->backlog, priv->backlog_size) < 0)
-                return 0;
+            VIR_REALLOC_N(priv->backlog, priv->backlog_size);
         }
 
         memcpy(priv->backlog + priv->backlog_used, input + input_used,
@@ -337,8 +335,8 @@ esxFreeStreamPrivate(esxStreamPrivate **priv)
         return;
 
     esxVI_CURL_Free(&(*priv)->curl);
-    VIR_FREE((*priv)->backlog);
-    VIR_FREE(*priv);
+    g_free((*priv)->backlog);
+    g_free(*priv);
 }
 
 static int
@@ -396,8 +394,7 @@ esxStreamOpen(virStreamPtr stream, esxPrivate *priv, const char *url,
 {
     int result = -1;
     esxStreamPrivate *streamPriv;
-    char *range = NULL;
-    char *userpwd = NULL;
+    g_autofree char *range = NULL;
     esxVI_MultiCURL *multi = NULL;
 
     /* FIXME: Although there is already some code in place to deal with
@@ -409,17 +406,14 @@ esxStreamOpen(virStreamPtr stream, esxPrivate *priv, const char *url,
         return -1;
     }
 
-    if (VIR_ALLOC(streamPriv) < 0)
-        return -1;
+    streamPriv = g_new0(esxStreamPrivate, 1);
 
     streamPriv->mode = mode;
 
     if (length > 0) {
-        if (virAsprintf(&range, "%llu-%llu", offset, offset + length - 1) < 0)
-            goto cleanup;
+        range = g_strdup_printf("%llu-%llu", offset, offset + length - 1);
     } else if (offset > 0) {
-        if (virAsprintf(&range, "%llu-", offset) < 0)
-            goto cleanup;
+        range = g_strdup_printf("%llu-", offset);
     }
 
     if (esxVI_CURL_Alloc(&streamPriv->curl) < 0 ||
@@ -442,18 +436,10 @@ esxStreamOpen(virStreamPtr stream, esxPrivate *priv, const char *url,
     curl_easy_setopt(streamPriv->curl->handle, CURLOPT_URL, url);
     curl_easy_setopt(streamPriv->curl->handle, CURLOPT_RANGE, range);
 
-#if LIBCURL_VERSION_NUM >= 0x071301 /* 7.19.1 */
     curl_easy_setopt(streamPriv->curl->handle, CURLOPT_USERNAME,
                      priv->primary->username);
     curl_easy_setopt(streamPriv->curl->handle, CURLOPT_PASSWORD,
                      priv->primary->password);
-#else
-    if (virAsprintf(&userpwd, "%s:%s", priv->primary->username,
-                    priv->primary->password) < 0)
-        goto cleanup;
-
-    curl_easy_setopt(streamPriv->curl->handle, CURLOPT_USERPWD, userpwd);
-#endif
 
     if (esxVI_MultiCURL_Alloc(&multi) < 0 ||
         esxVI_MultiCURL_Add(multi, streamPriv->curl) < 0)
@@ -471,9 +457,6 @@ esxStreamOpen(virStreamPtr stream, esxPrivate *priv, const char *url,
 
         esxFreeStreamPrivate(&streamPriv);
     }
-
-    VIR_FREE(range);
-    VIR_FREE(userpwd);
 
     return result;
 }

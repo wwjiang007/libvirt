@@ -24,8 +24,6 @@
 #include "lxc_conf.h"
 #include "lxc_monitor_dispatch.h"
 
-#include "viralloc.h"
-
 #include "virerror.h"
 #include "virlog.h"
 #include "virthread.h"
@@ -39,14 +37,14 @@ VIR_LOG_INIT("lxc.lxc_monitor");
 struct _virLXCMonitor {
     virObjectLockable parent;
 
-    virDomainObjPtr vm;
+    virDomainObj *vm;
     virLXCMonitorCallbacks cb;
 
-    virNetClientPtr client;
-    virNetClientProgramPtr program;
+    virNetClient *client;
+    virNetClientProgram *program;
 };
 
-static virClassPtr virLXCMonitorClass;
+static virClass *virLXCMonitorClass;
 static void virLXCMonitorDispose(void *obj);
 
 static int virLXCMonitorOnceInit(void)
@@ -60,12 +58,12 @@ static int virLXCMonitorOnceInit(void)
 VIR_ONCE_GLOBAL_INIT(virLXCMonitor);
 
 static void
-virLXCMonitorHandleEventExit(virNetClientProgramPtr prog,
-                             virNetClientPtr client,
+virLXCMonitorHandleEventExit(virNetClientProgram *prog,
+                             virNetClient *client,
                              void *evdata, void *opaque);
 static void
-virLXCMonitorHandleEventInit(virNetClientProgramPtr prog,
-                             virNetClientPtr client,
+virLXCMonitorHandleEventInit(virNetClientProgram *prog,
+                             virNetClient *client,
                              void *evdata, void *opaque);
 
 static virNetClientProgramEvent virLXCMonitorEvents[] = {
@@ -81,11 +79,11 @@ static virNetClientProgramEvent virLXCMonitorEvents[] = {
 
 
 static void
-virLXCMonitorHandleEventExit(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                             virNetClientPtr client ATTRIBUTE_UNUSED,
+virLXCMonitorHandleEventExit(virNetClientProgram *prog G_GNUC_UNUSED,
+                             virNetClient *client G_GNUC_UNUSED,
                              void *evdata, void *opaque)
 {
-    virLXCMonitorPtr mon = opaque;
+    virLXCMonitor *mon = opaque;
     virLXCMonitorExitEventMsg *msg = evdata;
 
     VIR_DEBUG("Event exit %d", msg->status);
@@ -95,11 +93,11 @@ virLXCMonitorHandleEventExit(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
 
 
 static void
-virLXCMonitorHandleEventInit(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
-                             virNetClientPtr client ATTRIBUTE_UNUSED,
+virLXCMonitorHandleEventInit(virNetClientProgram *prog G_GNUC_UNUSED,
+                             virNetClient *client G_GNUC_UNUSED,
                              void *evdata, void *opaque)
 {
-    virLXCMonitorPtr mon = opaque;
+    virLXCMonitor *mon = opaque;
     virLXCMonitorInitEventMsg *msg = evdata;
 
     VIR_DEBUG("Event init %lld", (long long)msg->initpid);
@@ -108,13 +106,13 @@ virLXCMonitorHandleEventInit(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
 }
 
 
-static void virLXCMonitorEOFNotify(virNetClientPtr client ATTRIBUTE_UNUSED,
-                                   int reason ATTRIBUTE_UNUSED,
+static void virLXCMonitorEOFNotify(virNetClient *client G_GNUC_UNUSED,
+                                   int reason G_GNUC_UNUSED,
                                    void *opaque)
 {
-    virLXCMonitorPtr mon = opaque;
+    virLXCMonitor *mon = opaque;
     virLXCMonitorCallbackEOFNotify eofNotify;
-    virDomainObjPtr vm;
+    virDomainObj *vm;
 
     VIR_DEBUG("EOF notify mon=%p", mon);
     virObjectLock(mon);
@@ -133,17 +131,17 @@ static void virLXCMonitorEOFNotify(virNetClientPtr client ATTRIBUTE_UNUSED,
 
 static void virLXCMonitorCloseFreeCallback(void *opaque)
 {
-    virLXCMonitorPtr mon = opaque;
+    virLXCMonitor *mon = opaque;
     virObjectUnref(mon);
 }
 
 
-virLXCMonitorPtr virLXCMonitorNew(virDomainObjPtr vm,
+virLXCMonitor *virLXCMonitorNew(virDomainObj *vm,
                                   const char *socketdir,
-                                  virLXCMonitorCallbacksPtr cb)
+                                  virLXCMonitorCallbacks *cb)
 {
-    virLXCMonitorPtr mon;
-    char *sockpath = NULL;
+    virLXCMonitor *mon;
+    g_autofree char *sockpath = NULL;
 
     if (virLXCMonitorInitialize() < 0)
         return NULL;
@@ -151,11 +149,9 @@ virLXCMonitorPtr virLXCMonitorNew(virDomainObjPtr vm,
     if (!(mon = virObjectLockableNew(virLXCMonitorClass)))
         return NULL;
 
-    if (virAsprintf(&sockpath, "%s/%s.sock",
-                    socketdir, vm->def->name) < 0)
-        goto error;
+    sockpath = g_strdup_printf("%s/%s.sock", socketdir, vm->def->name);
 
-    if (!(mon->client = virNetClientNewUNIX(sockpath, false, NULL)))
+    if (!(mon->client = virNetClientNewUNIX(sockpath, NULL)))
         goto error;
 
     if (virNetClientRegisterAsyncIO(mon->client) < 0)
@@ -171,7 +167,7 @@ virLXCMonitorPtr virLXCMonitorNew(virDomainObjPtr vm,
     if (!(mon->program = virNetClientProgramNew(VIR_LXC_MONITOR_PROGRAM,
                                                 VIR_LXC_MONITOR_PROGRAM_VERSION,
                                                 virLXCMonitorEvents,
-                                                ARRAY_CARDINALITY(virLXCMonitorEvents),
+                                                G_N_ELEMENTS(virLXCMonitorEvents),
                                                 mon)))
         goto error;
 
@@ -182,20 +178,17 @@ virLXCMonitorPtr virLXCMonitorNew(virDomainObjPtr vm,
     mon->vm = virObjectRef(vm);
     memcpy(&mon->cb, cb, sizeof(mon->cb));
 
- cleanup:
-    VIR_FREE(sockpath);
     return mon;
 
  error:
     virObjectUnref(mon);
-    mon = NULL;
-    goto cleanup;
+    return NULL;
 }
 
 
 static void virLXCMonitorDispose(void *opaque)
 {
-    virLXCMonitorPtr mon = opaque;
+    virLXCMonitor *mon = opaque;
 
     VIR_DEBUG("mon=%p", mon);
     if (mon->cb.destroy)
@@ -205,10 +198,10 @@ static void virLXCMonitorDispose(void *opaque)
 }
 
 
-void virLXCMonitorClose(virLXCMonitorPtr mon)
+void virLXCMonitorClose(virLXCMonitor *mon)
 {
-    virDomainObjPtr vm;
-    virNetClientPtr client;
+    virDomainObj *vm;
+    virNetClient *client;
 
     VIR_DEBUG("mon=%p", mon);
     if (mon->client) {
@@ -218,8 +211,7 @@ void virLXCMonitorClose(virLXCMonitorPtr mon)
          */
         VIR_DEBUG("Clear EOF callback mon=%p", mon);
         vm = mon->vm;
-        client = mon->client;
-        mon->client = NULL;
+        client = g_steal_pointer(&mon->client);
         mon->cb.eofNotify = NULL;
 
         virObjectRef(vm);

@@ -10,10 +10,9 @@
 
 # define VIR_FROM_THIS VIR_FROM_NONE
 
-static virCapsPtr caps;
-static virDomainXMLOptionPtr xmlopt;
+static virLXCDriver *driver;
 
-static int testSanitizeDef(virDomainDefPtr vmdef)
+static int testSanitizeDef(virDomainDef *vmdef)
 {
     /* Remove UUID randomness */
     if (virUUIDParse("c7a5fdbd-edaf-9455-926a-d65c16db1809", vmdef->uuid) < 0)
@@ -29,12 +28,12 @@ testCompareXMLToConfigFiles(const char *xmlfile,
     int ret = -1;
     char *config = NULL;
     char *actualxml = NULL;
-    virDomainDefPtr vmdef = NULL;
+    virDomainDef *vmdef = NULL;
 
     if (virTestLoadFile(configfile, &config) < 0)
         goto fail;
 
-    vmdef = lxcParseConfigString(config, caps, xmlopt);
+    vmdef = lxcParseConfigString(config, driver->caps, driver->xmlopt);
     if ((vmdef && expectError) || (!vmdef && !expectError))
         goto fail;
 
@@ -42,7 +41,7 @@ testCompareXMLToConfigFiles(const char *xmlfile,
         if (testSanitizeDef(vmdef) < 0)
             goto fail;
 
-        if (!(actualxml = virDomainDefFormat(vmdef, caps, 0)))
+        if (!(actualxml = virDomainDefFormat(vmdef, driver->xmlopt, 0)))
             goto fail;
 
         if (virTestCompareToFile(actualxml, xmlfile) < 0)
@@ -71,15 +70,13 @@ testCompareXMLToConfigHelperLegacy(const void *data)
     char *xml = NULL;
     char *config = NULL;
 
-    if (virAsprintf(&xml, "%s/lxcconf2xmldata/lxcconf2xml-%s.xml",
-                    abs_srcdir, info->name) < 0 ||
-        virAsprintf(&config, "%s/lxcconf2xmldata/lxcconf2xml-%s.config",
-                    abs_srcdir, info->name) < 0)
-        goto cleanup;
+    xml = g_strdup_printf("%s/lxcconf2xmldata/lxcconf2xml-%s.xml",
+                          abs_srcdir, info->name);
+    config = g_strdup_printf("%s/lxcconf2xmldata/lxcconf2xml-%s.config",
+                             abs_srcdir, info->name);
 
     result = testCompareXMLToConfigFiles(xml, config, info->expectError);
 
- cleanup:
     VIR_FREE(xml);
     VIR_FREE(config);
     return result;
@@ -93,15 +90,13 @@ testCompareXMLToConfigHelperV3(const void *data)
     char *xml = NULL;
     char *config = NULL;
 
-    if (virAsprintf(&xml, "%s/lxcconf2xmldata/lxcconf2xml-%s.xml",
-                    abs_srcdir, info->name) < 0 ||
-        virAsprintf(&config, "%s/lxcconf2xmldata/lxcconf2xml-%s-v3.config",
-                    abs_srcdir, info->name) < 0)
-        goto cleanup;
+    xml = g_strdup_printf("%s/lxcconf2xmldata/lxcconf2xml-%s.xml",
+                          abs_srcdir, info->name);
+    config = g_strdup_printf("%s/lxcconf2xmldata/lxcconf2xml-%s-v3.config",
+                             abs_srcdir, info->name);
 
     result = testCompareXMLToConfigFiles(xml, config, info->expectError);
 
- cleanup:
     VIR_FREE(xml);
     VIR_FREE(config);
     return result;
@@ -113,13 +108,8 @@ mymain(void)
 {
     int ret = EXIT_SUCCESS;
 
-    if (!(caps = testLXCCapsInit()))
+    if (!(driver = testLXCDriverInit()))
         return EXIT_FAILURE;
-
-    if (!(xmlopt = lxcDomainXMLConfInit())) {
-        virObjectUnref(caps);
-        return EXIT_FAILURE;
-    }
 
 # define DO_TEST(name, expectError) \
     do { \
@@ -170,8 +160,7 @@ mymain(void)
     DO_TEST3("blkiotune", false);
     DO_TEST3("ethernet", false);
 
-    virObjectUnref(xmlopt);
-    virObjectUnref(caps);
+    testLXCDriverFree(driver);
 
     return ret;
 }

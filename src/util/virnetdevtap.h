@@ -16,36 +16,35 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBVIRT_VIRNETDEVTAP_H
-# define LIBVIRT_VIRNETDEVTAP_H
+#pragma once
 
-# include "internal.h"
-# include "virnetdev.h"
-# include "virnetdevvportprofile.h"
-# include "virnetdevvlan.h"
+#include "internal.h"
+#include "virnetdev.h"
+#include "virnetdevvportprofile.h"
+#include "virnetdevvlan.h"
 
-# ifdef __FreeBSD__
+#ifdef __FreeBSD__
 /* This should be defined on OSes that don't automatically
  * cleanup released devices */
-#  define VIR_NETDEV_TAP_REQUIRE_MANUAL_CLEANUP 1
-# endif
+# define VIR_NETDEV_TAP_REQUIRE_MANUAL_CLEANUP 1
+#endif
 
 int virNetDevTapCreate(char **ifname,
                        const char *tunpath,
                        int *tapfd,
                        size_t tapfdSize,
                        unsigned int flags)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NOINLINE;
+    ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT G_GNUC_NO_INLINE;
 
 int virNetDevTapDelete(const char *ifname,
                        const char *tunpath)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT;
 
 int virNetDevTapGetName(int tapfd, char **ifname)
-    ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
+    ATTRIBUTE_NONNULL(2) G_GNUC_WARN_UNUSED_RESULT;
 
 char* virNetDevTapGetRealDeviceName(char *ifname)
-      ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NOINLINE;
+      ATTRIBUTE_NONNULL(1) G_GNUC_WARN_UNUSED_RESULT G_GNUC_NO_INLINE;
 
 typedef enum {
    VIR_NETDEV_TAP_CREATE_NONE = 0,
@@ -64,24 +63,26 @@ virNetDevTapAttachBridge(const char *tapname,
                          const char *brname,
                          const virMacAddr *macaddr,
                          const unsigned char *vmuuid,
-                         virNetDevVPortProfilePtr virtPortProfile,
-                         virNetDevVlanPtr virtVlan,
+                         const virNetDevVPortProfile *virtPortProfile,
+                         const virNetDevVlan *virtVlan,
+                         virTristateBool isolatedPort,
                          unsigned int mtu,
                          unsigned int *actualMTU)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
-    ATTRIBUTE_RETURN_CHECK;
+    G_GNUC_WARN_UNUSED_RESULT;
 
 int
 virNetDevTapReattachBridge(const char *tapname,
                            const char *brname,
                            const virMacAddr *macaddr,
                            const unsigned char *vmuuid,
-                           virNetDevVPortProfilePtr virtPortProfile,
-                           virNetDevVlanPtr virtVlan,
+                           const virNetDevVPortProfile *virtPortProfile,
+                           const virNetDevVlan *virtVlan,
+                           virTristateBool isolatedPort,
                            unsigned int mtu,
                            unsigned int *actualMTU)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
-    ATTRIBUTE_RETURN_CHECK;
+    G_GNUC_WARN_UNUSED_RESULT;
 
 int virNetDevTapCreateInBridgePort(const char *brname,
                                    char **ifname,
@@ -90,18 +91,17 @@ int virNetDevTapCreateInBridgePort(const char *brname,
                                    const char *tunpath,
                                    int *tapfd,
                                    size_t tapfdSize,
-                                   virNetDevVPortProfilePtr virtPortProfile,
-                                   virNetDevVlanPtr virtVlan,
-                                   virNetDevCoalescePtr coalesce,
+                                   const virNetDevVPortProfile *virtPortProfile,
+                                   const virNetDevVlan *virtVlan,
+                                   virTristateBool isolatedPort,
+                                   virNetDevCoalesce *coalesce,
                                    unsigned int mtu,
                                    unsigned int *actualMTU,
                                    unsigned int flags)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
-    ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NOINLINE;
+    G_GNUC_WARN_UNUSED_RESULT G_GNUC_NO_INLINE;
 
 int virNetDevTapInterfaceStats(const char *ifname,
                                virDomainInterfaceStatsPtr stats,
                                bool swapped)
-    ATTRIBUTE_RETURN_CHECK;
-
-#endif /* LIBVIRT_VIRNETDEVTAP_H */
+    G_GNUC_WARN_UNUSED_RESULT;

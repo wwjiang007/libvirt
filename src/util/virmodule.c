@@ -26,12 +26,13 @@
 #include "virerror.h"
 #include "virfile.h"
 #include "virlog.h"
+#include "virutil.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
 VIR_LOG_INIT("util.module");
 
-#ifdef HAVE_DLFCN_H
+#ifdef WITH_DLFCN_H
 # include <dlfcn.h>
 
 static void *
@@ -140,10 +141,10 @@ virModuleLoad(const char *path,
     return ret;
 }
 
-#else /* ! HAVE_DLFCN_H */
+#else /* ! WITH_DLFCN_H */
 int
 virModuleLoad(const char *path,
-              const char *regfunc ATTRIBUTE_UNUSED,
+              const char *regfunc G_GNUC_UNUSED,
               bool required)
 {
     VIR_DEBUG("dlopen not available on this platform");
@@ -159,4 +160,4 @@ virModuleLoad(const char *path,
         return 1;
     }
 }
-#endif /* ! HAVE_DLFCN_H */
+#endif /* ! WITH_DLFCN_H */
